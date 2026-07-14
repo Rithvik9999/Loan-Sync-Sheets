@@ -1,4 +1,0 @@
-import { ClerkProvider } from "@clerk/react";
-import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
-
-// Re-export or place App here. We'll append to App.tsx since we need to export it.

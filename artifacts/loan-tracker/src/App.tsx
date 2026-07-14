@@ -1,11 +1,12 @@
 import { useClerk } from "@clerk/react";
-import { SignIn, SignUp, Show } from "@clerk/react";
-import { Link, Redirect, Route, Switch, useLocation } from "wouter";
+import { ClerkProvider, SignIn, SignUp, Show } from "@clerk/react";
+import { Link, Redirect, Route, Switch, useLocation, Router as WouterRouter } from "wouter";
 import { queryClient } from "@/lib/queryClient";
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { shadcn } from "@clerk/themes";
+import { Toaster } from "@/components/ui/toaster";
 
 import { SharedLayout } from "@/components/layout";
 import { AuthProvider, useAppAuth } from "@/hooks/use-app-auth";
@@ -131,7 +132,11 @@ function ProtectedStaffRoute({ component: Component }: { component: React.Compon
   if (!isSignedIn) return <Redirect to="/sign-in" />;
   if (role !== "staff") return <Redirect to="/" />;
   
-  return <Component />;
+  return (
+    <SharedLayout>
+      <Component />
+    </SharedLayout>
+  );
 }
 
 function ProtectedBorrowerRoute({ component: Component }: { component: React.ComponentType }) {
@@ -141,7 +146,11 @@ function ProtectedBorrowerRoute({ component: Component }: { component: React.Com
   if (!isSignedIn) return <Redirect to="/sign-in" />;
   if (role !== "borrower") return <Redirect to="/" />;
   
-  return <Component />;
+  return (
+    <SharedLayout>
+      <Component />
+    </SharedLayout>
+  );
 }
 
 function ProtectedSharedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -150,7 +159,11 @@ function ProtectedSharedRoute({ component: Component }: { component: React.Compo
   if (!isLoaded) return null;
   if (!isSignedIn) return <Redirect to="/sign-in" />;
   
-  return <Component />;
+  return (
+    <SharedLayout>
+      <Component />
+    </SharedLayout>
+  );
 }
 
 function ClerkQueryClientCacheInvalidator() {
@@ -174,3 +187,76 @@ function ClerkQueryClientCacheInvalidator() {
 
   return null;
 }
+
+function ClerkProviderWithRoutes() {
+  const [, setLocation] = useLocation();
+
+  return (
+    <ClerkProvider
+      publishableKey={clerkPubKey}
+      proxyUrl={clerkProxyUrl}
+      appearance={clerkAppearance}
+      signInUrl={`${basePath}/sign-in`}
+      signUpUrl={`${basePath}/sign-up`}
+      localization={{
+        signIn: {
+          start: {
+            title: "Sign in to BorrowApp",
+            subtitle: "Welcome back — pick up right where the ledger left off",
+          },
+        },
+        signUp: {
+          start: {
+            title: "Create your BorrowApp account",
+            subtitle: "Set up access to your private lending ledger",
+          },
+        },
+      }}
+      routerPush={(to) => setLocation(stripBase(to))}
+      routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
+    >
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <ClerkQueryClientCacheInvalidator />
+          <Switch>
+            <Route path="/" component={HomeRedirect} />
+            <Route path="/sign-in/*?" component={SignInPage} />
+            <Route path="/sign-up/*?" component={SignUpPage} />
+            
+            <Route path="/dashboard">
+              {() => <ProtectedStaffRoute component={Dashboard} />}
+            </Route>
+            <Route path="/borrowers">
+              {() => <ProtectedStaffRoute component={BorrowersList} />}
+            </Route>
+            <Route path="/borrowers/:id">
+              {() => <ProtectedStaffRoute component={BorrowerDetail} />}
+            </Route>
+            <Route path="/loans">
+              {() => <ProtectedStaffRoute component={LoansList} />}
+            </Route>
+            <Route path="/loans/:id">
+              {() => <ProtectedSharedRoute component={LoanDetail} />}
+            </Route>
+            <Route path="/portal">
+              {() => <ProtectedBorrowerRoute component={Portal} />}
+            </Route>
+            
+            <Route component={NotFound} />
+          </Switch>
+          <Toaster />
+        </AuthProvider>
+      </QueryClientProvider>
+    </ClerkProvider>
+  );
+}
+
+function App() {
+  return (
+    <WouterRouter base={basePath}>
+      <ClerkProviderWithRoutes />
+    </WouterRouter>
+  );
+}
+
+export default App;
