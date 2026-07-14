@@ -10,6 +10,16 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: me
+    description: Current user identity/role
+  - name: borrowers
+    description: Borrower directory
+  - name: loans
+    description: Loan records
+  - name: repayments
+    description: Repayment records
+  - name: dashboard
+    description: Aggregate dashboard views
 paths:
   /healthz:
     get:
@@ -24,7 +34,295 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /me:
+    get:
+      operationId: getMe
+      tags: [me]
+      summary: Get current user's role and identity
+      description: Returns whether the signed-in user is staff or a linked borrower.
+      responses:
+        "200":
+          description: Current user info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeInfo"
+
+  /borrowers:
+    get:
+      operationId: listBorrowers
+      tags: [borrowers]
+      summary: List borrowers
+      responses:
+        "200":
+          description: List of borrowers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Borrower"
+    post:
+      operationId: createBorrower
+      tags: [borrowers]
+      summary: Create a borrower
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BorrowerInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Borrower"
+
+  /borrowers/{id}:
+    get:
+      operationId: getBorrower
+      tags: [borrowers]
+      summary: Get a borrower
+      parameters:
+        - $ref: "#/components/parameters/BorrowerId"
+      responses:
+        "200":
+          description: Borrower
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Borrower"
+    patch:
+      operationId: updateBorrower
+      tags: [borrowers]
+      summary: Update a borrower
+      parameters:
+        - $ref: "#/components/parameters/BorrowerId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BorrowerUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Borrower"
+    delete:
+      operationId: deleteBorrower
+      tags: [borrowers]
+      summary: Delete a borrower
+      parameters:
+        - $ref: "#/components/parameters/BorrowerId"
+      responses:
+        "204":
+          description: Deleted
+
+  /loans:
+    get:
+      operationId: listLoans
+      tags: [loans]
+      summary: List loans
+      description: Staff see all loans; borrowers see only their own loans.
+      parameters:
+        - name: borrowerId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/LoanStatus"
+      responses:
+        "200":
+          description: List of loans
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Loan"
+    post:
+      operationId: createLoan
+      tags: [loans]
+      summary: Create a loan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoanInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Loan"
+
+  /loans/{id}:
+    get:
+      operationId: getLoan
+      tags: [loans]
+      summary: Get a loan
+      parameters:
+        - $ref: "#/components/parameters/LoanId"
+      responses:
+        "200":
+          description: Loan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Loan"
+    patch:
+      operationId: updateLoan
+      tags: [loans]
+      summary: Update a loan
+      parameters:
+        - $ref: "#/components/parameters/LoanId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoanUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Loan"
+    delete:
+      operationId: deleteLoan
+      tags: [loans]
+      summary: Delete a loan
+      parameters:
+        - $ref: "#/components/parameters/LoanId"
+      responses:
+        "204":
+          description: Deleted
+
+  /loans/{id}/schedule:
+    get:
+      operationId: getLoanSchedule
+      tags: [loans]
+      summary: Get a loan's computed repayment schedule
+      description: Computed installment schedule with paid/due/overdue status per installment.
+      parameters:
+        - $ref: "#/components/parameters/LoanId"
+      responses:
+        "200":
+          description: Loan schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoanSchedule"
+
+  /repayments:
+    get:
+      operationId: listRepayments
+      tags: [repayments]
+      summary: List repayments
+      parameters:
+        - name: loanId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of repayments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Repayment"
+    post:
+      operationId: createRepayment
+      tags: [repayments]
+      summary: Record a repayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RepaymentInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Repayment"
+
+  /repayments/{id}:
+    delete:
+      operationId: deleteRepayment
+      tags: [repayments]
+      summary: Delete a repayment
+      parameters:
+        - $ref: "#/components/parameters/RepaymentId"
+      responses:
+        "204":
+          description: Deleted
+
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Aggregate portfolio summary
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /dashboard/activity:
+    get:
+      operationId: getRecentActivity
+      tags: [dashboard]
+      summary: Recent loan and repayment activity feed
+      responses:
+        "200":
+          description: Recent activity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecentActivity"
+
 components:
+  parameters:
+    BorrowerId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    LoanId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    RepaymentId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+
   schemas:
     HealthStatus:
       type: object
@@ -34,3 +332,264 @@ components:
       required:
         - status
 
+    LoanStatus:
+      type: string
+      enum: [active, paid, overdue, defaulted]
+
+    MeInfo:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [staff, borrower]
+        borrowerId:
+          type: ["string", "null"]
+        name:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+
+    Borrower:
+      type: object
+      required: [id, name, email, createdAt]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: ["string", "null"]
+        clerkUserId:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    BorrowerInput:
+      type: object
+      required: [name, email]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        email:
+          type: string
+        phone:
+          type: ["string", "null"]
+
+    BorrowerUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        email:
+          type: string
+        phone:
+          type: ["string", "null"]
+        clerkUserId:
+          type: ["string", "null"]
+
+    Loan:
+      type: object
+      required:
+        - id
+        - borrowerId
+        - borrowerName
+        - principal
+        - interestRate
+        - termMonths
+        - startDate
+        - status
+        - createdAt
+      properties:
+        id:
+          type: string
+        borrowerId:
+          type: string
+        borrowerName:
+          type: string
+        principal:
+          type: number
+        interestRate:
+          type: number
+          description: Annual interest rate as a percentage, e.g. 12.5
+        termMonths:
+          type: integer
+        startDate:
+          type: string
+        status:
+          $ref: "#/components/schemas/LoanStatus"
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        totalPaid:
+          type: number
+        outstandingBalance:
+          type: number
+
+    LoanInput:
+      type: object
+      required: [borrowerId, principal, interestRate, termMonths, startDate]
+      properties:
+        borrowerId:
+          type: string
+        principal:
+          type: number
+          minimum: 0
+        interestRate:
+          type: number
+          minimum: 0
+        termMonths:
+          type: integer
+          minimum: 1
+        startDate:
+          type: string
+        notes:
+          type: ["string", "null"]
+
+    LoanUpdate:
+      type: object
+      properties:
+        principal:
+          type: number
+        interestRate:
+          type: number
+        termMonths:
+          type: integer
+        startDate:
+          type: string
+        status:
+          $ref: "#/components/schemas/LoanStatus"
+        notes:
+          type: ["string", "null"]
+
+    Repayment:
+      type: object
+      required: [id, loanId, amount, paidDate, createdAt]
+      properties:
+        id:
+          type: string
+        loanId:
+          type: string
+        amount:
+          type: number
+        paidDate:
+          type: string
+        method:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    RepaymentInput:
+      type: object
+      required: [loanId, amount, paidDate]
+      properties:
+        loanId:
+          type: string
+        amount:
+          type: number
+          minimum: 0.01
+        paidDate:
+          type: string
+        method:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+
+    ScheduleInstallment:
+      type: object
+      required: [installmentNumber, dueDate, amountDue, amountPaid, status]
+      properties:
+        installmentNumber:
+          type: integer
+        dueDate:
+          type: string
+        amountDue:
+          type: number
+        amountPaid:
+          type: number
+        status:
+          type: string
+          enum: [paid, upcoming, due_soon, overdue]
+
+    LoanSchedule:
+      type: object
+      required:
+        - loanId
+        - installmentAmount
+        - installments
+        - totalDue
+        - totalPaid
+        - outstandingBalance
+      properties:
+        loanId:
+          type: string
+        installmentAmount:
+          type: number
+        installments:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScheduleInstallment"
+        totalDue:
+          type: number
+        totalPaid:
+          type: number
+        outstandingBalance:
+          type: number
+
+    DashboardSummary:
+      type: object
+      required:
+        - totalBorrowers
+        - activeLoansCount
+        - totalOutstanding
+        - totalCollected
+        - overdueLoansCount
+        - overdueAmount
+        - dueSoonCount
+      properties:
+        totalBorrowers:
+          type: integer
+        activeLoansCount:
+          type: integer
+        totalOutstanding:
+          type: number
+        totalCollected:
+          type: number
+        overdueLoansCount:
+          type: integer
+        overdueAmount:
+          type: number
+        dueSoonCount:
+          type: integer
+
+    ActivityItem:
+      type: object
+      required: [type, description, occurredAt]
+      properties:
+        type:
+          type: string
+          enum: [loan_created, repayment_recorded]
+        description:
+          type: string
+        amount:
+          type: ["number", "null"]
+        occurredAt:
+          type: string
+        borrowerName:
+          type: ["string", "null"]
+
+    RecentActivity:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityItem"

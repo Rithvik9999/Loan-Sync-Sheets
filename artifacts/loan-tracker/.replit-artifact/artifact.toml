@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "BorrowApp"
+version = "1.0.0"
+id = "artifacts/loan-tracker"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20131
+
+[services.development]
+run = "pnpm --filter @workspace/loan-tracker run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/loan-tracker", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/loan-tracker/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20131"
+BASE_PATH = "/"

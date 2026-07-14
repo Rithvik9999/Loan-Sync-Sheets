@@ -18,3 +18,8 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[userenv]
+
+[userenv.shared]
+GOOGLE_SHEET_ID = "1X7Ps9slp8L-fYv5flEDY5-2zT7NCQSwCO40WjCgaxYY"
