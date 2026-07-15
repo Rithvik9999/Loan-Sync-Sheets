@@ -1848,7 +1848,9 @@ function AlreadyPaidSection({
                 <div className="text-xs text-muted-foreground mt-0.5">
                   Paid on {(item as Loan).dateOfPartPayment
                     ? formatDate((item as Loan).dateOfPartPayment!)
-                    : "—"}
+                    : (item as Loan).returnDate
+                      ? formatDate((item as Loan).returnDate!)
+                      : "—"}
                 </div>
               </div>
               <div className="text-right">

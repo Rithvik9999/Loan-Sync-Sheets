@@ -56,7 +56,15 @@ async function fetchMe(): Promise<AuthState> {
       borrowerId: data.borrowerId ?? null,
       name: data.name ?? null,
       phone: data.phone ?? null,
-      creditLimit: typeof data.creditLimit === "number" ? data.creditLimit : null,
+      creditLimit: (() => {
+        const v = data.creditLimit;
+        if (typeof v === "number" && Number.isFinite(v)) return v;
+        if (typeof v === "string" && v !== "") {
+          const n = parseFloat((v as string).replace(/[^0-9.-]/g, ""));
+          return Number.isFinite(n) ? n : null;
+        }
+        return null;
+      })(),
     };
   } catch {
     return { ...defaultState, isLoaded: true };
