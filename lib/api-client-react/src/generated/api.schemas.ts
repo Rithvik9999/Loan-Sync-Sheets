@@ -55,7 +55,10 @@ export interface Borrower {
   phone?: string | null;
   /** Whether staff has set a login PIN for this borrower. */
   hasPin?: boolean;
-  /** Optional credit limit set by staff, in rupees. @nullable */
+  /**
+     * Maximum total borrowing allowed for this borrower; null means no limit set.
+     * @nullable
+     */
   creditLimit?: number | null;
   createdAt: string;
 }
@@ -71,8 +74,6 @@ export interface BorrowerInput {
      * @pattern ^[0-9]{6}$
      */
   pin?: string | null;
-  /** Optional credit limit in rupees. @nullable */
-  creditLimit?: number | null;
 }
 
 export interface BorrowerUpdate {
@@ -86,12 +87,13 @@ export interface BorrowerUpdate {
      * @pattern ^[0-9]{6}$
      */
   pin?: string | null;
-  /** Optional credit limit in rupees. @nullable */
-  creditLimit?: number | null;
 }
 
 export interface Loan {
+  /** Internal UUID used as the row's primary key. */
   id: string;
+  /** Human-readable loan identifier (e.g. "L-0001"). Assigned once on creation and persisted in column A of the Heat Map sheet alongside the UUID. */
+  loanId: string;
   /** Borrower name as recorded on the Heat Map sheet. */
   name: string;
   /**
@@ -210,8 +212,6 @@ export const LoanRequestStatus = {
   Rejected: 'Rejected',
 } as const;
 
-export type LoanRequestType = 'Loan' | 'EMI';
-
 export interface LoanRequest {
   id: string;
   name: string;
@@ -220,10 +220,6 @@ export interface LoanRequest {
   borrowerId: string | null;
   amount: number;
   tenureDays: number;
-  /** @nullable */
-  tenureMonths?: number | null;
-  /** Loan type: regular loan or EMI loan. */
-  type?: LoanRequestType;
   /** @nullable */
   purpose: string | null;
   status: LoanRequestStatus;
@@ -234,11 +230,7 @@ export interface LoanRequestInput {
   /** @minimum 0 */
   amount: number;
   /** @minimum 0 */
-  tenureDays?: number;
-  /** Number of monthly EMI instalments. Required when type is EMI. @nullable */
-  tenureMonths?: number | null;
-  /** Loan type: Loan (default) or EMI. */
-  type?: LoanRequestType;
+  tenureDays: number;
   /** @nullable */
   purpose?: string | null;
 }

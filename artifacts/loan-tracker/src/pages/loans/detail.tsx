@@ -77,6 +77,7 @@ export default function LoanDetail() {
   }
 
   const stats: { label: string; value: string; muted?: boolean }[] = [
+    { label: "Loan ID", value: loan.loanId },
     { label: "Principal", value: formatCurrency(loan.principal) },
     { label: "Tenure", value: `${loan.tenureDays} days` },
     { label: "Transaction Date", value: formatDate(loan.transactionDate) },

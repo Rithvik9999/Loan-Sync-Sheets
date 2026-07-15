@@ -423,6 +423,9 @@ components:
         hasPin:
           type: boolean
           description: Whether staff has set a login PIN for this borrower.
+        creditLimit:
+          type: ["number", "null"]
+          description: Maximum total borrowing allowed for this borrower; null means no limit set.
         createdAt:
           type: string
 
@@ -463,6 +466,7 @@ components:
       type: object
       required:
         - id
+        - loanId
         - name
         - borrowerId
         - principal
@@ -475,6 +479,10 @@ components:
       properties:
         id:
           type: string
+          description: Internal UUID used as the row's primary key.
+        loanId:
+          type: string
+          description: Human-readable loan identifier (e.g. "L-0001"). Assigned once on creation and persisted in column A of the Heat Map sheet alongside the UUID.
         name:
           type: string
           description: Borrower name as recorded on the Heat Map sheet.

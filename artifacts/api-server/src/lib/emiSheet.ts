@@ -69,6 +69,10 @@ export type EmiLoanStatus = "Pending" | "Clear";
 
 export interface EmiLoanRow {
   id: string;
+  /** Human-readable EMI loan ID derived from the sheet row (e.g. "E-0001").
+   *  DATA_START_ROW (6) → "E-0001", row 7 → "E-0002", etc.
+   *  Stable as long as the row is not deleted. */
+  emiId: string;
   rowNumber: number;
   name: string;
   statusNotes: string;
@@ -138,10 +142,17 @@ function toText(value: unknown): string {
   return String(value);
 }
 
+/** Converts a 1-based data row number to a human-readable EMI loan ID: "E-0001", "E-0002", … */
+function makeEmiId(rowNumber: number): string {
+  const seq = rowNumber - DATA_START_ROW + 1; // row 6 → 1, row 7 → 2, …
+  return `E-${String(seq).padStart(4, "0")}`;
+}
+
 function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
   const get = (idx: number) => raw[idx];
   return {
     id: toText(get(COL.ID)),
+    emiId: makeEmiId(rowNumber),
     rowNumber,
     name: toText(get(COL.NAME)),
     statusNotes: toText(get(COL.STATUS_NOTES)),

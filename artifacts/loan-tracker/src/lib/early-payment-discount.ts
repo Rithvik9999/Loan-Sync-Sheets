@@ -64,7 +64,10 @@ export interface EarlyPaymentDiscountInput {
 export interface EarlyPaymentDiscountResult {
   /** Days actually held: loan availing date → payment date. */
   elapsedDays: number;
-  /** elapsedDays + 3 day grace/processing buffer — what we charge for. */
+  /** elapsedDays + 10 day prepayment fee buffer — what we charge for.
+   *  The 10-day buffer accounts for lender's lost interest on the remaining
+   *  tenure and discourages borrowers from gaming the system with very
+   *  short-notice repayments. */
   chargeDays: number;
   /** Estimated discount (>= 0). Zero if paying at/after the agreed tenure. */
   discount: number;
@@ -95,7 +98,8 @@ export function computeEarlyPaymentDiscount(
   } = input;
 
   const elapsedDays = daysBetween(transactionDate, paymentDate);
-  const chargeDays = elapsedDays + 3;
+  // +10 day prepayment fee buffer (covers lender's lost income on early payoff)
+  const chargeDays = elapsedDays + 10;
 
   if (!tenureDays || chargeDays >= tenureDays) {
     return { elapsedDays, chargeDays, discount: 0 };

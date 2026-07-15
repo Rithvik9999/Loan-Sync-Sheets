@@ -109,6 +109,7 @@ export default function EmiLoanDetail() {
     loan.status !== "Clear";
 
   const stats: { label: string; value: string; highlight?: boolean }[] = [
+    { label: "EMI ID", value: loan.emiId ?? "—" },
     { label: "Principal", value: formatCurrency(loan.principal) },
     { label: "Tenure", value: `${loan.tenureMonths} months` },
     { label: "Transaction Date", value: formatDate(loan.transactionDate) },

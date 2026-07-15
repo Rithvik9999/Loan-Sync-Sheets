@@ -69,7 +69,7 @@ export const ListBorrowersResponseItem = zod.object({
   "name": zod.string(),
   "phone": zod.string().nullish(),
   "hasPin": zod.boolean().optional().describe('Whether staff has set a login PIN for this borrower.'),
-  "creditLimit": zod.number().nullish().describe('Optional credit limit set by staff, in rupees.'),
+  "creditLimit": zod.number().nullish().describe('Maximum total borrowing allowed for this borrower; null means no limit set.'),
   "createdAt": zod.string()
 })
 export const ListBorrowersResponse = zod.array(ListBorrowersResponseItem)
@@ -93,7 +93,7 @@ export const CreateBorrowerResponse = zod.object({
   "name": zod.string(),
   "phone": zod.string().nullish(),
   "hasPin": zod.boolean().optional().describe('Whether staff has set a login PIN for this borrower.'),
-  "creditLimit": zod.number().nullish().describe('Optional credit limit set by staff, in rupees.'),
+  "creditLimit": zod.number().nullish().describe('Maximum total borrowing allowed for this borrower; null means no limit set.'),
   "createdAt": zod.string()
 })
 
@@ -110,7 +110,7 @@ export const GetBorrowerResponse = zod.object({
   "name": zod.string(),
   "phone": zod.string().nullish(),
   "hasPin": zod.boolean().optional().describe('Whether staff has set a login PIN for this borrower.'),
-  "creditLimit": zod.number().nullish().describe('Optional credit limit set by staff, in rupees.'),
+  "creditLimit": zod.number().nullish().describe('Maximum total borrowing allowed for this borrower; null means no limit set.'),
   "createdAt": zod.string()
 })
 
@@ -137,7 +137,7 @@ export const UpdateBorrowerResponse = zod.object({
   "name": zod.string(),
   "phone": zod.string().nullish(),
   "hasPin": zod.boolean().optional().describe('Whether staff has set a login PIN for this borrower.'),
-  "creditLimit": zod.number().nullish().describe('Optional credit limit set by staff, in rupees.'),
+  "creditLimit": zod.number().nullish().describe('Maximum total borrowing allowed for this borrower; null means no limit set.'),
   "createdAt": zod.string()
 })
 
@@ -161,7 +161,8 @@ export const ListLoansQueryParams = zod.object({
 })
 
 export const ListLoansResponseItem = zod.object({
-  "id": zod.string(),
+  "id": zod.string().describe('Internal UUID used as the row\'s primary key.'),
+  "loanId": zod.string().describe('Human-readable loan identifier (e.g. \"L-0001\"). Assigned once on creation and persisted in column A of the Heat Map sheet alongside the UUID.'),
   "name": zod.string().describe('Borrower name as recorded on the Heat Map sheet.'),
   "borrowerId": zod.string().nullable().describe('Linked Borrower id, resolved by matching name; null if unlinked.'),
   "returnDate": zod.string().nullish().describe('Computed by the sheet from transaction date + tenure.'),
@@ -210,7 +211,8 @@ export const CreateLoanBody = zod.object({
 })
 
 export const CreateLoanResponse = zod.object({
-  "id": zod.string(),
+  "id": zod.string().describe('Internal UUID used as the row\'s primary key.'),
+  "loanId": zod.string().describe('Human-readable loan identifier (e.g. \"L-0001\"). Assigned once on creation and persisted in column A of the Heat Map sheet alongside the UUID.'),
   "name": zod.string().describe('Borrower name as recorded on the Heat Map sheet.'),
   "borrowerId": zod.string().nullable().describe('Linked Borrower id, resolved by matching name; null if unlinked.'),
   "returnDate": zod.string().nullish().describe('Computed by the sheet from transaction date + tenure.'),
@@ -243,7 +245,8 @@ export const GetLoanParams = zod.object({
 })
 
 export const GetLoanResponse = zod.object({
-  "id": zod.string(),
+  "id": zod.string().describe('Internal UUID used as the row\'s primary key.'),
+  "loanId": zod.string().describe('Human-readable loan identifier (e.g. \"L-0001\"). Assigned once on creation and persisted in column A of the Heat Map sheet alongside the UUID.'),
   "name": zod.string().describe('Borrower name as recorded on the Heat Map sheet.'),
   "borrowerId": zod.string().nullable().describe('Linked Borrower id, resolved by matching name; null if unlinked.'),
   "returnDate": zod.string().nullish().describe('Computed by the sheet from transaction date + tenure.'),
@@ -294,7 +297,8 @@ export const UpdateLoanBody = zod.object({
 })
 
 export const UpdateLoanResponse = zod.object({
-  "id": zod.string(),
+  "id": zod.string().describe('Internal UUID used as the row\'s primary key.'),
+  "loanId": zod.string().describe('Human-readable loan identifier (e.g. \"L-0001\"). Assigned once on creation and persisted in column A of the Heat Map sheet alongside the UUID.'),
   "name": zod.string().describe('Borrower name as recorded on the Heat Map sheet.'),
   "borrowerId": zod.string().nullable().describe('Linked Borrower id, resolved by matching name; null if unlinked.'),
   "returnDate": zod.string().nullish().describe('Computed by the sheet from transaction date + tenure.'),
@@ -340,8 +344,6 @@ export const ListLoanRequestsResponseItem = zod.object({
   "borrowerId": zod.string().nullable(),
   "amount": zod.number(),
   "tenureDays": zod.number(),
-  "tenureMonths": zod.number().nullish(),
-  "type": zod.enum(['Loan', 'EMI']).optional(),
   "purpose": zod.string().nullable(),
   "status": zod.enum(['Pending', 'Approved', 'Rejected']),
   "createdAt": zod.string()
@@ -361,9 +363,7 @@ export const createLoanRequestBodyTenureDaysMin = 0;
 
 export const CreateLoanRequestBody = zod.object({
   "amount": zod.number().min(createLoanRequestBodyAmountMin),
-  "tenureDays": zod.number().min(createLoanRequestBodyTenureDaysMin).optional(),
-  "tenureMonths": zod.number().int().min(1).nullish(),
-  "type": zod.enum(['Loan', 'EMI']).optional(),
+  "tenureDays": zod.number().min(createLoanRequestBodyTenureDaysMin),
   "purpose": zod.string().nullish()
 })
 
@@ -374,8 +374,6 @@ export const CreateLoanRequestResponse = zod.object({
   "borrowerId": zod.string().nullable(),
   "amount": zod.number(),
   "tenureDays": zod.number(),
-  "tenureMonths": zod.number().nullish(),
-  "type": zod.enum(['Loan', 'EMI']).optional(),
   "purpose": zod.string().nullable(),
   "status": zod.enum(['Pending', 'Approved', 'Rejected']),
   "createdAt": zod.string()
@@ -400,8 +398,6 @@ export const UpdateLoanRequestResponse = zod.object({
   "borrowerId": zod.string().nullable(),
   "amount": zod.number(),
   "tenureDays": zod.number(),
-  "tenureMonths": zod.number().nullish(),
-  "type": zod.enum(['Loan', 'EMI']).optional(),
   "purpose": zod.string().nullable(),
   "status": zod.enum(['Pending', 'Approved', 'Rejected']),
   "createdAt": zod.string()

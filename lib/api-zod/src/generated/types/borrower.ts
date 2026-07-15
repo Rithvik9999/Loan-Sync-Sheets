@@ -13,7 +13,10 @@ export interface Borrower {
   phone?: string | null;
   /** Whether staff has set a login PIN for this borrower. */
   hasPin?: boolean;
-  /** Optional credit limit set by staff, in rupees. @nullable */
+  /**
+     * Maximum total borrowing allowed for this borrower; null means no limit set.
+     * @nullable
+     */
   creditLimit?: number | null;
   createdAt: string;
 }

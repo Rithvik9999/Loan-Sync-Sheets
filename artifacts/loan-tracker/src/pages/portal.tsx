@@ -1226,6 +1226,7 @@ function LoanCard({ loan }: { loan: Loan }) {
               <LoanStatusBadge status={loan.status} />
             </h2>
             <p className="text-xs text-muted-foreground">
+              <span className="font-mono mr-2">{loan.loanId}</span>
               {formatDate(loan.transactionDate)} · {loan.tenureDays}d
             </p>
           </div>

@@ -458,7 +458,10 @@ export default function LoansList() {
                           aria-label={`Select ${loan.name}`}
                         />
                       </TableCell>
-                      <TableCell className="font-medium">{loan.name}</TableCell>
+                      <TableCell className="font-medium">
+                        <div>{loan.name}</div>
+                        <div className="text-xs text-muted-foreground font-mono">{loan.loanId}</div>
+                      </TableCell>
                       <TableCell className="font-numeric">
                         {formatCurrency(loan.principal)}
                       </TableCell>

@@ -86,7 +86,12 @@ export default function LoanRequestDetail() {
 
   const discountNum = Number(discount) || 0;
   const principal = req?.amount ?? 0;
-  const finalAmount = Math.max(0, principal - discountNum);
+  // NOTE: discount is stored as a negative discountOrCharges in the sheet.
+  // The sheet's array formula computes: finalAmount = principal + flatFee + interest + discountOrCharges + lateFees.
+  // At approval time we don't have the sheet-computed finalAmount yet, so we show an estimate:
+  // the admin enters the disbursed principal, and the discount will reduce the sheet-computed final total.
+  // We write discountOrCharges = -discountNum so the sheet formula applies it to the full final amount.
+  const estimatedFinalAmount = Math.max(0, principal - discountNum);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const reqAny = req as any;
@@ -108,6 +113,8 @@ export default function LoanRequestDetail() {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ discount: discountNum, transactionDate }),
+        // discount is written as -discountNum into sheet's discountOrCharges column,
+        // which applies to the sheet-computed finalAmount (principal + fees + interest).
       });
       if (!res.ok) {
         const err = await res
@@ -124,7 +131,7 @@ export default function LoanRequestDetail() {
         notifyBorrowerPaymentConfirmed({
           phone: req.phone,
           name: req.name,
-          amount: finalAmount,
+          amount: estimatedFinalAmount,
         });
       }
       setLocation("/loan-requests");
@@ -327,21 +334,24 @@ export default function LoanRequestDetail() {
             {/* Live breakdown */}
             <div className="rounded-lg border bg-background p-4 space-y-2.5">
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Principal</span>
+                <span className="text-muted-foreground">Principal (disbursed)</span>
                 <span className="font-numeric font-medium">
                   {formatCurrency(principal)}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Discount</span>
+                <span className="text-muted-foreground">Discount on final amount</span>
                 <span className="font-numeric text-emerald-700">
                   − {formatCurrency(discountNum)}
                 </span>
               </div>
+              <div className="flex items-start gap-2 rounded bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                <span>Discount is stored as a negative charge in the sheet; it reduces the sheet-computed final amount (principal + fees + interest), not just the principal.</span>
+              </div>
               <div className="flex justify-between border-t pt-2.5 mt-1">
-                <span className="font-semibold text-sm">Final Amount (Paid)</span>
+                <span className="font-semibold text-sm">Estimated Amount Collected</span>
                 <span className="font-bold font-numeric text-xl">
-                  {formatCurrency(finalAmount)}
+                  {formatCurrency(estimatedFinalAmount)}
                 </span>
               </div>
             </div>

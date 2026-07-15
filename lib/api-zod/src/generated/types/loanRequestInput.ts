@@ -6,18 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
-import type { LoanRequestType } from './loanRequest';
-export type { LoanRequestType };
-
 export interface LoanRequestInput {
   /** @minimum 0 */
   amount: number;
   /** @minimum 0 */
-  tenureDays?: number;
-  /** Number of monthly EMI instalments. Required when type is EMI. @nullable */
-  tenureMonths?: number | null;
-  /** Loan type: Loan (default) or EMI. */
-  type?: LoanRequestType;
+  tenureDays: number;
   /** @nullable */
   purpose?: string | null;
 }

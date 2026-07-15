@@ -371,7 +371,10 @@ export default function EmiLoansList() {
                           aria-label={`Select ${loan.name}`}
                         />
                       </TableCell>
-                      <TableCell className="font-medium">{loan.name}</TableCell>
+                      <TableCell className="font-medium">
+                        <div>{loan.name}</div>
+                        <div className="text-xs text-muted-foreground font-mono">{loan.emiId}</div>
+                      </TableCell>
                       <TableCell className="font-numeric">{formatCurrency(loan.principal)}</TableCell>
                       <TableCell className="font-numeric">
                         {loan.monthlyPayment != null ? formatCurrency(loan.monthlyPayment) : "—"}

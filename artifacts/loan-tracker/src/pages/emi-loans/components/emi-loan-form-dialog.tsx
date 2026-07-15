@@ -45,6 +45,8 @@ import { cn } from "@/lib/utils";
 
 export interface EmiLoan {
   id: string;
+  /** Human-readable EMI loan ID (e.g. "E-0001"), derived from sheet row position. */
+  emiId: string;
   rowNumber: number;
   name: string;
   statusNotes: string;

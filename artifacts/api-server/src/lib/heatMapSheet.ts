@@ -75,6 +75,10 @@ export type LoanStatus = "Pending" | "Clear" | "Temp";
 
 export interface LoanRow {
   id: string;
+  /** Human-readable loan ID derived from the sheet row (e.g. "L-0001").
+   *  DATA_START_ROW (7) → "L-0001", row 8 → "L-0002", etc.
+   *  Stable as long as the row is not deleted. */
+  loanId: string;
   rowNumber: number;
   name: string;
   returnDate: string | null;
@@ -143,10 +147,17 @@ function toText(value: unknown): string {
   return String(value);
 }
 
+/** Converts a 1-based data row number to a human-readable loan ID: "L-0001", "L-0002", … */
+function makeLoanId(rowNumber: number): string {
+  const seq = rowNumber - DATA_START_ROW + 1; // row 7 → 1, row 8 → 2, …
+  return `L-${String(seq).padStart(4, "0")}`;
+}
+
 function parseRow(raw: unknown[], rowNumber: number): LoanRow {
   const get = (idx: number) => raw[idx];
   return {
     id: toText(get(COL.ID)),
+    loanId: makeLoanId(rowNumber),
     rowNumber,
     name: toText(get(COL.NAME)),
     returnDate: serialToISODate(get(COL.RETURN_DATE)),

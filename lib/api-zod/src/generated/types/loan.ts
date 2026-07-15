@@ -8,7 +8,10 @@
 import type { LoanStatus } from './loanStatus';
 
 export interface Loan {
+  /** Internal UUID used as the row's primary key. */
   id: string;
+  /** Human-readable loan identifier (e.g. "L-0001"). Assigned once on creation and persisted in column A of the Heat Map sheet alongside the UUID. */
+  loanId: string;
   /** Borrower name as recorded on the Heat Map sheet. */
   name: string;
   /**
