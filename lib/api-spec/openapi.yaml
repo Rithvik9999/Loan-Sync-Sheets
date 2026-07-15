@@ -11,7 +11,7 @@ tags:
   - name: health
     description: Health operations
   - name: auth
-    description: Phone + password authentication
+    description: Phone + PIN authentication
   - name: me
     description: Current user identity/role
   - name: borrowers
@@ -27,11 +27,12 @@ paths:
     post:
       operationId: login
       tags: [auth]
-      summary: Log in with phone number + password
+      summary: Log in with phone number + 6-digit PIN
       description: >
         Sets a signed session cookie. The configured admin phone number
         always logs in as staff; any other phone must match a Borrower
-        record with a password set by staff.
+        record with a PIN set by staff. There is no self-service PIN
+        reset — borrowers must contact staff to have their PIN reset.
       requestBody:
         required: true
         content:
@@ -46,7 +47,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/MeInfo"
         "401":
-          description: Invalid phone number or password
+          description: Invalid phone number or PIN
 
   /auth/logout:
     post:
@@ -383,14 +384,17 @@ components:
 
     LoginBody:
       type: object
-      required: [phone, password]
+      required: [phone, pin]
       properties:
         phone:
           type: string
           minLength: 1
-        password:
+        pin:
           type: string
-          minLength: 1
+          description: Exactly 6 digits.
+          pattern: "^[0-9]{6}$"
+          minLength: 6
+          maxLength: 6
 
     MeInfo:
       type: object
@@ -416,9 +420,9 @@ components:
           type: string
         phone:
           type: ["string", "null"]
-        hasPassword:
+        hasPin:
           type: boolean
-          description: Whether staff has set a login password for this borrower.
+          description: Whether staff has set a login PIN for this borrower.
         createdAt:
           type: string
 
@@ -431,10 +435,14 @@ components:
           minLength: 1
         phone:
           type: ["string", "null"]
-        password:
+        pin:
           type: ["string", "null"]
-          description: Write-only. Sets the borrower's login password (min 4 chars).
-          minLength: 4
+          description: >
+            Write-only. Sets the borrower's login PIN. Exactly 6 digits.
+            Stored in plain text in the spreadsheet (never returned by the
+            API) — staff sets it and shares it with the borrower directly;
+            there is no self-service reset.
+          pattern: "^[0-9]{6}$"
 
     BorrowerUpdate:
       type: object
@@ -444,10 +452,12 @@ components:
           minLength: 1
         phone:
           type: ["string", "null"]
-        password:
+        pin:
           type: ["string", "null"]
-          description: Write-only. Set to update the borrower's login password.
-          minLength: 4
+          description: >
+            Write-only. Set to update the borrower's login PIN. Exactly 6
+            digits.
+          pattern: "^[0-9]{6}$"
 
     Loan:
       type: object

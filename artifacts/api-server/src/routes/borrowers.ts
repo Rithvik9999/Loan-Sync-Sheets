@@ -17,16 +17,18 @@ const router: IRouter = Router();
 router.use(attachRole, requireStaff);
 
 // Inline schemas (email removed — phone is the primary identity)
+const PIN_SCHEMA = z.string().regex(/^\d{6}$/, "PIN must be exactly 6 digits");
+
 const CreateBorrowerBodyLocal = z.object({
   name: z.string().min(1),
   phone: z.string().nullish(),
-  password: z.string().min(4).nullish(),
+  pin: PIN_SCHEMA.nullish(),
 });
 
 const UpdateBorrowerBodyLocal = z.object({
   name: z.string().min(1).optional(),
   phone: z.string().nullish(),
-  password: z.string().min(4).nullish(),
+  pin: PIN_SCHEMA.nullish(),
 });
 
 router.get("/borrowers", async (_req, res): Promise<void> => {

@@ -14,7 +14,5 @@ export interface MeInfo {
   /** @nullable */
   name?: string | null;
   /** @nullable */
-  email?: string | null;
-  /** @nullable */
   phone?: string | null;
 }

@@ -73,8 +73,8 @@ export const getLoginUrl = () => {
 }
 
 /**
- * Sets a signed session cookie. The configured admin phone number always logs in as staff; any other phone must match a Borrower record with a password set by staff.
- * @summary Log in with phone number + password
+ * Sets a signed session cookie. The configured admin phone number always logs in as staff; any other phone must match a Borrower record with a PIN set by staff. There is no self-service PIN reset — borrowers must contact staff to have their PIN reset.
+ * @summary Log in with phone number + 6-digit PIN
  */
 export const login = async (loginBody: LoginBody, options?: RequestInit): Promise<MeInfo> => {
 
@@ -123,7 +123,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type LoginMutationError = ErrorType<void>
 
     /**
- * @summary Log in with phone number + password
+ * @summary Log in with phone number + 6-digit PIN
  */
 export const useLogin = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof login>>, TError,{data: BodyType<LoginBody>}, TContext>, request?: SecondParameter<typeof customFetch>}

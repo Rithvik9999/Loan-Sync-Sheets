@@ -9,6 +9,11 @@
 export interface LoginBody {
   /** @minLength 1 */
   phone: string;
-  /** @minLength 1 */
-  password: string;
+  /**
+     * Exactly 6 digits.
+     * @minLength 6
+     * @maxLength 6
+     * @pattern ^[0-9]{6}$
+     */
+  pin: string;
 }

@@ -21,7 +21,7 @@ type AuthState = {
 };
 
 type AuthContextType = AuthState & {
-  login: (phone: string, password: string) => Promise<void>;
+  login: (phone: string, pin: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -78,16 +78,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     prevSignedInRef.current = state.isSignedIn;
   }, [state.isSignedIn, state.isLoaded, queryClient]);
 
-  const login = useCallback(async (phone: string, password: string) => {
+  const login = useCallback(async (phone: string, pin: string) => {
     const res = await fetch("/api/auth/login", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone, password }),
+      body: JSON.stringify({ phone, pin }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "Login failed" }));
-      throw new Error(err.error || "Invalid phone number or password");
+      throw new Error(err.error || "Invalid phone number or PIN");
     }
     const data = await res.json();
     setState({

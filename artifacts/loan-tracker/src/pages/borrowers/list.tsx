@@ -15,7 +15,7 @@ interface BorrowerEntry {
   id: string | null;
   name: string;
   phone: string;
-  hasPassword: boolean;
+  hasPin: boolean;
   loanCount: number;
 }
 
@@ -47,7 +47,7 @@ export default function BorrowersList() {
           id: null,
           name: loan.name.trim(),
           phone,
-          hasPassword: false,
+          hasPin: false,
           loanCount: 0,
         });
       }
@@ -60,7 +60,7 @@ export default function BorrowersList() {
       if (nameMap.has(key)) {
         const entry = nameMap.get(key)!;
         entry.id = b.id;
-        entry.hasPassword = b.hasPassword ?? false;
+        entry.hasPin = b.hasPin ?? false;
         if (!entry.phone && b.phone) entry.phone = b.phone;
       } else {
         // Borrower in portal tab but no loans — still show them
@@ -68,7 +68,7 @@ export default function BorrowersList() {
           id: b.id,
           name: b.name.trim(),
           phone: b.phone ?? "",
-          hasPassword: b.hasPassword ?? false,
+          hasPin: b.hasPin ?? false,
           loanCount: 0,
         });
       }
@@ -144,7 +144,7 @@ export default function BorrowersList() {
                     </TableCell>
                     <TableCell className="text-muted-foreground">{b.loanCount}</TableCell>
                     <TableCell>
-                      {b.hasPassword ? (
+                      {b.hasPin ? (
                         <Badge variant="secondary" className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 font-normal gap-1">
                           <KeyRound className="h-3 w-3" />
                           Enabled

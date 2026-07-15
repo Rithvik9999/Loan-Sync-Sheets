@@ -9,23 +9,26 @@ import * as zod from 'zod';
 
 
 /**
- * Sets a signed session cookie. The configured admin phone number always logs in as staff; any other phone must match a Borrower record with a password set by staff.
- * @summary Log in with phone number + password
+ * Sets a signed session cookie. The configured admin phone number always logs in as staff; any other phone must match a Borrower record with a PIN set by staff. There is no self-service PIN reset — borrowers must contact staff to have their PIN reset.
+ * @summary Log in with phone number + 6-digit PIN
  */
 
+export const loginBodyPinMin = 6;
+export const loginBodyPinMax = 6;
 
+
+export const loginBodyPinRegExp = new RegExp('^[0-9]{6}$');
 
 
 export const LoginBody = zod.object({
   "phone": zod.string().min(1),
-  "password": zod.string().min(1)
+  "pin": zod.string().min(loginBodyPinMin).max(loginBodyPinMax).regex(loginBodyPinRegExp).describe('Exactly 6 digits.')
 })
 
 export const LoginResponse = zod.object({
   "role": zod.enum(['staff', 'borrower']),
   "borrowerId": zod.string().nullish(),
   "name": zod.string().nullish(),
-  "email": zod.string().nullish(),
   "phone": zod.string().nullish()
 })
 
@@ -54,7 +57,6 @@ export const GetMeResponse = zod.object({
   "role": zod.enum(['staff', 'borrower']),
   "borrowerId": zod.string().nullish(),
   "name": zod.string().nullish(),
-  "email": zod.string().nullish(),
   "phone": zod.string().nullish()
 })
 
@@ -65,9 +67,8 @@ export const GetMeResponse = zod.object({
 export const ListBorrowersResponseItem = zod.object({
   "id": zod.string(),
   "name": zod.string(),
-  "email": zod.string(),
   "phone": zod.string().nullish(),
-  "hasPassword": zod.boolean().optional().describe('Whether staff has set a login password for this borrower.'),
+  "hasPin": zod.boolean().optional().describe('Whether staff has set a login PIN for this borrower.'),
   "createdAt": zod.string()
 })
 export const ListBorrowersResponse = zod.array(ListBorrowersResponseItem)
@@ -77,23 +78,20 @@ export const ListBorrowersResponse = zod.array(ListBorrowersResponseItem)
  * @summary Create a borrower
  */
 
-export const createBorrowerBodyPasswordMin = 4;
-
+export const createBorrowerBodyPinRegExp = new RegExp('^[0-9]{6}$');
 
 
 export const CreateBorrowerBody = zod.object({
   "name": zod.string().min(1),
-  "email": zod.string(),
   "phone": zod.string().nullish(),
-  "password": zod.string().min(createBorrowerBodyPasswordMin).nullish().describe('Write-only. Sets the borrower\'s login password (min 4 chars).')
+  "pin": zod.string().regex(createBorrowerBodyPinRegExp).nullish().describe('Write-only. Sets the borrower\'s login PIN. Exactly 6 digits. Stored in plain text in the spreadsheet (never returned by the API) — staff sets it and shares it with the borrower directly; there is no self-service reset.\n')
 })
 
 export const CreateBorrowerResponse = zod.object({
   "id": zod.string(),
   "name": zod.string(),
-  "email": zod.string(),
   "phone": zod.string().nullish(),
-  "hasPassword": zod.boolean().optional().describe('Whether staff has set a login password for this borrower.'),
+  "hasPin": zod.boolean().optional().describe('Whether staff has set a login PIN for this borrower.'),
   "createdAt": zod.string()
 })
 
@@ -108,9 +106,8 @@ export const GetBorrowerParams = zod.object({
 export const GetBorrowerResponse = zod.object({
   "id": zod.string(),
   "name": zod.string(),
-  "email": zod.string(),
   "phone": zod.string().nullish(),
-  "hasPassword": zod.boolean().optional().describe('Whether staff has set a login password for this borrower.'),
+  "hasPin": zod.boolean().optional().describe('Whether staff has set a login PIN for this borrower.'),
   "createdAt": zod.string()
 })
 
@@ -123,23 +120,20 @@ export const UpdateBorrowerParams = zod.object({
 })
 
 
-export const updateBorrowerBodyPasswordMin = 4;
-
+export const updateBorrowerBodyPinRegExp = new RegExp('^[0-9]{6}$');
 
 
 export const UpdateBorrowerBody = zod.object({
   "name": zod.string().min(1).optional(),
-  "email": zod.string().optional(),
   "phone": zod.string().nullish(),
-  "password": zod.string().min(updateBorrowerBodyPasswordMin).nullish().describe('Write-only. Set to update the borrower\'s login password.')
+  "pin": zod.string().regex(updateBorrowerBodyPinRegExp).nullish().describe('Write-only. Set to update the borrower\'s login PIN. Exactly 6 digits.\n')
 })
 
 export const UpdateBorrowerResponse = zod.object({
   "id": zod.string(),
   "name": zod.string(),
-  "email": zod.string(),
   "phone": zod.string().nullish(),
-  "hasPassword": zod.boolean().optional().describe('Whether staff has set a login password for this borrower.'),
+  "hasPin": zod.boolean().optional().describe('Whether staff has set a login PIN for this borrower.'),
   "createdAt": zod.string()
 })
 

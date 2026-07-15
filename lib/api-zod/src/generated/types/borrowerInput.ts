@@ -9,13 +9,12 @@
 export interface BorrowerInput {
   /** @minLength 1 */
   name: string;
-  email: string;
   /** @nullable */
   phone?: string | null;
   /**
-     * Write-only. Sets the borrower's login password (min 4 chars).
-     * @minLength 4
+     * Write-only. Sets the borrower's login PIN. Exactly 6 digits. Stored in plain text in the spreadsheet (never returned by the API) — staff sets it and shares it with the borrower directly; there is no self-service reset.
      * @nullable
+     * @pattern ^[0-9]{6}$
      */
-  password?: string | null;
+  pin?: string | null;
 }

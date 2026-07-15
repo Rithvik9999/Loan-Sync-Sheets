@@ -2,8 +2,8 @@ import { Router, type IRouter } from "express";
 import { LoginBody, LoginResponse } from "@workspace/api-zod";
 import {
   ADMIN_PHONE,
+  PIN_PATTERN,
   SESSION_COOKIE,
-  comparePassword,
   normalizePhone,
   signSession,
 } from "../lib/authTokens";
@@ -26,12 +26,21 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     return;
   }
   const phone = normalizePhone(parsed.data.phone);
-  const { password } = parsed.data;
+  const { pin } = parsed.data;
+
+  if (!/^\d{10}$/.test(phone)) {
+    res.status(400).json({ error: "Phone number must be exactly 10 digits" });
+    return;
+  }
+  if (!PIN_PATTERN.test(pin)) {
+    res.status(400).json({ error: "PIN must be exactly 6 digits" });
+    return;
+  }
 
   if (phone === ADMIN_PHONE) {
-    const adminPassword = process.env.ADMIN_PASSWORD;
-    if (!adminPassword || password !== adminPassword) {
-      res.status(401).json({ error: "Invalid phone number or password" });
+    const adminPin = process.env.ADMIN_PIN;
+    if (!adminPin || pin !== adminPin) {
+      res.status(401).json({ error: "Invalid phone number or PIN" });
       return;
     }
     const token = signSession({
@@ -53,10 +62,9 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   }
 
   const borrower = await getBorrowerByPhone(phone);
-  const valid =
-    borrower && (await comparePassword(password, borrower.passwordHash));
+  const valid = borrower && borrower.pin && pin === borrower.pin;
   if (!borrower || !valid) {
-    res.status(401).json({ error: "Invalid phone number or password" });
+    res.status(401).json({ error: "Invalid phone number or PIN" });
     return;
   }
 

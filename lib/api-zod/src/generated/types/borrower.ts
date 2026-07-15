@@ -9,10 +9,9 @@
 export interface Borrower {
   id: string;
   name: string;
-  email: string;
   /** @nullable */
   phone?: string | null;
-  /** Whether staff has set a login password for this borrower. */
-  hasPassword?: boolean;
+  /** Whether staff has set a login PIN for this borrower. */
+  hasPin?: boolean;
   createdAt: string;
 }

@@ -1,23 +1,26 @@
 import { randomUUID } from "node:crypto";
 import { appendRow, deleteRowAt, readTab, updateRowAt } from "../sheetsClient";
-import { hashPassword, normalizePhone } from "../authTokens";
+import { normalizePhone } from "../authTokens";
 
 const TAB = "Borrowers";
 // Email removed — phone is the primary identity for portal login.
-const HEADERS = ["id", "name", "phone", "passwordHash", "createdAt"];
+// `pin` is stored in plain text (intentionally — it's a staff-managed
+// 6-digit PIN, not a password) and is stripped out by toPublic() below
+// before ever reaching an API response, so the frontend never sees it.
+const HEADERS = ["id", "name", "phone", "pin", "createdAt"];
 
 export interface Borrower {
   id: string;
   name: string;
   phone: string;
-  passwordHash: string;
+  pin: string;
   createdAt: string;
 }
 
 export interface BorrowerInput {
   name: string;
   phone?: string | null;
-  password?: string | null;
+  pin?: string | null;
 }
 
 function fromRow(row: Record<string, string>): Borrower {
@@ -25,7 +28,7 @@ function fromRow(row: Record<string, string>): Borrower {
     id: row.id,
     name: row.name,
     phone: row.phone ?? "",
-    passwordHash: row.passwordHash ?? "",
+    pin: row.pin ?? "",
     createdAt: row.createdAt,
   };
 }
@@ -35,15 +38,15 @@ function toRow(borrower: Borrower): Record<string, string> {
     id: borrower.id,
     name: borrower.name,
     phone: borrower.phone,
-    passwordHash: borrower.passwordHash,
+    pin: borrower.pin,
     createdAt: borrower.createdAt,
   };
 }
 
-/** Shape returned to API clients — never leaks the password hash. */
+/** Shape returned to API clients — never leaks the plain-text PIN. */
 export function toPublic(borrower: Borrower) {
-  const { passwordHash, ...rest } = borrower;
-  return { ...rest, hasPassword: Boolean(passwordHash) };
+  const { pin, ...rest } = borrower;
+  return { ...rest, hasPin: Boolean(pin) };
 }
 
 export async function listBorrowers(): Promise<Borrower[]> {
@@ -74,7 +77,7 @@ export async function createBorrower(
     id: randomUUID(),
     name: input.name,
     phone: input.phone ?? "",
-    passwordHash: input.password ? await hashPassword(input.password) : "",
+    pin: input.pin ?? "",
     createdAt: new Date().toISOString(),
   };
   await appendRow(TAB, HEADERS, toRow(borrower));
@@ -92,9 +95,7 @@ export async function updateBorrower(
     ...fromRow(rows[idx]),
     ...(patch.name !== undefined ? { name: patch.name } : {}),
     ...(patch.phone !== undefined ? { phone: patch.phone ?? "" } : {}),
-    ...(patch.password
-      ? { passwordHash: await hashPassword(patch.password) }
-      : {}),
+    ...(patch.pin ? { pin: patch.pin } : {}),
   };
   await updateRowAt(TAB, rowNumbers[idx], HEADERS, toRow(updated));
   return updated;

@@ -1,20 +1,20 @@
 /**
- * Phone + password authentication.
+ * Phone + 6-digit PIN authentication.
  *
  * Sessions are stateless signed JWTs stored in an httpOnly cookie — no
  * server-side session store, which keeps this Vercel/serverless-friendly.
  *
  * The single owner/lender always logs in as admin via ADMIN_PHONE, checked
- * against the ADMIN_PASSWORD secret (never written to the spreadsheet).
- * Borrowers log in with their own phone number + a password that staff sets
- * for them (stored as a bcrypt hash in the Borrowers sheet tab — there is no
- * self-service signup).
+ * against the ADMIN_PIN secret (never written to the spreadsheet).
+ * Borrowers log in with their own phone number + a 6-digit PIN that staff
+ * sets for them (stored in plain text in the Borrowers sheet tab — there is
+ * no self-service signup or PIN reset; borrowers must contact staff).
  */
 import jwt from "jsonwebtoken";
-import bcrypt from "bcryptjs";
 
 export const SESSION_COOKIE = "borrowapp_session";
 export const ADMIN_PHONE = "8917656405";
+export const PIN_PATTERN = /^\d{6}$/;
 
 function getSessionSecret(): string {
   const secret = process.env.SESSION_SECRET;
@@ -56,16 +56,4 @@ export function extractPhoneFromWhatsapp(whatsapp: string | null | undefined): s
   if (!whatsapp) return "";
   const firstLine = whatsapp.split(/\n/)[0].trim();
   return normalizePhone(firstLine);
-}
-
-export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, 10);
-}
-
-export async function comparePassword(
-  password: string,
-  hash: string,
-): Promise<boolean> {
-  if (!hash) return false;
-  return bcrypt.compare(password, hash);
 }

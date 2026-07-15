@@ -9,13 +9,12 @@
 export interface BorrowerUpdate {
   /** @minLength 1 */
   name?: string;
-  email?: string;
   /** @nullable */
   phone?: string | null;
   /**
-     * Write-only. Set to update the borrower's login password.
-     * @minLength 4
+     * Write-only. Set to update the borrower's login PIN. Exactly 6 digits.
      * @nullable
+     * @pattern ^[0-9]{6}$
      */
-  password?: string | null;
+  pin?: string | null;
 }

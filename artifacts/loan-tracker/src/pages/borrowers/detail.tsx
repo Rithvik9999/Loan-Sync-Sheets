@@ -18,7 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "@/components/ui/link";
 import {
-  ArrowLeft, Edit, Trash2, Mail, Phone, Calendar, ChevronRight,
+  ArrowLeft, Edit, Trash2, Phone, Calendar, ChevronRight,
 } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { LoanStatusBadge } from "@/components/status-badges";
@@ -112,14 +112,6 @@ export default function BorrowerDetail() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-start gap-3">
-              <Mail className="h-4 w-4 mt-0.5 text-muted-foreground" />
-              <div>
-                <p className="text-sm font-medium">Email</p>
-                <a href={`mailto:${borrower.email}`} className="text-sm text-primary hover:underline">{borrower.email}</a>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
               <Phone className="h-4 w-4 mt-0.5 text-muted-foreground" />
               <div>
                 <p className="text-sm font-medium">Phone</p>
@@ -135,7 +127,7 @@ export default function BorrowerDetail() {
               </div>
             </div>
 
-            {borrower.hasPassword && (
+            {borrower.hasPin && (
               <div className="mt-4 pt-4 border-t border-border/50">
                 <Badge variant="secondary" className="bg-emerald-100 text-emerald-800 font-normal hover:bg-emerald-100 flex w-fit">
                   Portal Access Enabled

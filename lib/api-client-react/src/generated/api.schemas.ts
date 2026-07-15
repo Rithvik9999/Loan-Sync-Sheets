@@ -21,8 +21,13 @@ export const LoanStatus = {
 export interface LoginBody {
   /** @minLength 1 */
   phone: string;
-  /** @minLength 1 */
-  password: string;
+  /**
+     * Exactly 6 digits.
+     * @minLength 6
+     * @maxLength 6
+     * @pattern ^[0-9]{6}$
+     */
+  pin: string;
 }
 
 export type MeInfoRole = typeof MeInfoRole[keyof typeof MeInfoRole];
@@ -40,48 +45,43 @@ export interface MeInfo {
   /** @nullable */
   name?: string | null;
   /** @nullable */
-  email?: string | null;
-  /** @nullable */
   phone?: string | null;
 }
 
 export interface Borrower {
   id: string;
   name: string;
-  email: string;
   /** @nullable */
   phone?: string | null;
-  /** Whether staff has set a login password for this borrower. */
-  hasPassword?: boolean;
+  /** Whether staff has set a login PIN for this borrower. */
+  hasPin?: boolean;
   createdAt: string;
 }
 
 export interface BorrowerInput {
   /** @minLength 1 */
   name: string;
-  email: string;
   /** @nullable */
   phone?: string | null;
   /**
-     * Write-only. Sets the borrower's login password (min 4 chars).
-     * @minLength 4
+     * Write-only. Sets the borrower's login PIN. Exactly 6 digits. Stored in plain text in the spreadsheet (never returned by the API) — staff sets it and shares it with the borrower directly; there is no self-service reset.
      * @nullable
+     * @pattern ^[0-9]{6}$
      */
-  password?: string | null;
+  pin?: string | null;
 }
 
 export interface BorrowerUpdate {
   /** @minLength 1 */
   name?: string;
-  email?: string;
   /** @nullable */
   phone?: string | null;
   /**
-     * Write-only. Set to update the borrower's login password.
-     * @minLength 4
+     * Write-only. Set to update the borrower's login PIN. Exactly 6 digits.
      * @nullable
+     * @pattern ^[0-9]{6}$
      */
-  password?: string | null;
+  pin?: string | null;
 }
 
 export interface Loan {

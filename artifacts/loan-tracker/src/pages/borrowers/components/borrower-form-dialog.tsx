@@ -27,10 +27,19 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 
+/** Digits only, strips a leading 91/+91 country code, capped at 10 digits. */
+function sanitizePhoneInput(raw: string): string {
+  let digits = raw.replace(/\D/g, "");
+  if (digits.length > 10 && digits.startsWith("91")) {
+    digits = digits.slice(2);
+  }
+  return digits.slice(0, 10);
+}
+
 const borrowerSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  phone: z.string().min(1, "Phone number is required"),
-  password: z.string().min(4, "Password must be at least 4 characters").optional().or(z.literal("")),
+  phone: z.string().length(10, "Phone number must be exactly 10 digits"),
+  pin: z.string().regex(/^\d{6}$/, "PIN must be exactly 6 digits").optional().or(z.literal("")),
 });
 
 type BorrowerFormValues = z.infer<typeof borrowerSchema>;
@@ -52,8 +61,8 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
     resolver: zodResolver(borrowerSchema),
     defaultValues: {
       name: borrower?.name || defaultName || "",
-      phone: borrower?.phone || defaultPhone || "",
-      password: "",
+      phone: sanitizePhoneInput(borrower?.phone || defaultPhone || ""),
+      pin: "",
     },
   });
 
@@ -65,7 +74,7 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
     const payload = {
       name: data.name,
       phone: data.phone,
-      ...(data.password ? { password: data.password } : {}),
+      ...(data.pin ? { pin: data.pin } : {}),
     };
 
     if (isEditing) {
@@ -105,8 +114,8 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
     if (open) {
       form.reset({
         name: borrower?.name || defaultName || "",
-        phone: borrower?.phone || defaultPhone || "",
-        password: "",
+        phone: sanitizePhoneInput(borrower?.phone || defaultPhone || ""),
+        pin: "",
       });
     }
   }, [open, borrower, defaultName, defaultPhone, form]);
@@ -118,7 +127,7 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
           <DialogTitle>{isEditing ? "Edit Borrower" : "Set Up Portal Access"}</DialogTitle>
           <DialogDescription>
             {isEditing
-              ? "Update this borrower's login phone and optionally change their password."
+              ? "Update this borrower's login phone and optionally set a new PIN."
               : "Give this borrower a login so they can check their own loans."}
           </DialogDescription>
         </DialogHeader>
@@ -152,9 +161,15 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
                 <FormItem>
                   <FormLabel>Phone Number (Login ID)</FormLabel>
                   <FormControl>
-                    <Input placeholder="9876543210" {...field} />
+                    <Input
+                      placeholder="9876543210"
+                      inputMode="numeric"
+                      maxLength={10}
+                      {...field}
+                      onChange={(e) => field.onChange(sanitizePhoneInput(e.target.value))}
+                    />
                   </FormControl>
-                  <FormDescription>This is the borrower's login identifier.</FormDescription>
+                  <FormDescription>This is the borrower's 10-digit login identifier.</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -162,17 +177,23 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
 
             <FormField
               control={form.control}
-              name="password"
+              name="pin"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{isEditing ? "New Password (leave blank to keep)" : "Password"}</FormLabel>
+                  <FormLabel>{isEditing ? "New PIN (leave blank to keep)" : "PIN"}</FormLabel>
                   <FormControl>
                     <Input
                       type="password"
-                      placeholder={isEditing ? "Leave blank to keep existing" : "Min 4 characters"}
+                      inputMode="numeric"
+                      maxLength={6}
+                      placeholder={isEditing ? "Leave blank to keep existing" : "6-digit PIN"}
                       {...field}
+                      onChange={(e) => field.onChange(e.target.value.replace(/\D/g, "").slice(0, 6))}
                     />
                   </FormControl>
+                  <FormDescription>
+                    You set and share this PIN with the borrower directly — there's no self-service reset.
+                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
