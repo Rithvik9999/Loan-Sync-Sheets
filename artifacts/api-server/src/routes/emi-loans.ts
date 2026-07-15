@@ -21,12 +21,12 @@ router.get("/emi-loans", async (req, res): Promise<void> => {
     const myName = info.name.trim().toLowerCase();
     result = rows.filter((r) => {
       const rowPhone = extractPhoneFromWhatsapp(r.whatsapp);
-      if (rowPhone && myPhone) {
-        // Phone present on both sides — phone match is authoritative
-        return rowPhone === myPhone;
-      }
-      // Legacy fallback: no phone on the row (or borrower has no phone)
-      return r.name.trim().toLowerCase() === myName;
+      const phoneMatch = !!(rowPhone && myPhone && rowPhone === myPhone);
+      const nameMatch = r.name.trim().toLowerCase() === myName;
+      // Accept if phone matches OR name matches — a phone format mismatch
+      // between the sheet's WhatsApp column and the Borrowers tab should not
+      // silently hide loans that clearly belong to this borrower by name.
+      return phoneMatch || nameMatch;
     });
   }
 

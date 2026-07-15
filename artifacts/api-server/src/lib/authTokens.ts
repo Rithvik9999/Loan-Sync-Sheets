@@ -44,7 +44,12 @@ export function verifySession(token: string): SessionPayload | null {
 }
 
 export function normalizePhone(phone: string): string {
-  return phone.replace(/\D/g, "").replace(/^91(?=\d{10}$)/, "");
+  const digits = phone.replace(/\D/g, "");
+  // Strip country code 91 when followed by exactly 10 digits (e.g. 919876543210)
+  if (/^91\d{10}$/.test(digits)) return digits.slice(2);
+  // Strip leading 0 when followed by exactly 10 digits (e.g. 09876543210)
+  if (/^0\d{10}$/.test(digits)) return digits.slice(1);
+  return digits;
 }
 
 /**
