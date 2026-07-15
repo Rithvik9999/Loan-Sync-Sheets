@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "outputDirectory": "dist/public",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://loan-sync-sheets-api-server-65yqi0pox-burrow-app.vercel.app/api/:path*"
+    }
+  ]
+}
