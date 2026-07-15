@@ -34,4 +34,11 @@ app.use(cookieParser());
 
 app.use("/api", router);
 
+// Root catch-all — Vercel routes every path here; respond with a simple
+// status so hitting the deployment URL directly gives something useful
+// instead of an Express "Cannot GET /" 404.
+app.get("/", (_req, res) => {
+  res.json({ status: "ok", message: "BorrowApp API — use /api/* endpoints." });
+});
+
 export default app;
