@@ -22,7 +22,10 @@ const COOKIE_OPTIONS = {
 router.post("/auth/login", async (req, res): Promise<void> => {
   const parsed = LoginBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    const firstIssue = parsed.error.issues[0];
+    res.status(400).json({
+      error: firstIssue ? `${firstIssue.path.join(".") || "field"}: ${firstIssue.message}` : "Invalid request",
+    });
     return;
   }
   const phone = normalizePhone(parsed.data.phone);

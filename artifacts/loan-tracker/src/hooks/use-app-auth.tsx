@@ -87,7 +87,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "Login failed" }));
-      throw new Error(err.error || "Invalid phone number or PIN");
+      const msg = typeof err?.error === "string" ? err.error : "Login failed. Please try again.";
+      throw new Error(msg || "Invalid phone number or PIN");
     }
     const data = await res.json();
     setState({
