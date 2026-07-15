@@ -4,7 +4,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://loan-sync-sheets-api-server-65yqi0pox-burrow-app.vercel.app/api/:path*"
+      "destination": "https://loan-sync-sheets-api-server.vercel.app/api/:path*"
     },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
