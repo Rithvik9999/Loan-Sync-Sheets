@@ -5,3 +5,5 @@
 - [Google Sheets grid row limits](sheets-grid-row-limit.md) — appending past a tab's physical `gridProperties.rowCount` fails; grow the grid first so array formulas can spill into the new row.
 - [Raw-imported repl artifact registration](raw-import-artifact-registration.md) — a repl with full artifact.toml files but empty `listArtifacts()`/no workflows is a raw import; the platform auto-registers it shortly, no need to force a migration.
 - [Sheet array formulas need iterative calculation](sheets-self-referencing-formulas.md) — "keep existing value" columns self-reference their own column inside MAP/ARRAYFORMULA; this only works if Sheets' iterative calculation is enabled, and copy-paste errors here silently leak the wrong column's value.
+- [Orval barrel re-export conflict](orval-barrel-reexport-conflict.md) — api-spec codegen re-appends duplicate wildcard exports to lib/api-zod/src/index.ts; strip them after every codegen run or typecheck breaks.
+- [Sheets column rename is positional](sheets-column-rename.md) — sheetsClient maps by header array order, not sheet header text; renaming a field in code needs no data migration.
