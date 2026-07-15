@@ -64,7 +64,7 @@ export default function LoanDetail() {
         },
         onError: () => {
           toast({ variant: "destructive", title: "Cannot delete", description: "An error occurred." });
-          setIsDeleteOpen(false);
+          setIsDeleteStep2Open(false);
         },
       },
     );
@@ -93,7 +93,17 @@ export default function LoanDetail() {
     { label: "Late Days", value: loan.lateDays != null ? String(loan.lateDays) : "—" },
     { label: "Late Fees", value: loan.lateFees != null ? formatCurrency(loan.lateFees) : "—" },
     ...(isStaff
-      ? [{ label: "Profit", value: loan.profit != null ? formatCurrency(loan.profit) : "—" }]
+      ? [
+          { label: "Profit", value: loan.profit != null ? formatCurrency(loan.profit) : "—" },
+          {
+            label: "Discount / Charges",
+            value: loan.discountOrCharges
+              ? (loan.discountOrCharges < 0
+                  ? `−${formatCurrency(Math.abs(loan.discountOrCharges))} (discount)`
+                  : `+${formatCurrency(loan.discountOrCharges)} (charge)`)
+              : "—"
+          },
+        ]
       : []),
   ];
 

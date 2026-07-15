@@ -12,7 +12,7 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { format } from "date-fns";
+import { format, addDays, differenceInCalendarDays, parseISO } from "date-fns";
 
 import {
   Dialog,
@@ -35,7 +35,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, ChevronsUpDown, Check, Calculator } from "lucide-react";
+import { Loader2, ChevronsUpDown, Check, Calculator, Tag } from "lucide-react";
 import { useLocation } from "wouter";
 import {
   Command,
@@ -49,6 +49,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn, formatCurrency } from "@/lib/utils";
 import { estimateFinalAmount } from "@/lib/early-payment-discount";
 
@@ -57,8 +58,10 @@ const loanSchema = z.object({
   transactionDate: z.string().min(1, "Transaction date is required"),
   principal: z.coerce.number().min(0.01, "Principal must be greater than 0"),
   tenureDays: z.coerce.number().int().min(1, "Tenure must be at least 1 day"),
+  returnDate: z.string().optional(),
   whatsapp: z.string().optional(),
-  discountOrCharges: z.coerce.number().optional(),
+  discountOrChargesAbs: z.coerce.number().min(0).optional(),
+  isDiscount: z.boolean().optional(),
   notes: z.string().optional(),
   status: z.enum(["Pending", "Clear", "Temp"]).optional(),
 });
@@ -85,27 +88,6 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
     query: { queryKey: getListLoansQueryKey(), enabled: open },
   });
 
-  const borrowerNames: { name: string; phone: string }[] = (() => {
-    const map = new Map<string, string>();
-    for (const l of loans ?? []) {
-      const key = l.name.trim().toLowerCase();
-      if (!map.has(key)) {
-        const phone = (l.whatsapp ?? "").split("\n")[0].trim();
-        map.set(key, phone);
-      }
-    }
-    return Array.from(map.entries())
-      .map(([, phone], i) => ({
-        name: Array.from(map.keys())[i]
-          .split(" ")
-          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(" "),
-        phone,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  })();
-
-  // Re-derive to get properly-cased names from original loan data
   const uniqueNames: { name: string; phone: string }[] = (() => {
     const seen = new Set<string>();
     const result: { name: string; phone: string }[] = [];
@@ -120,30 +102,93 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
     return result.sort((a, b) => a.name.localeCompare(b.name));
   })();
 
-  const defaults = (): LoanFormValues => ({
-    name: loan?.name || defaultName || "",
-    transactionDate: loan?.transactionDate || format(new Date(), "yyyy-MM-dd"),
-    principal: loan?.principal || 0,
-    tenureDays: loan?.tenureDays || 30,
-    whatsapp: loan?.whatsapp || "",
-    discountOrCharges: loan?.discountOrCharges || 0,
-    notes: loan?.notes || "",
-    status: loan?.status || "Pending",
-  });
+  const getDefaults = (): LoanFormValues => {
+    const existingDiscount = loan?.discountOrCharges ?? 0;
+    return {
+      name: loan?.name || defaultName || "",
+      transactionDate: loan?.transactionDate || format(new Date(), "yyyy-MM-dd"),
+      principal: loan?.principal || 0,
+      tenureDays: loan?.tenureDays || 30,
+      returnDate: loan?.returnDate || "",
+      whatsapp: loan?.whatsapp || "",
+      discountOrChargesAbs: existingDiscount !== 0 ? Math.abs(existingDiscount) : 0,
+      isDiscount: existingDiscount < 0,
+      notes: loan?.notes || "",
+      status: loan?.status || "Pending",
+    };
+  };
 
   const form = useForm<LoanFormValues>({
     resolver: zodResolver(loanSchema),
-    defaultValues: defaults(),
+    defaultValues: getDefaults(),
   });
 
   const createLoan = useCreateLoan();
   const updateLoan = useUpdateLoan();
   const isPending = createLoan.isPending || updateLoan.isPending;
 
+  // Watch fields for cross-calculation
+  const watchedTransactionDate = form.watch("transactionDate");
+  const watchedTenureDays = form.watch("tenureDays");
+  const watchedReturnDate = form.watch("returnDate");
+
+  // When tenureDays changes, update returnDate
+  const handleTenureChange = (value: string) => {
+    form.setValue("tenureDays", Number(value) || 1);
+    const txDate = form.getValues("transactionDate");
+    if (txDate && value && Number(value) > 0) {
+      try {
+        const computed = addDays(parseISO(txDate), Number(value));
+        form.setValue("returnDate", format(computed, "yyyy-MM-dd"), { shouldDirty: false });
+      } catch {}
+    }
+  };
+
+  // When returnDate changes, update tenureDays
+  const handleReturnDateChange = (value: string) => {
+    form.setValue("returnDate", value);
+    const txDate = form.getValues("transactionDate");
+    if (txDate && value) {
+      try {
+        const diff = differenceInCalendarDays(parseISO(value), parseISO(txDate));
+        if (diff > 0) {
+          form.setValue("tenureDays", diff, { shouldDirty: false });
+        }
+      } catch {}
+    }
+  };
+
+  // When transactionDate changes, keep returnDate consistent with tenure
+  const handleTransactionDateChange = (value: string) => {
+    form.setValue("transactionDate", value);
+    const tenure = form.getValues("tenureDays");
+    if (value && tenure && tenure > 0) {
+      try {
+        const computed = addDays(parseISO(value), tenure);
+        form.setValue("returnDate", format(computed, "yyyy-MM-dd"), { shouldDirty: false });
+      } catch {}
+    }
+  };
+
   function onSubmit(data: LoanFormValues) {
+    const discountOrCharges = data.discountOrChargesAbs
+      ? (data.isDiscount ? -Math.abs(data.discountOrChargesAbs) : Math.abs(data.discountOrChargesAbs))
+      : 0;
+
+    const submitData = {
+      name: data.name,
+      transactionDate: data.transactionDate,
+      principal: data.principal,
+      tenureDays: data.tenureDays,
+      whatsapp: data.whatsapp,
+      discountOrCharges,
+      notes: data.notes,
+      status: data.status,
+    };
+
     if (isEditing) {
       updateLoan.mutate(
-        { id: loan.id, data },
+        { id: loan.id, data: submitData },
         {
           onSuccess: (updatedLoan) => {
             queryClient.setQueryData(getGetLoanQueryKey(loan.id), updatedLoan);
@@ -158,7 +203,7 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
       );
     } else {
       createLoan.mutate(
-        { data },
+        { data: submitData },
         {
           onSuccess: (newLoan) => {
             queryClient.invalidateQueries({ queryKey: getListLoansQueryKey() });
@@ -177,7 +222,17 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
 
   useEffect(() => {
     if (open) {
-      form.reset(defaults());
+      const defaults = getDefaults();
+      // Compute returnDate from transactionDate + tenureDays if not set
+      if (!defaults.returnDate && defaults.transactionDate && defaults.tenureDays) {
+        try {
+          defaults.returnDate = format(
+            addDays(parseISO(defaults.transactionDate), defaults.tenureDays),
+            "yyyy-MM-dd"
+          );
+        } catch {}
+      }
+      form.reset(defaults);
       setNameSearch("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -189,13 +244,14 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
   );
 
   const watchedPrincipal = form.watch("principal");
-  const watchedTenure = form.watch("tenureDays");
   const calcPreview = useMemo(() => {
     const p = Number(watchedPrincipal);
-    const t = Number(watchedTenure);
+    const t = Number(watchedTenureDays);
     if (!p || !t || p <= 0 || t <= 0) return null;
     return estimateFinalAmount({ principal: p, tenureDays: t });
-  }, [watchedPrincipal, watchedTenure]);
+  }, [watchedPrincipal, watchedTenureDays]);
+
+  const isDiscountChecked = form.watch("isDiscount");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -260,7 +316,6 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                                 value={b.name}
                                 onSelect={(val) => {
                                   field.onChange(val);
-                                  // Also auto-fill whatsapp if empty
                                   if (!form.getValues("whatsapp") && b.phone) {
                                     form.setValue("whatsapp", b.phone);
                                   }
@@ -311,36 +366,6 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
 
               <FormField
                 control={form.control}
-                name="tenureDays"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Tenure (Days)</FormLabel>
-                    <FormControl>
-                      <Input type="number" step="1" min="1" placeholder="30" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="transactionDate"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Transaction Date</FormLabel>
-                    <FormControl>
-                      <Input type="date" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
                 name="whatsapp"
                 render={({ field }) => (
                   <FormItem>
@@ -354,20 +379,121 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
               />
             </div>
 
+            {/* Transaction Date */}
             <FormField
               control={form.control}
-              name="discountOrCharges"
+              name="transactionDate"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Discount / Charges (₹)</FormLabel>
+                  <FormLabel>Transaction Date</FormLabel>
                   <FormControl>
-                    <Input type="number" step="0.01" placeholder="0" {...field} />
+                    <Input
+                      type="date"
+                      {...field}
+                      onChange={(e) => handleTransactionDateChange(e.target.value)}
+                    />
                   </FormControl>
-                  <FormDescription>Negative for a discount, positive for an extra charge.</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
+
+            {/* Tenure + Return Date — linked pair */}
+            <div className="grid grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="tenureDays"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Tenure (Days)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        step="1"
+                        min="1"
+                        placeholder="30"
+                        {...field}
+                        onChange={(e) => handleTenureChange(e.target.value)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="returnDate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Return Date</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="date"
+                        {...field}
+                        onChange={(e) => handleReturnDateChange(e.target.value)}
+                      />
+                    </FormControl>
+                    <FormDescription className="text-[10px]">Auto-calculated from tenure</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            {/* Discount / Charges with checkbox */}
+            <div className="space-y-2">
+              <FormLabel>Discount / Charges (₹)</FormLabel>
+              <div className="flex items-center gap-3">
+                <FormField
+                  control={form.control}
+                  name="discountOrChargesAbs"
+                  render={({ field }) => (
+                    <FormItem className="flex-1 space-y-0">
+                      <FormControl>
+                        <div className="relative">
+                          {isDiscountChecked && (
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-emerald-600 font-medium pointer-events-none">−</span>
+                          )}
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="0"
+                            className={isDiscountChecked ? "pl-6" : ""}
+                            {...field}
+                          />
+                        </div>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="isDiscount"
+                  render={({ field }) => (
+                    <FormItem className="flex items-center gap-2 space-y-0 shrink-0">
+                      <FormControl>
+                        <Checkbox
+                          checked={!!field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                      <FormLabel className="text-sm font-normal cursor-pointer flex items-center gap-1 mb-0">
+                        <Tag className="h-3.5 w-3.5 text-emerald-600" />
+                        Is Discount
+                      </FormLabel>
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {isDiscountChecked
+                  ? "Will be recorded as a negative value (discount reduces final amount)."
+                  : "Positive value adds extra charges to the final amount."}
+              </p>
+            </div>
 
             {isEditing && (
               <FormField

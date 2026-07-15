@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { PieChart, Pie, Cell } from "recharts";
+import { addDays, differenceInCalendarDays, parseISO, format as dateFnsFormat } from "date-fns";
 import { Link } from "@/components/ui/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -145,6 +146,7 @@ const loanRequestSchema = z.object({
     .number({ invalid_type_error: "Enter a valid tenure" })
     .int()
     .positive("Tenure must be at least 1 day"),
+  returnDate: z.string().optional(),
   purpose: z.string().optional(),
 });
 
@@ -155,23 +157,34 @@ function LoanRequestDialog({
   onOpenChange,
   borrowerName,
   borrowerPhone,
+  availableCredit,
+  creditLimit,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   borrowerName: string;
   borrowerPhone: string;
+  availableCredit: number | null;
+  creditLimit: number | null;
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const createLoanRequest = useCreateLoanRequest();
+  const today = dateFnsFormat(new Date(), "yyyy-MM-dd");
 
   const form = useForm<LoanRequestValues>({
     resolver: zodResolver(loanRequestSchema),
-    defaultValues: { amount: undefined, tenureDays: undefined, purpose: "" },
+    defaultValues: {
+      amount: undefined,
+      tenureDays: 30,
+      returnDate: dateFnsFormat(addDays(new Date(), 30), "yyyy-MM-dd"),
+      purpose: "",
+    },
   });
 
   const watchedAmount = form.watch("amount");
   const watchedTenure = form.watch("tenureDays");
+
   const loanPreview = useMemo(() => {
     const p = Number(watchedAmount);
     const t = Number(watchedTenure);
@@ -179,7 +192,41 @@ function LoanRequestDialog({
     return estimateFinalAmount({ principal: p, tenureDays: t });
   }, [watchedAmount, watchedTenure]);
 
+  // Credit limit validation
+  const creditLimitError = useMemo(() => {
+    const amt = Number(watchedAmount);
+    if (!amt || availableCredit == null) return null;
+    if (amt > availableCredit) {
+      return `Amount exceeds your available credit of ${formatCurrency(availableCredit)}`;
+    }
+    return null;
+  }, [watchedAmount, availableCredit]);
+
+  const handleTenureChange = (value: string) => {
+    form.setValue("tenureDays", Number(value) || 1);
+    const days = Number(value);
+    if (days > 0) {
+      try {
+        form.setValue("returnDate", dateFnsFormat(addDays(new Date(), days), "yyyy-MM-dd"), { shouldDirty: false });
+      } catch {}
+    }
+  };
+
+  const handleReturnDateChange = (value: string) => {
+    form.setValue("returnDate", value);
+    if (value) {
+      try {
+        const diff = differenceInCalendarDays(parseISO(value), new Date());
+        if (diff > 0) form.setValue("tenureDays", diff, { shouldDirty: false });
+      } catch {}
+    }
+  };
+
   function onSubmit(data: LoanRequestValues) {
+    if (creditLimitError) {
+      toast({ variant: "destructive", title: "Credit limit exceeded", description: creditLimitError });
+      return;
+    }
     createLoanRequest.mutate(
       {
         data: {
@@ -205,7 +252,12 @@ function LoanRequestDialog({
             tenure: `${data.tenureDays} days`,
             purpose: data.purpose,
           });
-          form.reset();
+          form.reset({
+            amount: undefined,
+            tenureDays: 30,
+            returnDate: dateFnsFormat(addDays(new Date(), 30), "yyyy-MM-dd"),
+            purpose: "",
+          });
           onOpenChange(false);
         },
         onError: (err: unknown) => {
@@ -226,6 +278,23 @@ function LoanRequestDialog({
             Fill in the details. Admin will be notified via WhatsApp.
           </DialogDescription>
         </DialogHeader>
+
+        {/* Credit limit summary */}
+        {creditLimit != null && (
+          <div className={`rounded-lg px-3 py-2.5 text-sm ${availableCredit != null && availableCredit <= 0 ? "bg-destructive/10 border border-destructive/30" : "bg-muted/40 border border-border/60"}`}>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground text-xs">Available Credit</span>
+              <span className={`font-bold font-numeric ${availableCredit != null && availableCredit <= 0 ? "text-destructive" : "text-foreground"}`}>
+                {formatCurrency(availableCredit ?? 0)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between mt-0.5">
+              <span className="text-muted-foreground text-xs">Total Limit</span>
+              <span className="text-xs text-muted-foreground font-numeric">{formatCurrency(creditLimit)}</span>
+            </div>
+          </div>
+        )}
+
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(onSubmit)}
@@ -245,32 +314,61 @@ function LoanRequestDialog({
                       step="1"
                       {...field}
                       value={field.value ?? ""}
+                      className={creditLimitError ? "border-destructive focus-visible:ring-destructive" : ""}
                     />
                   </FormControl>
+                  {creditLimitError && (
+                    <p className="text-xs text-destructive font-medium mt-1">{creditLimitError}</p>
+                  )}
                   <FormMessage />
                 </FormItem>
               )}
             />
-            <FormField
-              control={form.control}
-              name="tenureDays"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Tenure (days)</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="number"
-                      placeholder="e.g. 30"
-                      min="1"
-                      step="1"
-                      {...field}
-                      value={field.value ?? ""}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+
+            {/* Tenure + Return Date — linked pair */}
+            <div className="grid grid-cols-2 gap-3">
+              <FormField
+                control={form.control}
+                name="tenureDays"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Tenure (days)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        placeholder="30"
+                        min="1"
+                        step="1"
+                        {...field}
+                        value={field.value ?? ""}
+                        onChange={(e) => handleTenureChange(e.target.value)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="returnDate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Return By</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="date"
+                        min={today}
+                        {...field}
+                        value={field.value ?? ""}
+                        onChange={(e) => handleReturnDateChange(e.target.value)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
             <FormField
               control={form.control}
               name="purpose"
@@ -320,7 +418,7 @@ function LoanRequestDialog({
               <Button
                 type="submit"
                 className="w-full sm:w-auto"
-                disabled={createLoanRequest.isPending}
+                disabled={createLoanRequest.isPending || !!creditLimitError}
               >
                 {createLoanRequest.isPending && (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1902,142 +2000,79 @@ export default function Portal() {
         </div>
       </div>
 
-      {/* Summary Cards */}
+      {/* Summary Cards — 3-column on mobile */}
       {isLoading ? (
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <Skeleton className="h-20 w-full rounded-xl" />
-            <Skeleton className="h-20 w-full rounded-xl" />
-          </div>
-          <Skeleton className="h-28 w-full rounded-xl" />
+        <div className="grid grid-cols-3 gap-2">
+          <Skeleton className="h-24 w-full rounded-xl" />
+          <Skeleton className="h-24 w-full rounded-xl" />
+          <Skeleton className="h-24 w-full rounded-xl" />
         </div>
       ) : (
-        <div className="space-y-3">
-          {/* Count cards */}
-          <div className="grid grid-cols-2 gap-3">
-            <Card className="shadow-sm border-border/60">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1 pt-3 px-3">
-                <CardTitle className="text-xs font-medium text-muted-foreground leading-tight">
-                  Active Loans
-                </CardTitle>
-                <CreditCard className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              </CardHeader>
-              <CardContent className="px-3 pb-3">
-                <div className="text-2xl font-bold font-numeric">
-                  {activeLoans.length}
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="shadow-sm border-border/60">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1 pt-3 px-3">
-                <CardTitle className="text-xs font-medium text-muted-foreground leading-tight">
-                  Active EMIs
-                </CardTitle>
-                <CalendarClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              </CardHeader>
-              <CardContent className="px-3 pb-3">
-                <div className="text-2xl font-bold font-numeric">
-                  {activeEmi.length}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+        <div className="grid grid-cols-3 gap-2">
+          {/* Loans count */}
+          <Card className="shadow-sm border-border/60">
+            <CardContent className="px-2 py-3 flex flex-col items-center justify-center text-center gap-1">
+              <CreditCard className="h-4 w-4 text-muted-foreground" />
+              <div className="text-2xl font-bold font-numeric leading-none">{activeLoans.length}</div>
+              <p className="text-[10px] text-muted-foreground leading-tight">Loans</p>
+            </CardContent>
+          </Card>
 
-          {/* Credit limit utilisation card */}
-          <Card
-            className={`shadow-sm ${isOverLimit ? "border-destructive/40 bg-destructive/5" : "border-border/60"}`}
-          >
-            <CardContent className="px-4 py-3">
-              <div className="flex items-center gap-4">
-                {/* Donut chart */}
-                <div className="relative shrink-0" style={{ width: 84, height: 84 }}>
-                  <PieChart width={84} height={84}>
-                    <Pie
-                      data={
-                        creditLimit != null && creditLimit > 0
-                          ? [
-                              { name: "Used", value: Math.min(usedPrincipal, creditLimit) },
-                              { name: "Available", value: Math.max(creditLimit - usedPrincipal, 0) },
-                              ...(isOverLimit
-                                ? [{ name: "Over", value: usedPrincipal - creditLimit }]
-                                : []),
-                            ]
-                          : usedPrincipal > 0
-                          ? [{ name: "Used", value: 1 }]
-                          : [{ name: "Empty", value: 1 }]
-                      }
-                      cx={38}
-                      cy={38}
-                      innerRadius={26}
-                      outerRadius={38}
-                      strokeWidth={0}
-                      startAngle={90}
-                      endAngle={-270}
-                      dataKey="value"
-                    >
-                      {creditLimit != null && creditLimit > 0 ? (
-                        <>
-                          <Cell fill={isOverLimit ? "hsl(var(--destructive))" : "hsl(var(--primary))"} />
-                          <Cell fill="hsl(var(--muted))" />
-                          {isOverLimit && <Cell fill="hsl(var(--destructive) / 0.4)" />}
-                        </>
-                      ) : usedPrincipal > 0 ? (
-                        <Cell fill="hsl(var(--primary))" />
-                      ) : (
+          {/* EMI count */}
+          <Card className="shadow-sm border-border/60">
+            <CardContent className="px-2 py-3 flex flex-col items-center justify-center text-center gap-1">
+              <CalendarClock className="h-4 w-4 text-muted-foreground" />
+              <div className="text-2xl font-bold font-numeric leading-none">{activeEmi.length}</div>
+              <p className="text-[10px] text-muted-foreground leading-tight">EMI</p>
+            </CardContent>
+          </Card>
+
+          {/* Credit Limit — mini donut */}
+          <Card className={`shadow-sm ${isOverLimit ? "border-destructive/40 bg-destructive/5" : "border-border/60"}`}>
+            <CardContent className="px-2 py-3 flex flex-col items-center justify-center text-center gap-1">
+              {/* Donut */}
+              <div className="relative shrink-0" style={{ width: 44, height: 44 }}>
+                <PieChart width={44} height={44}>
+                  <Pie
+                    data={
+                      creditLimit != null && creditLimit > 0
+                        ? [
+                            { name: "Used", value: Math.min(usedPrincipal, creditLimit) },
+                            { name: "Available", value: Math.max(creditLimit - usedPrincipal, 0) },
+                          ]
+                        : [{ name: "Empty", value: 1 }]
+                    }
+                    cx={20}
+                    cy={20}
+                    innerRadius={13}
+                    outerRadius={20}
+                    strokeWidth={0}
+                    startAngle={90}
+                    endAngle={-270}
+                    dataKey="value"
+                  >
+                    {creditLimit != null && creditLimit > 0 ? (
+                      <>
+                        <Cell fill={isOverLimit ? "hsl(var(--destructive))" : "#22c55e"} />
                         <Cell fill="hsl(var(--muted))" />
-                      )}
-                    </Pie>
-                  </PieChart>
-                  {/* Centre label */}
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <span
-                      className={`text-xs font-bold font-numeric ${isOverLimit ? "text-destructive" : "text-foreground"}`}
-                    >
-                      {usedPct != null ? `${usedPct}%` : "—"}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Stats */}
-                <div className="flex-1 min-w-0 space-y-2">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    Credit Limit
-                  </p>
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                    <div>
-                      <p className="text-[10px] text-muted-foreground">Used</p>
-                      <p
-                        className={`text-sm font-bold font-numeric leading-tight ${isOverLimit ? "text-destructive" : ""}`}
-                      >
-                        {formatCurrency(usedPrincipal)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-muted-foreground">
-                        {creditLimit != null ? "Available" : "Limit"}
-                      </p>
-                      <p className="text-sm font-bold font-numeric leading-tight">
-                        {creditLimit != null
-                          ? formatCurrency(availableCredit ?? 0)
-                          : <span className="text-muted-foreground font-normal text-xs">No limit set</span>}
-                      </p>
-                    </div>
-                  </div>
-                  {creditLimit != null && (
-                    <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${isOverLimit ? "bg-destructive" : "bg-primary"}`}
-                        style={{ width: `${Math.min((usedPrincipal / creditLimit) * 100, 100)}%` }}
-                      />
-                    </div>
-                  )}
-                  {creditLimit != null && (
-                    <p className="text-[10px] text-muted-foreground">
-                      of {formatCurrency(creditLimit)} total limit
-                    </p>
-                  )}
+                      </>
+                    ) : (
+                      <Cell fill="hsl(var(--muted))" />
+                    )}
+                  </Pie>
+                </PieChart>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <span className={`text-[9px] font-bold font-numeric leading-none ${isOverLimit ? "text-destructive" : "text-foreground"}`}>
+                    {usedPct != null ? `${usedPct}%` : "—"}
+                  </span>
                 </div>
               </div>
+              <p className="text-[10px] text-muted-foreground leading-tight">Credit</p>
+              {creditLimit != null && (
+                <p className={`text-[9px] font-numeric leading-none ${isOverLimit ? "text-destructive font-semibold" : "text-muted-foreground"}`}>
+                  {formatCurrency(availableCredit ?? 0)} free
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -2135,7 +2170,7 @@ export default function Portal() {
 
         {/* ── Paid Tab ── */}
         <TabsContent value="paid" className="mt-4">
-          <PaidTab loans={loans ?? []} emiLoans={emiLoans ?? []} isLoading={isLoading || isLoadingEmi} />
+          <AlreadyPaidSection loans={loans ?? []} emiLoans={emiLoans ?? []} />
         </TabsContent>
       </Tabs>
 
@@ -2144,6 +2179,8 @@ export default function Portal() {
         onOpenChange={setLoanRequestOpen}
         borrowerName={name ?? ""}
         borrowerPhone={borrowerPhone}
+        availableCredit={availableCredit}
+        creditLimit={creditLimit}
       />
       <EmiRequestDialog
         open={emiRequestOpen}

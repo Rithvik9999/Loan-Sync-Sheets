@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus, Search, ChevronRight, CalendarClock, ArrowUpDown, CheckSquare, CheckCircle2, Loader2 } from "lucide-react";
+import { Plus, Search, ChevronRight, CalendarClock, CheckSquare, CheckCircle2, Loader2 } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { Input } from "@/components/ui/input";
@@ -23,8 +23,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import EmiLoanFormDialog, { EmiLoan, EMI_LOANS_QUERY_KEY, fetchEmiLoans, updateEmiLoan } from "./components/emi-loan-form-dialog";
-
-type SortField = "next-payment-asc" | "date-desc" | "date-asc" | "name-asc" | "name-desc" | "amount-desc" | "amount-asc";
 
 function EmiStatusBadge({ status }: { status: string }) {
   switch (status) {
@@ -161,7 +159,6 @@ function BulkMarkPaidDialog({
 export default function EmiLoansList() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [sortField, setSortField] = useState<SortField>("next-payment-asc");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkPaidOpen, setBulkPaidOpen] = useState(false);
@@ -173,6 +170,7 @@ export default function EmiLoansList() {
 
   const now = new Date();
 
+  // Sort by latest transaction date (newest first), no sort dropdown
   const filtered = loans
     ?.filter((l) => {
       const nameMatch = l.name.toLowerCase().includes(search.toLowerCase());
@@ -180,34 +178,9 @@ export default function EmiLoansList() {
       return nameMatch && statusMatch;
     })
     .sort((a, b) => {
-      switch (sortField) {
-        case "next-payment-asc": {
-          // Overdue (past) payments first, then soonest upcoming
-          const da = a.nextPaymentDate ? new Date(a.nextPaymentDate).getTime() : Infinity;
-          const db = b.nextPaymentDate ? new Date(b.nextPaymentDate).getTime() : Infinity;
-          return da - db;
-        }
-        case "date-desc": {
-          const da = a.transactionDate ? new Date(a.transactionDate).getTime() : 0;
-          const db = b.transactionDate ? new Date(b.transactionDate).getTime() : 0;
-          return db - da;
-        }
-        case "date-asc": {
-          const da = a.transactionDate ? new Date(a.transactionDate).getTime() : 0;
-          const db = b.transactionDate ? new Date(b.transactionDate).getTime() : 0;
-          return da - db;
-        }
-        case "name-asc":
-          return a.name.localeCompare(b.name);
-        case "name-desc":
-          return b.name.localeCompare(a.name);
-        case "amount-desc":
-          return (b.principal ?? 0) - (a.principal ?? 0);
-        case "amount-asc":
-          return (a.principal ?? 0) - (b.principal ?? 0);
-        default:
-          return 0;
-      }
+      const da = a.transactionDate ? new Date(a.transactionDate).getTime() : 0;
+      const db = b.transactionDate ? new Date(b.transactionDate).getTime() : 0;
+      return db - da;
     });
 
   const toggleRow = (id: string) => {
@@ -292,20 +265,6 @@ export default function EmiLoansList() {
                 <SelectItem value="Pending">Pending</SelectItem>
                 <SelectItem value="Clear">Clear</SelectItem>
                 <SelectItem value="Temp">Temp</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={sortField} onValueChange={(v) => setSortField(v as SortField)}>
-              <SelectTrigger className="bg-background w-full sm:w-56">
-                <SelectValue placeholder="Sort by…" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="next-payment-asc">Next Payment (soonest/overdue first)</SelectItem>
-                <SelectItem value="date-desc">Date (newest first)</SelectItem>
-                <SelectItem value="date-asc">Date (oldest first)</SelectItem>
-                <SelectItem value="name-asc">Name (A → Z)</SelectItem>
-                <SelectItem value="name-desc">Name (Z → A)</SelectItem>
-                <SelectItem value="amount-desc">Amount (high → low)</SelectItem>
-                <SelectItem value="amount-asc">Amount (low → high)</SelectItem>
               </SelectContent>
             </Select>
           </div>

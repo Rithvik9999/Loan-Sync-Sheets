@@ -89,7 +89,7 @@ export default function EmiLoanDetail() {
       setLocation("/emi-loans");
     } catch (err) {
       toast({ variant: "destructive", title: "Cannot delete", description: err instanceof Error ? err.message : "An error occurred." });
-      setIsDeleteOpen(false);
+      setIsDeleteStep2Open(false);
     } finally {
       setIsDeleting(false);
     }

@@ -24,7 +24,6 @@ import {
   Search,
   ChevronRight,
   CreditCard,
-  ArrowUpDown,
   CheckSquare,
   CheckCircle2,
   Loader2,
@@ -57,15 +56,6 @@ import LoanFormDialog from "./components/loan-form-dialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-
-type SortField =
-  | "due-soonest"
-  | "date-desc"
-  | "date-asc"
-  | "name-asc"
-  | "name-desc"
-  | "amount-desc"
-  | "amount-asc";
 
 // ─── Bulk Mark as Paid Dialog ─────────────────────────────────────────────────
 
@@ -321,7 +311,6 @@ function LoansTable({
 export default function LoansList() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [sortField, setSortField] = useState<SortField>("due-soonest");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkPaidOpen, setBulkPaidOpen] = useState(false);
@@ -376,7 +365,7 @@ export default function LoansList() {
     [allLoans],
   );
 
-  // Main "Loans" tab filtered list (excludes archived)
+  // Main "Loans" tab — sorted by latest input date (transactionDate), excludes archived
   const filtered = useMemo(
     () =>
       (allLoans ?? [])
@@ -389,40 +378,12 @@ export default function LoansList() {
         )
         .filter((l) => l.name.toLowerCase().includes(search.toLowerCase()))
         .sort((a, b) => {
-          switch (sortField) {
-            case "due-soonest": {
-              const overdueA = a.lateDays ?? 0;
-              const overdueB = b.lateDays ?? 0;
-              if (overdueA > 0 || overdueB > 0) {
-                if (overdueA !== overdueB) return overdueB - overdueA;
-              }
-              const dueA = a.returnDate ? new Date(a.returnDate).getTime() : Infinity;
-              const dueB = b.returnDate ? new Date(b.returnDate).getTime() : Infinity;
-              return dueA - dueB;
-            }
-            case "date-desc": {
-              const da = a.transactionDate ? new Date(a.transactionDate).getTime() : 0;
-              const db = b.transactionDate ? new Date(b.transactionDate).getTime() : 0;
-              return db - da;
-            }
-            case "date-asc": {
-              const da = a.transactionDate ? new Date(a.transactionDate).getTime() : 0;
-              const db = b.transactionDate ? new Date(b.transactionDate).getTime() : 0;
-              return da - db;
-            }
-            case "name-asc":
-              return a.name.localeCompare(b.name);
-            case "name-desc":
-              return b.name.localeCompare(a.name);
-            case "amount-desc":
-              return (b.finalAmount ?? 0) - (a.finalAmount ?? 0);
-            case "amount-asc":
-              return (a.finalAmount ?? 0) - (b.finalAmount ?? 0);
-            default:
-              return 0;
-          }
+          // Always sort by latest transaction date first
+          const da = a.transactionDate ? new Date(a.transactionDate).getTime() : 0;
+          const db = b.transactionDate ? new Date(b.transactionDate).getTime() : 0;
+          return db - da;
         }),
-    [allLoans, statusFilter, search, sortField],
+    [allLoans, statusFilter, search],
   );
 
   const toggleRow = (id: string) => {
@@ -463,10 +424,11 @@ export default function LoansList() {
       queryClient.invalidateQueries({ queryKey: getListLoansQueryKey() });
       toast({ title: `${ids.length} loan${ids.length !== 1 ? "s" : ""} archived` });
       setSelected(new Set());
-    } catch {
+    } catch (err) {
+      console.error("Archive error:", err);
       toast({
         variant: "destructive",
-        title: "Error",
+        title: "Archive failed",
         description: "Could not archive loans. Please retry.",
       });
     } finally {
@@ -546,8 +508,6 @@ export default function LoansList() {
   }
 
   // Only Pending/Temp loans are eligible for archiving.
-  // Clear (paid) loans must NOT be archived: restoring would reset them to Pending,
-  // making a paid loan appear outstanding again — a serious data integrity issue.
   const archivableSelected = selectedLoans.filter(
     (l) => l.status === "Pending" || l.status === "Temp",
   );
@@ -742,25 +702,6 @@ export default function LoansList() {
                     <SelectItem value="Pending">Pending</SelectItem>
                     <SelectItem value="Clear">Clear</SelectItem>
                     <SelectItem value="Temp">Temp</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select
-                  value={sortField}
-                  onValueChange={(v) => setSortField(v as SortField)}
-                >
-                  <SelectTrigger className="bg-background w-full sm:w-52">
-                    <span className="truncate text-sm">
-                      {({"due-soonest": "Due Date (overdue first)", "date-desc": "Date (newest first)", "date-asc": "Date (oldest first)", "name-asc": "Name (A → Z)", "name-desc": "Name (Z → A)", "amount-desc": "Amount (high → low)", "amount-asc": "Amount (low → high)"} as Record<string,string>)[sortField] ?? sortField}
-                    </span>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="due-soonest">Due Date (overdue first)</SelectItem>
-                    <SelectItem value="date-desc">Date (newest first)</SelectItem>
-                    <SelectItem value="date-asc">Date (oldest first)</SelectItem>
-                    <SelectItem value="name-asc">Name (A → Z)</SelectItem>
-                    <SelectItem value="name-desc">Name (Z → A)</SelectItem>
-                    <SelectItem value="amount-desc">Amount (high → low)</SelectItem>
-                    <SelectItem value="amount-asc">Amount (low → high)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

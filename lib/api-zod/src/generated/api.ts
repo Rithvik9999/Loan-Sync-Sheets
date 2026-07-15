@@ -158,7 +158,7 @@ export const DeleteBorrowerResponse = zod.void()
  * @summary List loans
  */
 export const ListLoansQueryParams = zod.object({
-  "status": zod.enum(['Pending', 'Clear', 'Temp']).optional()
+  "status": zod.enum(['Pending', 'Clear', 'Temp', 'Archived']).optional()
 })
 
 export const ListLoansResponseItem = zod.object({
@@ -172,7 +172,7 @@ export const ListLoansResponseItem = zod.object({
   "principal": zod.number(),
   "tenureDays": zod.number(),
   "whatsapp": zod.string(),
-  "status": zod.enum(['Pending', 'Clear', 'Temp']),
+  "status": zod.enum(['Pending', 'Clear', 'Temp', 'Archived']),
   "flatFee": zod.number().nullish().describe('Computed (tiered % of principal by tenure).'),
   "interestPct": zod.number().nullish().describe('Computed tiered rate.'),
   "interest": zod.number().nullish().describe('Computed interest amount.'),
@@ -206,7 +206,7 @@ export const CreateLoanBody = zod.object({
   "principal": zod.number().min(createLoanBodyPrincipalMin),
   "tenureDays": zod.number().min(createLoanBodyTenureDaysMin),
   "whatsapp": zod.string().nullish(),
-  "status": zod.enum(['Pending', 'Clear', 'Temp']).optional(),
+  "status": zod.enum(['Pending', 'Clear', 'Temp', 'Archived']).optional(),
   "discountOrCharges": zod.number().nullish(),
   "notes": zod.string().nullish()
 })
@@ -222,7 +222,7 @@ export const CreateLoanResponse = zod.object({
   "principal": zod.number(),
   "tenureDays": zod.number(),
   "whatsapp": zod.string(),
-  "status": zod.enum(['Pending', 'Clear', 'Temp']),
+  "status": zod.enum(['Pending', 'Clear', 'Temp', 'Archived']),
   "flatFee": zod.number().nullish().describe('Computed (tiered % of principal by tenure).'),
   "interestPct": zod.number().nullish().describe('Computed tiered rate.'),
   "interest": zod.number().nullish().describe('Computed interest amount.'),
@@ -256,7 +256,7 @@ export const GetLoanResponse = zod.object({
   "principal": zod.number(),
   "tenureDays": zod.number(),
   "whatsapp": zod.string(),
-  "status": zod.enum(['Pending', 'Clear', 'Temp']),
+  "status": zod.enum(['Pending', 'Clear', 'Temp', 'Archived']),
   "flatFee": zod.number().nullish().describe('Computed (tiered % of principal by tenure).'),
   "interestPct": zod.number().nullish().describe('Computed tiered rate.'),
   "interest": zod.number().nullish().describe('Computed interest amount.'),
@@ -289,7 +289,7 @@ export const UpdateLoanBody = zod.object({
   "principal": zod.number().optional(),
   "tenureDays": zod.number().optional(),
   "whatsapp": zod.string().nullish(),
-  "status": zod.enum(['Pending', 'Clear', 'Temp']).optional(),
+  "status": zod.enum(['Pending', 'Clear', 'Temp', 'Archived']).optional(),
   "discountOrCharges": zod.number().nullish(),
   "partPayment": zod.number().nullish(),
   "dateOfPartPayment": zod.string().nullish(),
@@ -308,7 +308,7 @@ export const UpdateLoanResponse = zod.object({
   "principal": zod.number(),
   "tenureDays": zod.number(),
   "whatsapp": zod.string(),
-  "status": zod.enum(['Pending', 'Clear', 'Temp']),
+  "status": zod.enum(['Pending', 'Clear', 'Temp', 'Archived']),
   "flatFee": zod.number().nullish().describe('Computed (tiered % of principal by tenure).'),
   "interestPct": zod.number().nullish().describe('Computed tiered rate.'),
   "interest": zod.number().nullish().describe('Computed interest amount.'),

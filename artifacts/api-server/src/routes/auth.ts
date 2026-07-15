@@ -41,7 +41,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   }
 
   if (phone === ADMIN_PHONE) {
-    const adminPin = process.env.ADMIN_PIN;
+    const adminPin = process.env.ADMIN_PIN ?? process.env.ADMIN_PASSWORD;
     if (!adminPin || pin !== adminPin) {
       res.status(401).json({ error: "Invalid phone number or PIN" });
       return;

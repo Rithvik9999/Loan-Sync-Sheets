@@ -72,7 +72,7 @@ export default function BorrowerDetail() {
         },
         onError: () => {
           toast({ variant: "destructive", title: "Error", description: "Could not delete borrower." });
-          setIsDeleteOpen(false);
+          setIsDeleteStep2Open(false);
         },
       },
     );

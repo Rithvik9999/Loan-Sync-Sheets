@@ -13,4 +13,5 @@ export const LoanStatus = {
   Pending: 'Pending',
   Clear: 'Clear',
   Temp: 'Temp',
+  Archived: 'Archived',
 } as const;
