@@ -4,6 +4,6 @@
 // which is exactly the signature of an Express app instance — so we
 // can hand it the same `app` used by the normal Replit/Node server
 // (src/index.ts) without any extra wrapping.
-import app from "../src/app";
+import app from "../src/app.js";
 
 export default app;
