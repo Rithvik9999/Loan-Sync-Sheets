@@ -26,7 +26,9 @@ import {
   CheckCircle2,
   XCircle,
   CalendarClock,
+  Receipt,
 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -525,54 +527,73 @@ export default function Portal() {
     },
   });
 
-  if (isLoadingLoans) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-10 w-64" />
-        <Skeleton className="h-40 w-full" />
-        <Skeleton className="h-40 w-full" />
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">
-            {name ? `Hi, ${name}` : "My Loans"}
-          </h1>
-        </div>
+        <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">
+          {name ? `Hi, ${name}` : "My Loans"}
+        </h1>
         <Button onClick={() => setRequestOpen(true)} className="w-full sm:w-auto">
           <Plus className="mr-2 h-4 w-4" />
           Request New Loan
         </Button>
       </div>
 
-      {!loans || loans.length === 0 ? (
-        <div className="py-12">
-          <EmptyState
-            title="No loans yet"
-            description="You don't have any loans on record. Request one to get started."
-            icon={<CreditCard />}
-            action={
-              <Button onClick={() => setRequestOpen(true)}>
-                <Plus className="mr-2 h-4 w-4" /> Request a Loan
-              </Button>
-            }
-          />
-        </div>
-      ) : (
-        <div className="grid gap-4">
-          {loans.map((loan) => (
-            <LoanCard key={loan.id} loan={loan} />
-          ))}
-        </div>
-      )}
+      {/* Tabs */}
+      <Tabs defaultValue="loans">
+        <TabsList className="w-full sm:w-auto">
+          <TabsTrigger value="loans" className="flex-1 sm:flex-none gap-2">
+            <CreditCard className="h-4 w-4" />
+            Loans
+            {loans && loans.length > 0 && (
+              <span className="ml-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                {loans.length}
+              </span>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="emi" className="flex-1 sm:flex-none gap-2">
+            <CalendarClock className="h-4 w-4" />
+            EMI Loans
+          </TabsTrigger>
+        </TabsList>
 
-      <MyEmiLoans enabled={isLoaded && role === "borrower"} />
+        {/* ── Loans Tab ── */}
+        <TabsContent value="loans" className="mt-6 space-y-6">
+          {isLoadingLoans ? (
+            <div className="space-y-4">
+              <Skeleton className="h-40 w-full" />
+              <Skeleton className="h-40 w-full" />
+            </div>
+          ) : !loans || loans.length === 0 ? (
+            <div className="py-12">
+              <EmptyState
+                title="No loans yet"
+                description="You don't have any loans on record. Request one to get started."
+                icon={<CreditCard />}
+                action={
+                  <Button onClick={() => setRequestOpen(true)}>
+                    <Plus className="mr-2 h-4 w-4" /> Request a Loan
+                  </Button>
+                }
+              />
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {loans.map((loan) => (
+                <LoanCard key={loan.id} loan={loan} />
+              ))}
+            </div>
+          )}
 
-      <MyLoanRequests />
+          <MyLoanRequests />
+        </TabsContent>
+
+        {/* ── EMI Loans Tab ── */}
+        <TabsContent value="emi" className="mt-6">
+          <MyEmiLoans enabled={isLoaded && role === "borrower"} />
+        </TabsContent>
+      </Tabs>
 
       <LoanRequestDialog open={requestOpen} onOpenChange={setRequestOpen} />
     </div>
