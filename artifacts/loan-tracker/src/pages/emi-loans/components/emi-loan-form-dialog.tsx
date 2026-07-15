@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -28,7 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, ChevronsUpDown, Check } from "lucide-react";
+import { Loader2, ChevronsUpDown, Check, Calculator } from "lucide-react";
 import {
   Command,
   CommandEmpty,
@@ -41,7 +41,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 
 export interface EmiLoan {
   id: string;
@@ -232,6 +232,22 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
   const filteredNames = uniqueNames.filter((b) =>
     b.name.toLowerCase().includes(nameSearch.toLowerCase()),
   );
+
+  const watchedPrincipal = form.watch("principal");
+  const watchedTenure = form.watch("tenureMonths");
+  const emiPreview = useMemo(() => {
+    const p = Number(watchedPrincipal);
+    const t = Number(watchedTenure);
+    if (!p || !t || p <= 0 || t <= 0) return null;
+    // Estimate using 2% per month flat interest (mirrors lending setup)
+    const monthlyRate = 0.02;
+    const interestPerMonth = Math.round(p * monthlyRate);
+    const principalPerMonth = Math.round(p / t);
+    const monthlyPayment = interestPerMonth + principalPerMonth;
+    const totalInterest = interestPerMonth * t;
+    const totalAmount = p + totalInterest;
+    return { interestPerMonth, principalPerMonth, monthlyPayment, totalInterest, totalAmount };
+  }, [watchedPrincipal, watchedTenure]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -454,6 +470,33 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
                 </FormItem>
               )}
             />
+
+            {!isEditing && emiPreview && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-4 space-y-2">
+                <p className="text-sm font-semibold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
+                  <Calculator className="h-4 w-4" /> Estimated Monthly Breakdown
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-amber-700 dark:text-amber-400">Principal/mo</p>
+                    <p className="font-semibold font-numeric">{formatCurrency(emiPreview.principalPerMonth)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-amber-700 dark:text-amber-400">Interest/mo</p>
+                    <p className="font-semibold font-numeric">{formatCurrency(emiPreview.interestPerMonth)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-amber-700 dark:text-amber-400">Monthly EMI</p>
+                    <p className="font-bold font-numeric text-amber-900 dark:text-amber-200">{formatCurrency(emiPreview.monthlyPayment)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-amber-700 dark:text-amber-400">Total Amount</p>
+                    <p className="font-bold font-numeric text-amber-900 dark:text-amber-200">{formatCurrency(emiPreview.totalAmount)}</p>
+                  </div>
+                </div>
+                <p className="text-[10px] text-amber-600 dark:text-amber-500">Estimate only (2%/mo flat) — sheet formulas are the source of truth.</p>
+              </div>
+            )}
 
             <DialogFooter className="pt-4">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

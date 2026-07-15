@@ -67,7 +67,8 @@ export default function EmiLoanDetail() {
   const { role } = useAppAuth();
 
   const [isEditOpen, setIsEditOpen] = useState(false);
-  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [isDeleteStep1Open, setIsDeleteStep1Open] = useState(false);
+  const [isDeleteStep2Open, setIsDeleteStep2Open] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const { data: loan, isLoading } = useQuery<EmiLoan>({
@@ -123,7 +124,7 @@ export default function EmiLoanDetail() {
   const computed: { label: string; value: string }[] = [
     { label: "Monthly Payment", value: loan.monthlyPayment != null ? formatCurrency(loan.monthlyPayment) : "—" },
     { label: "Flat Fee", value: loan.flatFee != null ? formatCurrency(loan.flatFee) : "—" },
-    { label: "Interest %", value: loan.interestPct != null ? `${loan.interestPct}%` : "—" },
+    { label: "Interest %", value: loan.interestPct != null ? `${Number((loan.interestPct * 100).toFixed(2))}%` : "—" },
     { label: "Interest / Month", value: loan.interestPerMonth != null ? formatCurrency(loan.interestPerMonth) : "—" },
     { label: "Total Interest", value: loan.totalInterest != null ? formatCurrency(loan.totalInterest) : "—" },
     { label: "Principal / Month", value: loan.principalPerMonth != null ? formatCurrency(loan.principalPerMonth) : "—" },
@@ -155,7 +156,7 @@ export default function EmiLoanDetail() {
             <Button variant="outline" onClick={() => setIsEditOpen(true)}>
               <Edit className="h-4 w-4 mr-2" /> Edit
             </Button>
-            <Button variant="destructive" onClick={() => setIsDeleteOpen(true)}>
+            <Button variant="destructive" onClick={() => setIsDeleteStep1Open(true)}>
               <Trash2 className="h-4 w-4 mr-2" /> Delete
             </Button>
           </div>
@@ -259,12 +260,34 @@ export default function EmiLoanDetail() {
         <>
           <EmiLoanFormDialog open={isEditOpen} onOpenChange={setIsEditOpen} loan={loan} />
 
-          <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+          {/* Step 1 — initial warning */}
+          <AlertDialog open={isDeleteStep1Open} onOpenChange={setIsDeleteStep1Open}>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Delete EMI Loan Row?</AlertDialogTitle>
+                <AlertDialogTitle>Delete this EMI loan?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This will permanently delete this row from the EMI sheet. This action cannot be undone.
+                  This will permanently remove the row from the EMI sheet. Are you sure you want to continue?
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-amber-500 hover:bg-amber-600 text-white"
+                  onClick={() => { setIsDeleteStep1Open(false); setIsDeleteStep2Open(true); }}
+                >
+                  Yes, continue
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          {/* Step 2 — final irreversible confirmation */}
+          <AlertDialog open={isDeleteStep2Open} onOpenChange={setIsDeleteStep2Open}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>This cannot be undone</AlertDialogTitle>
+                <AlertDialogDescription>
+                  You are about to permanently delete the EMI loan for <strong>{loan.name}</strong> ({loan.emiId}). The row will be removed from the sheet and cannot be recovered.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -274,7 +297,7 @@ export default function EmiLoanDetail() {
                   className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                   disabled={isDeleting}
                 >
-                  {isDeleting ? "Deleting..." : "Delete EMI Loan"}
+                  {isDeleting ? "Deleting..." : "Delete Permanently"}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>

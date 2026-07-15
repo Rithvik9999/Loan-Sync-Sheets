@@ -71,7 +71,7 @@ import { z } from "zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
-import { computeEarlyPaymentDiscount } from "@/lib/early-payment-discount";
+import { computeEarlyPaymentDiscount, estimateFinalAmount } from "@/lib/early-payment-discount";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -168,6 +168,15 @@ function LoanRequestDialog({
     resolver: zodResolver(loanRequestSchema),
     defaultValues: { amount: undefined, tenureDays: undefined, purpose: "" },
   });
+
+  const watchedAmount = form.watch("amount");
+  const watchedTenure = form.watch("tenureDays");
+  const loanPreview = useMemo(() => {
+    const p = Number(watchedAmount);
+    const t = Number(watchedTenure);
+    if (!p || !t || p <= 0 || t <= 0) return null;
+    return estimateFinalAmount({ principal: p, tenureDays: t });
+  }, [watchedAmount, watchedTenure]);
 
   function onSubmit(data: LoanRequestValues) {
     createLoanRequest.mutate(
@@ -278,6 +287,26 @@ function LoanRequestDialog({
                 </FormItem>
               )}
             />
+            {loanPreview && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-3 space-y-2">
+                <p className="text-xs font-semibold text-amber-900 dark:text-amber-300">Estimated breakdown</p>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div>
+                    <p className="text-amber-700 dark:text-amber-400">Flat Fee</p>
+                    <p className="font-semibold font-numeric">{formatCurrency(loanPreview.flatFee)}</p>
+                  </div>
+                  <div>
+                    <p className="text-amber-700 dark:text-amber-400">Interest</p>
+                    <p className="font-semibold font-numeric">{formatCurrency(loanPreview.interest)}</p>
+                  </div>
+                  <div>
+                    <p className="text-amber-700 dark:text-amber-400">Total to repay</p>
+                    <p className="font-bold font-numeric text-amber-900 dark:text-amber-200">{formatCurrency(loanPreview.finalAmount)}</p>
+                  </div>
+                </div>
+                <p className="text-[10px] text-amber-600">Estimate only — admin confirms the exact amount.</p>
+              </div>
+            )}
             <DialogFooter className="pt-2 flex-col sm:flex-row gap-2">
               <Button
                 type="button"
@@ -343,6 +372,20 @@ function EmiRequestDialog({
       purpose: "",
     },
   });
+
+  const watchedAmount = form.watch("amount");
+  const watchedTenure = form.watch("tenureMonths");
+  const emiPreview = useMemo(() => {
+    const p = Number(watchedAmount);
+    const t = Number(watchedTenure);
+    if (!p || !t || p <= 0 || t <= 0) return null;
+    const monthlyRate = 0.02;
+    const interestPerMonth = Math.round(p * monthlyRate);
+    const principalPerMonth = Math.round(p / t);
+    const monthlyPayment = interestPerMonth + principalPerMonth;
+    const totalAmount = p + interestPerMonth * t;
+    return { interestPerMonth, principalPerMonth, monthlyPayment, totalAmount };
+  }, [watchedAmount, watchedTenure]);
 
   async function onSubmit(data: EmiRequestValues) {
     setIsPending(true);
@@ -466,6 +509,30 @@ function EmiRequestDialog({
                 </FormItem>
               )}
             />
+            {emiPreview && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-3 space-y-2">
+                <p className="text-xs font-semibold text-amber-900 dark:text-amber-300">Estimated monthly breakdown</p>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <p className="text-amber-700 dark:text-amber-400">Principal/mo</p>
+                    <p className="font-semibold font-numeric">{formatCurrency(emiPreview.principalPerMonth)}</p>
+                  </div>
+                  <div>
+                    <p className="text-amber-700 dark:text-amber-400">Interest/mo</p>
+                    <p className="font-semibold font-numeric">{formatCurrency(emiPreview.interestPerMonth)}</p>
+                  </div>
+                  <div>
+                    <p className="text-amber-700 dark:text-amber-400">Monthly EMI</p>
+                    <p className="font-bold font-numeric text-amber-900 dark:text-amber-200">{formatCurrency(emiPreview.monthlyPayment)}</p>
+                  </div>
+                  <div>
+                    <p className="text-amber-700 dark:text-amber-400">Total repayable</p>
+                    <p className="font-bold font-numeric text-amber-900 dark:text-amber-200">{formatCurrency(emiPreview.totalAmount)}</p>
+                  </div>
+                </div>
+                <p className="text-[10px] text-amber-600">Estimate only (2%/mo) — admin confirms the exact terms.</p>
+              </div>
+            )}
             <DialogFooter className="pt-2 flex-col sm:flex-row gap-2">
               <Button
                 type="button"
@@ -1054,10 +1121,6 @@ function OverdueTab({
           <div className="flex items-center gap-2 text-sm">
             <CheckSquare className="h-4 w-4 text-primary" />
             <span className="font-medium">{selected.size} selected</span>
-            <span className="text-muted-foreground">·</span>
-            <span className="font-bold font-numeric">
-              {formatCurrency(Math.max(bulkTotal - bulkDiscountTotal, 0))}
-            </span>
           </div>
           <div className="flex gap-2">
             <Button
@@ -1127,10 +1190,10 @@ function ComingUpTab({ items }: { items: RepayItem[] }) {
       <div className="rounded-xl border bg-muted/30 p-8 text-center">
         <ListChecks className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
         <p className="text-sm font-medium text-muted-foreground">
-          Nothing due soon
+          Nothing due in 5 days
         </p>
         <p className="text-xs text-muted-foreground mt-0.5">
-          No upcoming repayments found.
+          No repayments due in the next 5 days.
         </p>
       </div>
     );
@@ -1143,10 +1206,6 @@ function ComingUpTab({ items }: { items: RepayItem[] }) {
           <div className="flex items-center gap-2 text-sm">
             <CheckSquare className="h-4 w-4 text-primary" />
             <span className="font-medium">{selected.size} selected</span>
-            <span className="text-muted-foreground">·</span>
-            <span className="font-bold font-numeric">
-              {formatCurrency(Math.max(bulkTotal - bulkDiscountTotal, 0))}
-            </span>
           </div>
           <div className="flex gap-2">
             <Button
@@ -1242,6 +1301,11 @@ function LoanCard({ loan }: { loan: Loan }) {
             <p className="text-xs text-muted-foreground">
               <span className="font-mono mr-2">{loan.loanId}</span>
               {formatDate(loan.transactionDate)} · {loan.tenureDays}d
+              {dueDate && (
+                <span className={`ml-2 ${isOverdue ? "text-destructive" : ""}`}>
+                  · {isOverdue ? "Overdue" : "Due"} {formatDate(dueDate.toISOString())}
+                </span>
+              )}
             </p>
           </div>
           <div className="flex gap-2">
@@ -1745,15 +1809,22 @@ export default function Portal() {
   );
 
   const comingUpItems = useMemo(
-    () =>
-      allItems
-        .filter((i) => !i.isOverdue)
+    () => {
+      const now = new Date();
+      return allItems
+        .filter((i) => {
+          if (i.isOverdue) return false;
+          if (!i.dueDate) return false;
+          const daysUntil = (i.dueDate.getTime() - now.getTime()) / 86400000;
+          return daysUntil >= 0 && daysUntil <= 5;
+        })
         .sort((a, b) => {
           if (!a.dueDate && !b.dueDate) return 0;
           if (!a.dueDate) return 1;
           if (!b.dueDate) return -1;
           return a.dueDate.getTime() - b.dueDate.getTime();
-        }),
+        });
+    },
     [allItems],
   );
 
@@ -1863,7 +1934,7 @@ export default function Portal() {
             </CardHeader>
             <CardContent className="px-3 pb-3">
               <div
-                className={`text-xl font-bold font-numeric leading-tight truncate ${hasOverdue ? "text-destructive" : ""}`}
+                className={`text-sm font-bold font-numeric leading-tight break-all ${hasOverdue ? "text-destructive" : ""}`}
               >
                 {formatCurrency(totalOutstanding)}
               </div>
@@ -1901,6 +1972,10 @@ export default function Portal() {
             <CalendarClock className="h-3.5 w-3.5 shrink-0" />
             EMI
           </TabsTrigger>
+          <TabsTrigger value="requests" className="flex-1 gap-1.5 text-xs sm:text-sm">
+            <ListChecks className="h-3.5 w-3.5 shrink-0" />
+            Requests
+          </TabsTrigger>
         </TabsList>
 
         {/* ── Overdue Tab ── */}
@@ -1936,9 +2011,6 @@ export default function Portal() {
             isLoading={isLoadingLoans}
             onRequestLoan={() => setLoanRequestOpen(true)}
           />
-          <div className="mt-4">
-            <MyLoanRequests />
-          </div>
         </TabsContent>
 
         {/* ── My EMI Tab ── */}
@@ -1948,6 +2020,11 @@ export default function Portal() {
           ) : (
             <MyEmiLoans emiLoans={emiLoans ?? []} />
           )}
+        </TabsContent>
+
+        {/* ── Requests Tab ── */}
+        <TabsContent value="requests" className="mt-4">
+          <MyLoanRequests />
         </TabsContent>
       </Tabs>
 

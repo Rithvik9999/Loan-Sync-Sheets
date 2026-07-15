@@ -43,7 +43,8 @@ export default function BorrowerDetail() {
   const queryClient = useQueryClient();
 
   const [isEditOpen, setIsEditOpen] = useState(false);
-  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [isDeleteStep1Open, setIsDeleteStep1Open] = useState(false);
+  const [isDeleteStep2Open, setIsDeleteStep2Open] = useState(false);
 
   const { data: borrower, isLoading: isBorrowerLoading } = useGetBorrower(id, {
     query: { queryKey: getGetBorrowerQueryKey(id), enabled: !!id },
@@ -98,7 +99,7 @@ export default function BorrowerDetail() {
           <Button variant="outline" size="sm" onClick={() => setIsEditOpen(true)}>
             <Edit className="h-4 w-4 mr-2" /> Edit
           </Button>
-          <Button variant="destructive" size="sm" onClick={() => setIsDeleteOpen(true)}>
+          <Button variant="destructive" size="sm" onClick={() => setIsDeleteStep1Open(true)}>
             <Trash2 className="h-4 w-4 mr-2" /> Delete
           </Button>
         </div>
@@ -196,13 +197,34 @@ export default function BorrowerDetail() {
         borrower={borrower}
       />
 
-      <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+      {/* Step 1 — initial warning */}
+      <AlertDialog open={isDeleteStep1Open} onOpenChange={setIsDeleteStep1Open}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogTitle>Delete this borrower?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete the borrower profile for {borrower.name}. This does not delete their loan
-              rows on the Heat Map sheet.
+              This removes the borrower profile for {borrower.name}. Their loan rows on the Heat Map sheet are not affected.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-amber-500 hover:bg-amber-600 text-white"
+              onClick={() => { setIsDeleteStep1Open(false); setIsDeleteStep2Open(true); }}
+            >
+              Yes, continue
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Step 2 — final irreversible confirmation */}
+      <AlertDialog open={isDeleteStep2Open} onOpenChange={setIsDeleteStep2Open}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>This cannot be undone</AlertDialogTitle>
+            <AlertDialogDescription>
+              Permanently deletes the borrower profile for <strong>{borrower.name}</strong>. Loan rows on the Heat Map sheet will not be removed.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -212,7 +234,7 @@ export default function BorrowerDetail() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               disabled={deleteBorrower.isPending}
             >
-              {deleteBorrower.isPending ? "Deleting..." : "Delete Borrower"}
+              {deleteBorrower.isPending ? "Deleting..." : "Delete Permanently"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

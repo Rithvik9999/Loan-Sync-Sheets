@@ -10,6 +10,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useAppAuth } from "@/hooks/use-app-auth";
+import { AlertTriangle } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -41,7 +42,8 @@ export default function LoanDetail() {
   const { role } = useAppAuth();
 
   const [isEditOpen, setIsEditOpen] = useState(false);
-  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [isDeleteStep1Open, setIsDeleteStep1Open] = useState(false);
+  const [isDeleteStep2Open, setIsDeleteStep2Open] = useState(false);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
 
   const { data: loan, isLoading: isLoanLoading } = useGetLoan(id, {
@@ -86,11 +88,13 @@ export default function LoanDetail() {
 
   const computed: { label: string; value: string }[] = [
     { label: "Flat Fee", value: loan.flatFee != null ? formatCurrency(loan.flatFee) : "—" },
-    { label: "Interest %", value: loan.interestPct != null ? `${loan.interestPct}%` : "—" },
+    { label: "Interest %", value: loan.interestPct != null ? `${Number((loan.interestPct * 100).toFixed(2))}%` : "—" },
     { label: "Interest", value: loan.interest != null ? formatCurrency(loan.interest) : "—" },
     { label: "Late Days", value: loan.lateDays != null ? String(loan.lateDays) : "—" },
     { label: "Late Fees", value: loan.lateFees != null ? formatCurrency(loan.lateFees) : "—" },
-    { label: "Profit", value: loan.profit != null ? formatCurrency(loan.profit) : "—" },
+    ...(isStaff
+      ? [{ label: "Profit", value: loan.profit != null ? formatCurrency(loan.profit) : "—" }]
+      : []),
   ];
 
   return (
@@ -115,7 +119,7 @@ export default function LoanDetail() {
             <Button variant="outline" onClick={() => setIsEditOpen(true)}>
               <Edit className="h-4 w-4 mr-2" /> Edit
             </Button>
-            <Button variant="destructive" onClick={() => setIsDeleteOpen(true)}>
+            <Button variant="destructive" onClick={() => setIsDeleteStep1Open(true)}>
               <Trash2 className="h-4 w-4 mr-2" /> Delete
             </Button>
           </div>
@@ -210,12 +214,38 @@ export default function LoanDetail() {
 
           <RecordPaymentDialog open={isPaymentOpen} onOpenChange={setIsPaymentOpen} loan={loan} />
 
-          <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+          {/* Step 1 — initial warning */}
+          <AlertDialog open={isDeleteStep1Open} onOpenChange={setIsDeleteStep1Open}>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Delete Loan Row?</AlertDialogTitle>
+                <AlertDialogTitle className="flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5 text-amber-500" /> Delete this loan?
+                </AlertDialogTitle>
                 <AlertDialogDescription>
-                  This will permanently delete this row from the Heat Map sheet. This action cannot be undone.
+                  This will permanently remove the row from the Heat Map sheet. Are you sure you want to continue?
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-amber-500 hover:bg-amber-600 text-white"
+                  onClick={() => { setIsDeleteStep1Open(false); setIsDeleteStep2Open(true); }}
+                >
+                  Yes, continue
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          {/* Step 2 — final irreversible confirmation */}
+          <AlertDialog open={isDeleteStep2Open} onOpenChange={setIsDeleteStep2Open}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle className="flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5 text-destructive" /> This cannot be undone
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  You are about to permanently delete the loan for <strong>{loan.name}</strong> ({loan.loanId}). The row will be removed from the sheet and cannot be recovered.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -225,7 +255,7 @@ export default function LoanDetail() {
                   className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                   disabled={deleteLoan.isPending}
                 >
-                  {deleteLoan.isPending ? "Deleting..." : "Delete Loan"}
+                  {deleteLoan.isPending ? "Deleting..." : "Delete Permanently"}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>

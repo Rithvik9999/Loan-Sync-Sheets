@@ -24,7 +24,6 @@ import {
   Search,
   ChevronRight,
   CreditCard,
-  Filter,
   ArrowUpDown,
   CheckSquare,
   CheckCircle2,
@@ -32,6 +31,7 @@ import {
   Archive,
   AlertCircle,
   Clock,
+  MessageCircle,
 } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
@@ -279,6 +279,10 @@ function LoansTable({
               <TableCell className="font-medium">
                 <div className="truncate max-w-[100px] sm:max-w-none">{loan.name}</div>
                 <div className="text-xs text-muted-foreground font-mono">{loan.loanId}</div>
+                <div className="text-[10px] text-muted-foreground/70 sm:hidden">
+                  {formatDate(loan.transactionDate)}
+                  {loan.returnDate ? ` · Due ${formatDate(loan.returnDate)}` : ""}
+                </div>
               </TableCell>
               <TableCell className="font-numeric">
                 {formatCurrency(loan.principal)}
@@ -287,7 +291,12 @@ function LoansTable({
                 {loan.tenureDays}d
               </TableCell>
               <TableCell className="text-muted-foreground hidden md:table-cell whitespace-nowrap text-xs">
-                {formatDate(loan.transactionDate)}
+                <div>{formatDate(loan.transactionDate)}</div>
+                {loan.returnDate && (
+                  <div className="text-[10px] text-amber-600 dark:text-amber-400">
+                    Due {formatDate(loan.returnDate)}
+                  </div>
+                )}
               </TableCell>
               <TableCell>
                 <LoanStatusBadge status={loan.status} />
@@ -493,6 +502,58 @@ export default function LoansList() {
     .map((id) => (allLoans ?? []).find((l) => l.id === id))
     .filter(Boolean) as Loan[];
 
+  // Reminder helpers
+  function sanitizePhone(raw: string): string {
+    let digits = raw.replace(/\D/g, "");
+    if (digits.length > 10 && digits.startsWith("91")) digits = digits.slice(2);
+    return digits.slice(-10);
+  }
+  const selectedPhones = selectedLoans.map((l) =>
+    sanitizePhone((l.whatsapp ?? "").split("\n")[0].trim()),
+  );
+  const uniqueSelectedPhones = new Set(selectedPhones.filter((p) => p.length === 10));
+  const canSendReminder = selectedLoans.length > 0 && uniqueSelectedPhones.size === 1;
+  const reminderPhone = canSendReminder ? [...uniqueSelectedPhones][0] : null;
+
+  function buildReminderMessage(loans: Loan[]): string {
+    const name = loans[0]?.name ?? "Borrower";
+    if (loans.length === 1) {
+      const l = loans[0];
+      const outstanding = Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0);
+      const dueText =
+        (l.lateDays ?? 0) > 0
+          ? `overdue by ${l.lateDays} day${l.lateDays !== 1 ? "s" : ""}`
+          : l.returnDate
+            ? `due on ${formatDate(l.returnDate)}`
+            : "due soon";
+      return [
+        `👋 Hi ${name},`,
+        `This is a reminder about your loan payment of ₹${outstanding.toLocaleString("en-IN")} ${dueText}.`,
+        l.loanId ? `🔖 Loan ID: ${l.loanId}` : "",
+        `Please arrange payment at your earliest convenience. Thank you! 🙏`,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    } else {
+      const lines = [`👋 Hi ${name},`, `You have ${loans.length} outstanding dues:`];
+      loans.forEach((l, i) => {
+        const outstanding = Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0);
+        const status =
+          (l.lateDays ?? 0) > 0
+            ? `Overdue ${l.lateDays}d`
+            : l.returnDate
+              ? `Due ${formatDate(l.returnDate)}`
+              : "Due soon";
+        const idPart = l.loanId ? ` [${l.loanId}]` : "";
+        lines.push(`${i + 1}. Loan${idPart}: ₹${outstanding.toLocaleString("en-IN")} — ${status}`);
+      });
+      const total = loans.reduce((s, l) => s + Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0), 0);
+      lines.push(`\nTotal: ₹${total.toLocaleString("en-IN")}`);
+      lines.push(`Please arrange payment at your earliest convenience. Thank you! 🙏`);
+      return lines.join("\n");
+    }
+  }
+
   // Only Pending/Temp loans are eligible for archiving.
   // Clear (paid) loans must NOT be archived: restoring would reset them to Pending,
   // making a paid loan appear outstanding again — a serious data integrity issue.
@@ -523,6 +584,28 @@ export default function LoansList() {
             <span className="font-medium">{selected.size} selected</span>
           </div>
           <div className="flex flex-wrap gap-2">
+            {canSendReminder && reminderPhone && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const msg = buildReminderMessage(selectedLoans);
+                  window.open(
+                    `https://wa.me/91${reminderPhone}?text=${encodeURIComponent(msg)}`,
+                    "_blank",
+                  );
+                }}
+              >
+                <MessageCircle className="mr-1.5 h-3.5 w-3.5" />
+                Send Reminder
+              </Button>
+            )}
+            {selectedLoans.length > 0 && !canSendReminder && uniqueSelectedPhones.size > 1 && (
+              <Button size="sm" variant="outline" disabled title="Select loans from the same borrower to send a reminder">
+                <MessageCircle className="mr-1.5 h-3.5 w-3.5" />
+                Send Reminder
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={() => setSelected(new Set())}>
               Clear
             </Button>
@@ -656,8 +739,7 @@ export default function LoansList() {
                   />
                 </div>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="bg-background w-full sm:w-44 gap-2">
-                    <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <SelectTrigger className="bg-background w-full sm:w-44">
                     <SelectValue placeholder="All Statuses" />
                   </SelectTrigger>
                   <SelectContent>
@@ -671,8 +753,7 @@ export default function LoansList() {
                   value={sortField}
                   onValueChange={(v) => setSortField(v as SortField)}
                 >
-                  <SelectTrigger className="bg-background w-full sm:w-52 gap-2">
-                    <ArrowUpDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <SelectTrigger className="bg-background w-full sm:w-52">
                     <SelectValue placeholder="Sort by…" />
                   </SelectTrigger>
                   <SelectContent>

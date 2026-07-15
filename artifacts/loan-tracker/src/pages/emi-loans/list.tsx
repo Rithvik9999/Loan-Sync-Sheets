@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus, Search, ChevronRight, CalendarClock, Filter, ArrowUpDown, CheckSquare, CheckCircle2, Loader2 } from "lucide-react";
+import { Plus, Search, ChevronRight, CalendarClock, ArrowUpDown, CheckSquare, CheckCircle2, Loader2 } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { Input } from "@/components/ui/input";
@@ -284,8 +284,7 @@ export default function EmiLoansList() {
               />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="bg-background w-full sm:w-44 gap-2">
-                <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
+              <SelectTrigger className="bg-background w-full sm:w-44">
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
               <SelectContent>
@@ -296,8 +295,7 @@ export default function EmiLoansList() {
               </SelectContent>
             </Select>
             <Select value={sortField} onValueChange={(v) => setSortField(v as SortField)}>
-              <SelectTrigger className="bg-background w-full sm:w-56 gap-2">
-                <ArrowUpDown className="h-4 w-4 text-muted-foreground shrink-0" />
+              <SelectTrigger className="bg-background w-full sm:w-56">
                 <SelectValue placeholder="Sort by…" />
               </SelectTrigger>
               <SelectContent>

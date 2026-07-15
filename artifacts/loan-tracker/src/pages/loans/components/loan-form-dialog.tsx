@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -35,7 +35,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, ChevronsUpDown, Check } from "lucide-react";
+import { Loader2, ChevronsUpDown, Check, Calculator } from "lucide-react";
 import { useLocation } from "wouter";
 import {
   Command,
@@ -49,7 +49,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
+import { estimateFinalAmount } from "@/lib/early-payment-discount";
 
 const loanSchema = z.object({
   name: z.string().min(1, "Borrower name is required"),
@@ -186,6 +187,15 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
   const filteredNames = uniqueNames.filter((b) =>
     b.name.toLowerCase().includes(nameSearch.toLowerCase()),
   );
+
+  const watchedPrincipal = form.watch("principal");
+  const watchedTenure = form.watch("tenureDays");
+  const calcPreview = useMemo(() => {
+    const p = Number(watchedPrincipal);
+    const t = Number(watchedTenure);
+    if (!p || !t || p <= 0 || t <= 0) return null;
+    return estimateFinalAmount({ principal: p, tenureDays: t });
+  }, [watchedPrincipal, watchedTenure]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -397,6 +407,29 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                 </FormItem>
               )}
             />
+
+            {!isEditing && calcPreview && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-4 space-y-2">
+                <p className="text-sm font-semibold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
+                  <Calculator className="h-4 w-4" /> Estimated Calculation
+                </p>
+                <div className="grid grid-cols-3 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-amber-700 dark:text-amber-400">Flat Fee</p>
+                    <p className="font-semibold font-numeric">{formatCurrency(calcPreview.flatFee)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-amber-700 dark:text-amber-400">Interest</p>
+                    <p className="font-semibold font-numeric">{formatCurrency(calcPreview.interest)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-amber-700 dark:text-amber-400">Final Amount</p>
+                    <p className="font-bold font-numeric text-amber-900 dark:text-amber-200">{formatCurrency(calcPreview.finalAmount)}</p>
+                  </div>
+                </div>
+                <p className="text-[10px] text-amber-600 dark:text-amber-500">Estimate only — sheet formulas are the source of truth.</p>
+              </div>
+            )}
 
             <DialogFooter className="pt-4">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

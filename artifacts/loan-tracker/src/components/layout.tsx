@@ -20,7 +20,6 @@ const staffNav = [
   { title: "Loans", href: "/loans", icon: CreditCard },
   { title: "EMI Loans", href: "/emi-loans", icon: CalendarClock },
   { title: "Loan Requests", href: "/loan-requests", icon: ClipboardList },
-  { title: "Reminders", href: "/reminders", icon: MessageCircle },
 ];
 
 export function SharedLayout({ children }: { children: React.ReactNode }) {
