@@ -1,12 +1,10 @@
 import { Router, type IRouter } from "express";
+import { z } from "zod";
 import {
-  CreateBorrowerBody,
-  UpdateBorrowerBody,
   GetBorrowerParams,
   UpdateBorrowerParams,
   DeleteBorrowerParams,
   ListBorrowersResponse,
-  CreateBorrowerResponse,
   GetBorrowerResponse,
   UpdateBorrowerResponse,
 } from "@workspace/api-zod";
@@ -18,19 +16,32 @@ const router: IRouter = Router();
 
 router.use(attachRole, requireStaff);
 
+// Inline schemas (email removed — phone is the primary identity)
+const CreateBorrowerBodyLocal = z.object({
+  name: z.string().min(1),
+  phone: z.string().nullish(),
+  password: z.string().min(4).nullish(),
+});
+
+const UpdateBorrowerBodyLocal = z.object({
+  name: z.string().min(1).optional(),
+  phone: z.string().nullish(),
+  password: z.string().min(4).nullish(),
+});
+
 router.get("/borrowers", async (_req, res): Promise<void> => {
   const borrowers = await borrowersRepo.listBorrowers();
   res.json(ListBorrowersResponse.parse(borrowers.map(toPublic)));
 });
 
 router.post("/borrowers", async (req, res): Promise<void> => {
-  const parsed = CreateBorrowerBody.safeParse(req.body);
+  const parsed = CreateBorrowerBodyLocal.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
   const borrower = await borrowersRepo.createBorrower(parsed.data);
-  res.status(201).json(CreateBorrowerResponse.parse(toPublic(borrower)));
+  res.status(201).json(toPublic(borrower));
 });
 
 router.get("/borrowers/:id", async (req, res): Promise<void> => {
@@ -53,7 +64,7 @@ router.patch("/borrowers/:id", async (req, res): Promise<void> => {
     res.status(400).json({ error: params.error.message });
     return;
   }
-  const parsed = UpdateBorrowerBody.safeParse(req.body);
+  const parsed = UpdateBorrowerBodyLocal.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;

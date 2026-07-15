@@ -3,12 +3,12 @@ import { appendRow, deleteRowAt, readTab, updateRowAt } from "../sheetsClient";
 import { hashPassword, normalizePhone } from "../authTokens";
 
 const TAB = "Borrowers";
-const HEADERS = ["id", "name", "email", "phone", "passwordHash", "createdAt"];
+// Email removed — phone is the primary identity for portal login.
+const HEADERS = ["id", "name", "phone", "passwordHash", "createdAt"];
 
 export interface Borrower {
   id: string;
   name: string;
-  email: string;
   phone: string;
   passwordHash: string;
   createdAt: string;
@@ -16,7 +16,6 @@ export interface Borrower {
 
 export interface BorrowerInput {
   name: string;
-  email: string;
   phone?: string | null;
   password?: string | null;
 }
@@ -25,7 +24,6 @@ function fromRow(row: Record<string, string>): Borrower {
   return {
     id: row.id,
     name: row.name,
-    email: row.email,
     phone: row.phone ?? "",
     passwordHash: row.passwordHash ?? "",
     createdAt: row.createdAt,
@@ -33,7 +31,13 @@ function fromRow(row: Record<string, string>): Borrower {
 }
 
 function toRow(borrower: Borrower): Record<string, string> {
-  return { ...borrower };
+  return {
+    id: borrower.id,
+    name: borrower.name,
+    phone: borrower.phone,
+    passwordHash: borrower.passwordHash,
+    createdAt: borrower.createdAt,
+  };
 }
 
 /** Shape returned to API clients — never leaks the password hash. */
@@ -69,7 +73,6 @@ export async function createBorrower(
   const borrower: Borrower = {
     id: randomUUID(),
     name: input.name,
-    email: input.email,
     phone: input.phone ?? "",
     passwordHash: input.password ? await hashPassword(input.password) : "",
     createdAt: new Date().toISOString(),
@@ -88,7 +91,6 @@ export async function updateBorrower(
   const updated: Borrower = {
     ...fromRow(rows[idx]),
     ...(patch.name !== undefined ? { name: patch.name } : {}),
-    ...(patch.email !== undefined ? { email: patch.email } : {}),
     ...(patch.phone !== undefined ? { phone: patch.phone ?? "" } : {}),
     ...(patch.password
       ? { passwordHash: await hashPassword(patch.password) }

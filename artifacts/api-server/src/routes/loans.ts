@@ -42,6 +42,33 @@ router.get("/loans", async (req, res): Promise<void> => {
   res.json(ListLoansResponse.parse(filtered));
 });
 
+/**
+ * GET /loans/borrower-names
+ * Returns unique borrower names + phones from the Heat Map sheet.
+ * Used to populate the borrower name combobox when recording a loan.
+ * Must be registered BEFORE GET /loans/:id to avoid "borrower-names" being
+ * treated as a loan ID.
+ */
+router.get("/loans/borrower-names", requireStaff, async (_req, res): Promise<void> => {
+  const loans = await loansRepo.listLoans();
+  const nameMap = new Map<string, { name: string; phone: string }>();
+  for (const loan of loans) {
+    const key = loan.name.trim().toLowerCase();
+    if (!nameMap.has(key)) {
+      // Use first line of whatsapp field as the phone number
+      const phone = (loan.whatsapp ?? "").split(/\n/)[0].trim();
+      nameMap.set(key, { name: loan.name.trim(), phone });
+    } else if (!nameMap.get(key)!.phone) {
+      const phone = (loan.whatsapp ?? "").split(/\n/)[0].trim();
+      if (phone) nameMap.get(key)!.phone = phone;
+    }
+  }
+  const result = Array.from(nameMap.values()).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+  res.json(result);
+});
+
 router.post("/loans", requireStaff, async (req, res): Promise<void> => {
   const parsed = CreateLoanBody.safeParse(req.body);
   if (!parsed.success) {

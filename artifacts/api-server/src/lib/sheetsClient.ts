@@ -1,10 +1,5 @@
 /**
  * Generic Google Sheets-as-database client.
- *
- * Uses a Google service account (no Replit OAuth coupling) to read/write
- * tabs in a single spreadsheet, identified by GOOGLE_SHEET_ID. Each domain
- * table (Borrowers, Loans, Repayments) is a tab with a header row; rows are
- * addressed by their spreadsheet row number for update/delete.
  */
 import { google, type sheets_v4 } from "googleapis";
 import { logger } from "./logger";
@@ -23,7 +18,6 @@ function getCredentials() {
         "GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY, and GOOGLE_SHEET_ID.",
     );
   }
-  // Secrets managers often store the PEM key with literal "\n" sequences.
   const privateKey = rawKey.includes("\\n")
     ? rawKey.replace(/\\n/g, "\n")
     : rawKey;
@@ -43,8 +37,19 @@ function getSheets(): sheets_v4.Sheets {
   return sheetsSingleton;
 }
 
+/** Exposed so other sheet modules (e.g. emiSheet) can reuse the same client. */
+export function getSheetsClient(): sheets_v4.Sheets {
+  return getSheets();
+}
+
 export function getSpreadsheetId(): string {
   return getCredentials().sheetId;
+}
+
+export function getEmiSpreadsheetId(): string {
+  const id = process.env.EMI_GOOGLE_SHEET_ID;
+  if (!id) throw new Error("EMI_GOOGLE_SHEET_ID is not set.");
+  return id;
 }
 
 function columnLetter(n: number): string {
@@ -84,7 +89,6 @@ async function ensureSheetTab(title: string, headers: string[]): Promise<void> {
   ensuredTabs.add(title);
 }
 
-/** Reads all data rows from a tab, returning parsed row objects alongside their 1-indexed sheet row numbers. */
 export async function readTab(
   title: string,
   headers: string[],
@@ -144,7 +148,6 @@ export async function updateRowAt(
   });
 }
 
-/** Reads raw values for an arbitrary range without any header/tab assumptions. */
 export async function getRawValues(
   range: string,
   renderOption: "UNFORMATTED_VALUE" | "FORMATTED_VALUE" | "FORMULA" = "UNFORMATTED_VALUE",
@@ -159,11 +162,21 @@ export async function getRawValues(
   return res.data.values ?? [];
 }
 
-/**
- * Writes a set of individual, possibly non-contiguous cell ranges in one call.
- * Unlike updateRowAt, this never touches cells outside the given ranges, so it's
- * safe to use next to array-formula/spilled columns that must not be overwritten.
- */
+/** Like getRawValues but for an arbitrary spreadsheet (e.g. EMI sheet). */
+export async function getRawValuesFromSheet(
+  spreadsheetId: string,
+  range: string,
+  renderOption: "UNFORMATTED_VALUE" | "FORMATTED_VALUE" | "FORMULA" = "UNFORMATTED_VALUE",
+): Promise<unknown[][]> {
+  const sheets = getSheets();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range,
+    valueRenderOption: renderOption,
+  });
+  return res.data.values ?? [];
+}
+
 export async function batchUpdateCells(
   updates: { range: string; values: (string | number)[][] }[],
 ): Promise<void> {
@@ -176,13 +189,19 @@ export async function batchUpdateCells(
   });
 }
 
-/**
- * Ensures the tab's physical grid has at least `minRows` rows, growing it
- * with blank rows appended at the bottom if needed. Required before writing
- * to a row number beyond the sheet's current grid size — the Sheets API
- * rejects writes to cells outside `gridProperties.rowCount`, and array
- * formulas can only spill into rows that already exist in the grid.
- */
+/** Like batchUpdateCells but for an arbitrary spreadsheet. */
+export async function batchUpdateCellsInSheet(
+  spreadsheetId: string,
+  updates: { range: string; values: (string | number)[][] }[],
+): Promise<void> {
+  if (updates.length === 0) return;
+  const sheets = getSheets();
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId,
+    requestBody: { valueInputOption: "USER_ENTERED", data: updates },
+  });
+}
+
 export async function ensureGridRowCount(
   title: string,
   minRows: number,
@@ -215,12 +234,71 @@ export async function ensureGridRowCount(
   );
 }
 
+/** Like ensureGridRowCount but for an arbitrary spreadsheet. */
+export async function ensureGridRowCountForSheet(
+  spreadsheetId: string,
+  title: string,
+  minRows: number,
+): Promise<void> {
+  const sheets = getSheets();
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const sheet = meta.data.sheets?.find((s) => s.properties?.title === title);
+  const sheetId = sheet?.properties?.sheetId;
+  const currentRowCount = sheet?.properties?.gridProperties?.rowCount ?? 0;
+  if (sheetId === undefined || sheetId === null) return;
+  if (currentRowCount >= minRows) return;
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          appendDimension: {
+            sheetId,
+            dimension: "ROWS",
+            length: minRows - currentRowCount,
+          },
+        },
+      ],
+    },
+  });
+}
+
 export async function deleteRowAt(
   title: string,
   rowNumber: number,
 ): Promise<void> {
   const sheets = getSheets();
   const spreadsheetId = getSpreadsheetId();
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const sheetId = meta.data.sheets?.find((s) => s.properties?.title === title)
+    ?.properties?.sheetId;
+  if (sheetId === undefined || sheetId === null) return;
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          deleteDimension: {
+            range: {
+              sheetId,
+              dimension: "ROWS",
+              startIndex: rowNumber - 1,
+              endIndex: rowNumber,
+            },
+          },
+        },
+      ],
+    },
+  });
+}
+
+/** Like deleteRowAt but for an arbitrary spreadsheet. */
+export async function deleteRowAtInSheet(
+  spreadsheetId: string,
+  title: string,
+  rowNumber: number,
+): Promise<void> {
+  const sheets = getSheets();
   const meta = await sheets.spreadsheets.get({ spreadsheetId });
   const sheetId = meta.data.sheets?.find((s) => s.properties?.title === title)
     ?.properties?.sheetId;

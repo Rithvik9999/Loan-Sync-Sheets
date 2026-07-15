@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -8,8 +8,7 @@ import {
   getListLoansQueryKey,
   getGetLoanQueryKey,
   Loan,
-  useListBorrowers,
-  getListBorrowersQueryKey,
+  useListLoans,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -36,8 +35,21 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2 } from "lucide-react";
+import { Loader2, ChevronsUpDown, Check } from "lucide-react";
 import { useLocation } from "wouter";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 
 const loanSchema = z.object({
   name: z.string().min(1, "Borrower name is required"),
@@ -47,7 +59,7 @@ const loanSchema = z.object({
   whatsapp: z.string().optional(),
   discountOrCharges: z.coerce.number().optional(),
   notes: z.string().optional(),
-  status: z.enum(["Pending", "Clear", "Temp"]).optional(), // only used for edit
+  status: z.enum(["Pending", "Clear", "Temp"]).optional(),
 });
 
 type LoanFormValues = z.infer<typeof loanSchema>;
@@ -55,8 +67,8 @@ type LoanFormValues = z.infer<typeof loanSchema>;
 interface LoanFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  loan?: Loan; // If provided, we're editing
-  defaultName?: string; // Pre-fill borrower name if creating from a borrower profile
+  loan?: Loan;
+  defaultName?: string;
 }
 
 export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }: LoanFormDialogProps) {
@@ -64,10 +76,48 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
   const isEditing = !!loan;
+  const [namePopoverOpen, setNamePopoverOpen] = useState(false);
+  const [nameSearch, setNameSearch] = useState("");
 
-  const { data: borrowers } = useListBorrowers({
-    query: { queryKey: getListBorrowersQueryKey(), enabled: open },
+  // Derive unique borrower names from existing loans
+  const { data: loans } = useListLoans(undefined, {
+    query: { queryKey: getListLoansQueryKey(), enabled: open },
   });
+
+  const borrowerNames: { name: string; phone: string }[] = (() => {
+    const map = new Map<string, string>();
+    for (const l of loans ?? []) {
+      const key = l.name.trim().toLowerCase();
+      if (!map.has(key)) {
+        const phone = (l.whatsapp ?? "").split("\n")[0].trim();
+        map.set(key, phone);
+      }
+    }
+    return Array.from(map.entries())
+      .map(([, phone], i) => ({
+        name: Array.from(map.keys())[i]
+          .split(" ")
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(" "),
+        phone,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  })();
+
+  // Re-derive to get properly-cased names from original loan data
+  const uniqueNames: { name: string; phone: string }[] = (() => {
+    const seen = new Set<string>();
+    const result: { name: string; phone: string }[] = [];
+    for (const l of loans ?? []) {
+      const key = l.name.trim().toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        const phone = (l.whatsapp ?? "").split("\n")[0].trim();
+        result.push({ name: l.name.trim(), phone });
+      }
+    }
+    return result.sort((a, b) => a.name.localeCompare(b.name));
+  })();
 
   const defaults = (): LoanFormValues => ({
     name: loan?.name || defaultName || "",
@@ -87,7 +137,6 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
 
   const createLoan = useCreateLoan();
   const updateLoan = useUpdateLoan();
-
   const isPending = createLoan.isPending || updateLoan.isPending;
 
   function onSubmit(data: LoanFormValues) {
@@ -112,7 +161,7 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
         {
           onSuccess: (newLoan) => {
             queryClient.invalidateQueries({ queryKey: getListLoansQueryKey() });
-            toast({ title: "Loan recorded", description: "Added to the Heat Map sheet; computed fields are ready." });
+            toast({ title: "Loan recorded", description: "Added to the Heat Map sheet." });
             form.reset();
             onOpenChange(false);
             setLocation(`/loans/${newLoan.id}`);
@@ -125,28 +174,34 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
     }
   }
 
-  // Reset form when dialog opens with new data
   useEffect(() => {
     if (open) {
       form.reset(defaults());
+      setNameSearch("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, loan, defaultName, form]);
+  }, [open, loan, defaultName]);
+
+  const currentName = form.watch("name");
+  const filteredNames = uniqueNames.filter((b) =>
+    b.name.toLowerCase().includes(nameSearch.toLowerCase()),
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Loan" : "Record Loan"}</DialogTitle>
           <DialogDescription>
             {isEditing
-              ? "Only these input fields are editable — fees, interest, late fees, and the final amount are computed automatically by the sheet."
-              : "This writes only the inputs to your Heat Map sheet. Fees, interest, and the final amount are computed there automatically."}
+              ? "Only input fields are editable — computed fields (fees, interest, final amount) are recalculated by the sheet."
+              : "This writes only the inputs to your Heat Map sheet. Fees, interest, and the final amount are computed automatically."}
           </DialogDescription>
         </DialogHeader>
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-2">
+            {/* Borrower Name Combobox */}
             <FormField
               control={form.control}
               name="name"
@@ -154,16 +209,76 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                 <FormItem>
                   <FormLabel>Borrower Name</FormLabel>
                   <FormControl>
-                    <>
-                      <Input placeholder="Jane Doe" list="borrower-names" {...field} />
-                      <datalist id="borrower-names">
-                        {borrowers?.map((b) => (
-                          <option key={b.id} value={b.name} />
-                        ))}
-                      </datalist>
-                    </>
+                    <Popover open={namePopoverOpen} onOpenChange={setNamePopoverOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={namePopoverOpen}
+                          className="w-full justify-between font-normal"
+                        >
+                          <span className={cn(!field.value && "text-muted-foreground")}>
+                            {field.value || "Select or type borrower name…"}
+                          </span>
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="p-0 w-[--radix-popover-trigger-width]" align="start">
+                        <Command>
+                          <CommandInput
+                            placeholder="Search or type a new name…"
+                            value={nameSearch}
+                            onValueChange={(v) => {
+                              setNameSearch(v);
+                              field.onChange(v);
+                            }}
+                          />
+                          {nameSearch && !uniqueNames.some(
+                            (b) => b.name.toLowerCase() === nameSearch.toLowerCase(),
+                          ) && (
+                            <div className="px-3 py-2 text-xs text-muted-foreground border-b">
+                              Press Enter or select below to add as new borrower
+                            </div>
+                          )}
+                          <CommandEmpty className="py-3 text-center text-sm text-muted-foreground">
+                            {nameSearch ? `Record as new borrower: "${nameSearch}"` : "No borrowers found."}
+                          </CommandEmpty>
+                          <CommandGroup className="max-h-52 overflow-y-auto">
+                            {filteredNames.map((b) => (
+                              <CommandItem
+                                key={b.name}
+                                value={b.name}
+                                onSelect={(val) => {
+                                  field.onChange(val);
+                                  // Also auto-fill whatsapp if empty
+                                  if (!form.getValues("whatsapp") && b.phone) {
+                                    form.setValue("whatsapp", b.phone);
+                                  }
+                                  setNameSearch("");
+                                  setNamePopoverOpen(false);
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    currentName?.toLowerCase() === b.name.toLowerCase()
+                                      ? "opacity-100"
+                                      : "opacity-0",
+                                  )}
+                                />
+                                <span>{b.name}</span>
+                                {b.phone && (
+                                  <span className="ml-auto text-xs text-muted-foreground">
+                                    {b.phone}
+                                  </span>
+                                )}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   </FormControl>
-                  <FormDescription>Must match a borrower's name exactly for portal access to work.</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -175,9 +290,9 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                 name="principal"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Principal</FormLabel>
+                    <FormLabel>Principal (₹)</FormLabel>
                     <FormControl>
-                      <Input type="number" step="0.01" min="0" placeholder="5000.00" {...field} />
+                      <Input type="number" step="0.01" min="0" placeholder="5000" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -219,9 +334,9 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                 name="whatsapp"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>WhatsApp / Phone</FormLabel>
+                    <FormLabel>Phone / WhatsApp</FormLabel>
                     <FormControl>
-                      <Input placeholder="+1 555 000 0000" {...field} />
+                      <Input placeholder="9876543210" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -234,7 +349,7 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
               name="discountOrCharges"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Discount / Charges</FormLabel>
+                  <FormLabel>Discount / Charges (₹)</FormLabel>
                   <FormControl>
                     <Input type="number" step="0.01" placeholder="0" {...field} />
                   </FormControl>
@@ -276,7 +391,7 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                 <FormItem>
                   <FormLabel>Notes (Optional)</FormLabel>
                   <FormControl>
-                    <Textarea placeholder="Any specific terms or context..." className="resize-none" {...field} />
+                    <Textarea placeholder="Any specific terms or context…" className="resize-none" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

@@ -63,12 +63,15 @@ router.get("/dashboard/summary", async (_req, res): Promise<void> => {
 router.get("/dashboard/activity", async (_req, res): Promise<void> => {
   const loans = await loansRepo.listLoans();
 
-  // Heat Map rows carry no timestamp column; row order (append order) is the
-  // best available proxy for recency, so the most recently added rows are
-  // the most recent activity.
-  const recent = [...loans]
-    .sort((a, b) => b.rowNumber - a.rowNumber)
-    .slice(0, 20);
+  // Sort by transactionDate descending (newest first), then by rowNumber as tiebreaker
+  const sorted = [...loans].sort((a, b) => {
+    const da = a.transactionDate ? new Date(a.transactionDate).getTime() : 0;
+    const db = b.transactionDate ? new Date(b.transactionDate).getTime() : 0;
+    if (db !== da) return db - da;
+    return b.rowNumber - a.rowNumber;
+  });
+
+  const recent = sorted.slice(0, 20);
 
   const items = recent.map((l) => ({
     type: (l.status === "Clear" ? "loan_settled" : "loan_created") as

@@ -9,6 +9,7 @@ import {
   LogOut,
   Loader2,
   ClipboardList,
+  CalendarClock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +17,7 @@ const staffNav = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { title: "Borrowers", href: "/borrowers", icon: Users },
   { title: "Loans", href: "/loans", icon: CreditCard },
+  { title: "EMI Loans", href: "/emi-loans", icon: CalendarClock },
   { title: "Loan Requests", href: "/loan-requests", icon: ClipboardList },
 ];
 
