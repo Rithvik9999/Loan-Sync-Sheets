@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { attachRole, requireStaff } from "../middlewares/auth";
 import * as emiSheet from "../lib/emiSheet";
 import * as borrowersRepo from "../lib/repositories/borrowers";
+import { extractPhoneFromWhatsapp, normalizePhone } from "../lib/authTokens";
 
 const router: IRouter = Router();
 router.use(attachRole);
@@ -16,15 +17,30 @@ router.get("/emi-loans", async (req, res): Promise<void> => {
 
   let result = rows;
   if (info.role === "borrower") {
-    const myName = info.borrower?.name.trim().toLowerCase();
-    result = rows.filter((r) => r.name.trim().toLowerCase() === myName);
+    const myPhone = normalizePhone(info.phone ?? "");
+    const myName = info.name.trim().toLowerCase();
+    result = rows.filter((r) => {
+      const rowPhone = extractPhoneFromWhatsapp(r.whatsapp);
+      if (rowPhone && myPhone) {
+        // Phone present on both sides — phone match is authoritative
+        return rowPhone === myPhone;
+      }
+      // Legacy fallback: no phone on the row (or borrower has no phone)
+      return r.name.trim().toLowerCase() === myName;
+    });
   }
 
-  // Attach borrowerId by name match
+  // Attach borrowerId — phone-first, then name fallback
   const enriched = result.map((r) => {
-    const b = borrowers.find(
-      (bw) => bw.name.trim().toLowerCase() === r.name.trim().toLowerCase(),
-    );
+    const rowPhone = extractPhoneFromWhatsapp(r.whatsapp);
+    let b = rowPhone
+      ? borrowers.find((bw) => normalizePhone(bw.phone) === rowPhone)
+      : undefined;
+    if (!b) {
+      b = borrowers.find(
+        (bw) => bw.name.trim().toLowerCase() === r.name.trim().toLowerCase(),
+      );
+    }
     return { ...r, borrowerId: b?.id ?? null };
   });
 
@@ -58,26 +74,31 @@ router.post("/emi-loans", requireStaff, async (req, res): Promise<void> => {
 
 // GET /api/emi-loans/:id — get one
 router.get("/emi-loans/:id", async (req, res): Promise<void> => {
-  const { id } = req.params;
+  const id = String(req.params.id);
   const info = req.roleInfo!;
   const row = await emiSheet.getEmiLoanRow(id);
   if (!row) {
     res.status(404).json({ error: "EMI loan not found" });
     return;
   }
-  if (
-    info.role === "borrower" &&
-    row.name.trim().toLowerCase() !== info.borrower?.name.trim().toLowerCase()
-  ) {
-    res.status(403).json({ error: "Forbidden" });
-    return;
+  if (info.role === "borrower") {
+    const myPhone = normalizePhone(info.phone ?? "");
+    const rowPhone = extractPhoneFromWhatsapp(row.whatsapp);
+    const allowed =
+      rowPhone && myPhone
+        ? rowPhone === myPhone
+        : row.name.trim().toLowerCase() === info.name.trim().toLowerCase();
+    if (!allowed) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
   }
   res.json(row);
 });
 
 // PATCH /api/emi-loans/:id — update (staff only)
 router.patch("/emi-loans/:id", requireStaff, async (req, res): Promise<void> => {
-  const { id } = req.params;
+  const id = String(req.params.id);
   const updated = await emiSheet.updateEmiLoanRow(id, req.body);
   if (!updated) {
     res.status(404).json({ error: "EMI loan not found" });
@@ -88,7 +109,7 @@ router.patch("/emi-loans/:id", requireStaff, async (req, res): Promise<void> => 
 
 // DELETE /api/emi-loans/:id — delete (staff only)
 router.delete("/emi-loans/:id", requireStaff, async (req, res): Promise<void> => {
-  const { id } = req.params;
+  const id = String(req.params.id);
   const deleted = await emiSheet.deleteEmiLoanRow(id);
   if (!deleted) {
     res.status(404).json({ error: "EMI loan not found" });

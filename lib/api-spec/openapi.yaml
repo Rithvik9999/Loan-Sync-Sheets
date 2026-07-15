@@ -403,20 +403,16 @@ components:
           type: ["string", "null"]
         name:
           type: ["string", "null"]
-        email:
-          type: ["string", "null"]
         phone:
           type: ["string", "null"]
 
     Borrower:
       type: object
-      required: [id, name, email, createdAt]
+      required: [id, name, createdAt]
       properties:
         id:
           type: string
         name:
-          type: string
-        email:
           type: string
         phone:
           type: ["string", "null"]
@@ -428,13 +424,11 @@ components:
 
     BorrowerInput:
       type: object
-      required: [name, email]
+      required: [name]
       properties:
         name:
           type: string
           minLength: 1
-        email:
-          type: string
         phone:
           type: ["string", "null"]
         password:
@@ -448,8 +442,6 @@ components:
         name:
           type: string
           minLength: 1
-        email:
-          type: string
         phone:
           type: ["string", "null"]
         password:

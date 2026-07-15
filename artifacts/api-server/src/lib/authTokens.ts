@@ -47,6 +47,17 @@ export function normalizePhone(phone: string): string {
   return phone.replace(/\D/g, "").replace(/^91(?=\d{10}$)/, "");
 }
 
+/**
+ * Extracts and normalizes a phone number from a loan/EMI row's `whatsapp`
+ * field. The phone is the first line/token; subsequent lines are notes.
+ * Returns an empty string if no usable phone is found.
+ */
+export function extractPhoneFromWhatsapp(whatsapp: string | null | undefined): string {
+  if (!whatsapp) return "";
+  const firstLine = whatsapp.split(/\n/)[0].trim();
+  return normalizePhone(firstLine);
+}
+
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10);
 }

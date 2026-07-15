@@ -14,6 +14,8 @@ import BorrowerDetail from "@/pages/borrowers/detail";
 import LoansList from "@/pages/loans/list";
 import LoanDetail from "@/pages/loans/detail";
 import LoanRequests from "@/pages/loan-requests";
+import EmiLoansList from "@/pages/emi-loans/list";
+import EmiLoanDetail from "@/pages/emi-loans/detail";
 import NotFound from "@/pages/not-found";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -92,6 +94,12 @@ function Routes() {
       </Route>
       <Route path="/loan-requests">
         {() => <ProtectedStaffRoute component={LoanRequests} />}
+      </Route>
+      <Route path="/emi-loans">
+        {() => <ProtectedStaffRoute component={EmiLoansList} />}
+      </Route>
+      <Route path="/emi-loans/:id">
+        {() => <ProtectedSharedRoute component={EmiLoanDetail} />}
       </Route>
       <Route path="/portal">
         {() => <ProtectedBorrowerRoute component={Portal} />}

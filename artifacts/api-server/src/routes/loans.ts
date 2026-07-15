@@ -14,6 +14,7 @@ import { attachRole, requireStaff } from "../middlewares/auth";
 import * as loansRepo from "../lib/repositories/loans";
 import * as borrowersRepo from "../lib/repositories/borrowers";
 import { attachBorrowerId } from "../lib/repositories/loans";
+import { extractPhoneFromWhatsapp, normalizePhone } from "../lib/authTokens";
 
 const router: IRouter = Router();
 
@@ -29,8 +30,17 @@ router.get("/loans", async (req, res): Promise<void> => {
   let enriched = loans.map((l) => attachBorrowerId(l, borrowers));
 
   if (info.role === "borrower") {
-    const myName = info.borrower?.name.trim().toLowerCase();
-    enriched = enriched.filter((l) => l.name.trim().toLowerCase() === myName);
+    const myPhone = normalizePhone(info.phone ?? "");
+    const myName = info.name.trim().toLowerCase();
+    enriched = enriched.filter((l) => {
+      const rowPhone = extractPhoneFromWhatsapp(l.whatsapp);
+      if (rowPhone && myPhone) {
+        // Phone present on both sides — phone match is authoritative
+        return rowPhone === myPhone;
+      }
+      // Legacy fallback: no phone on the row (or borrower has no phone)
+      return l.name.trim().toLowerCase() === myName;
+    });
   }
 
   const status = req.query.status;
@@ -92,12 +102,17 @@ router.get("/loans/:id", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Loan not found" });
     return;
   }
-  if (
-    info.role === "borrower" &&
-    loan.name.trim().toLowerCase() !== info.borrower?.name.trim().toLowerCase()
-  ) {
-    res.status(403).json({ error: "Forbidden" });
-    return;
+  if (info.role === "borrower") {
+    const myPhone = normalizePhone(info.phone ?? "");
+    const rowPhone = extractPhoneFromWhatsapp(loan.whatsapp);
+    const allowed =
+      rowPhone && myPhone
+        ? rowPhone === myPhone
+        : loan.name.trim().toLowerCase() === info.name.trim().toLowerCase();
+    if (!allowed) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
   }
   const borrowers = await borrowersRepo.listBorrowers();
   res.json(GetLoanResponse.parse(attachBorrowerId(loan, borrowers)));

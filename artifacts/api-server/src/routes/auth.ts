@@ -46,7 +46,6 @@ router.post("/auth/login", async (req, res): Promise<void> => {
         role: "staff",
         borrowerId: null,
         name: "Admin",
-        email: null,
         phone,
       }),
     );
@@ -73,7 +72,6 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       role: "borrower",
       borrowerId: borrower.id,
       name: borrower.name,
-      email: borrower.email || null,
       phone,
     }),
   );

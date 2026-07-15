@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { Link } from "@/components/ui/link";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAppAuth } from "@/hooks/use-app-auth";
+import { useQuery } from "@tanstack/react-query";
+import { EmiLoan, EMI_LOANS_QUERY_KEY, fetchEmiLoans } from "@/pages/emi-loans/components/emi-loan-form-dialog";
 import {
   useListLoans,
   useCreateLoanRequest,
@@ -23,6 +25,7 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
+  CalendarClock,
 } from "lucide-react";
 import {
   Dialog,
@@ -435,6 +438,80 @@ function MyLoanRequests() {
   );
 }
 
+// ─── EMI Loans Section ────────────────────────────────────────────────────────
+
+function MyEmiLoans({ enabled }: { enabled: boolean }) {
+  const { data: emiLoans, isLoading } = useQuery<EmiLoan[]>({
+    queryKey: EMI_LOANS_QUERY_KEY,
+    queryFn: fetchEmiLoans,
+    enabled,
+  });
+
+  if (isLoading) return <Skeleton className="h-24 w-full" />;
+  if (!emiLoans || emiLoans.length === 0) return null;
+
+  const now = new Date();
+
+  return (
+    <div className="space-y-3">
+      <h2 className="text-lg font-semibold font-serif flex items-center gap-2">
+        <CalendarClock className="h-5 w-5 text-muted-foreground" />
+        My EMI Loans
+      </h2>
+      <div className="grid gap-4">
+        {emiLoans.map((loan) => {
+          const isOverdue =
+            loan.nextPaymentDate &&
+            new Date(loan.nextPaymentDate) < now &&
+            loan.status !== "Clear";
+          return (
+            <Card key={loan.id} className="overflow-hidden shadow-sm border-border/60">
+              <div className="bg-primary/5 px-6 py-4 border-b flex justify-between items-center gap-2 flex-wrap">
+                <div>
+                  <h3 className="text-lg font-medium font-serif">
+                    {formatCurrency(loan.principal)} EMI Loan
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    Started {formatDate(loan.transactionDate)} · {loan.tenureMonths} months
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" asChild>
+                  <Link href={`/emi-loans/${loan.id}`}>
+                    Details <ChevronRight className="ml-1 h-4 w-4" />
+                  </Link>
+                </Button>
+              </div>
+              <CardContent className="p-0">
+                <div className="grid md:grid-cols-3 divide-y md:divide-y-0 md:divide-x">
+                  <div className="p-5 space-y-1">
+                    <div className="text-xs text-muted-foreground">Monthly Payment</div>
+                    <div className="text-2xl font-bold font-numeric text-foreground">
+                      {loan.monthlyPayment != null ? formatCurrency(loan.monthlyPayment) : "—"}
+                    </div>
+                  </div>
+                  <div className="p-5 bg-muted/10 space-y-1">
+                    <div className="text-xs text-muted-foreground">Next Payment</div>
+                    <div className={`text-xl font-semibold font-numeric ${isOverdue ? "text-destructive" : ""}`}>
+                      {loan.nextPaymentDate ? formatDate(loan.nextPaymentDate) : "—"}
+                      {isOverdue && <span className="block text-xs font-normal">Overdue</span>}
+                    </div>
+                  </div>
+                  <div className="p-5 space-y-1">
+                    <div className="text-xs text-muted-foreground">Remaining Months</div>
+                    <div className="text-xl font-semibold font-numeric">
+                      {loan.remainingMonths != null ? loan.remainingMonths : "—"}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Portal Page ──────────────────────────────────────────────────────────────
 
 export default function Portal() {
@@ -493,6 +570,8 @@ export default function Portal() {
           ))}
         </div>
       )}
+
+      <MyEmiLoans enabled={isLoaded && role === "borrower"} />
 
       <MyLoanRequests />
 
