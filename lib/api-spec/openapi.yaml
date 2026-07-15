@@ -624,6 +624,9 @@ components:
           type: integer
         purpose:
           type: ["string", "null"]
+        upiId:
+          type: ["string", "null"]
+          description: Optional UPI ID provided by the borrower for payment reference.
         status:
           $ref: "#/components/schemas/LoanRequestStatus"
         createdAt:
@@ -641,6 +644,9 @@ components:
           minimum: 0
         purpose:
           type: ["string", "null"]
+        upiId:
+          type: ["string", "null"]
+          description: Optional UPI ID for payment reference.
 
     LoanRequestUpdate:
       type: object

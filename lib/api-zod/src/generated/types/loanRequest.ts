@@ -17,6 +17,11 @@ export interface LoanRequest {
   tenureDays: number;
   /** @nullable */
   purpose: string | null;
+  /**
+     * Optional UPI ID provided by the borrower for payment reference.
+     * @nullable
+     */
+  upiId?: string | null;
   status: LoanRequestStatus;
   createdAt: string;
 }

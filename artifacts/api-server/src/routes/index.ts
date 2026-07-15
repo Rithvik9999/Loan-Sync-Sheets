@@ -7,6 +7,7 @@ import loansRouter from "./loans";
 import loanRequestsRouter from "./loan-requests";
 import dashboardRouter from "./dashboard";
 import emiLoansRouter from "./emi-loans";
+import debugRouter from "./debug";
 
 const router: IRouter = Router();
 
@@ -18,5 +19,6 @@ router.use(loansRouter);
 router.use(loanRequestsRouter);
 router.use(dashboardRouter);
 router.use(emiLoansRouter);
+router.use(debugRouter);
 
 export default router;

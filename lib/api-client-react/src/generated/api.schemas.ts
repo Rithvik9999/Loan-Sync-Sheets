@@ -16,6 +16,7 @@ export const LoanStatus = {
   Pending: 'Pending',
   Clear: 'Clear',
   Temp: 'Temp',
+  Archived: 'Archived',
 } as const;
 
 export interface LoginBody {
@@ -46,6 +47,11 @@ export interface MeInfo {
   name?: string | null;
   /** @nullable */
   phone?: string | null;
+  /**
+     * Maximum total principal the borrower may have outstanding; null means no limit set. Always null for staff.
+     * @nullable
+     */
+  creditLimit?: number | null;
 }
 
 export interface Borrower {
@@ -222,6 +228,11 @@ export interface LoanRequest {
   tenureDays: number;
   /** @nullable */
   purpose: string | null;
+  /**
+     * Optional UPI ID provided by the borrower for payment reference.
+     * @nullable
+     */
+  upiId?: string | null;
   status: LoanRequestStatus;
   createdAt: string;
 }
@@ -233,6 +244,11 @@ export interface LoanRequestInput {
   tenureDays: number;
   /** @nullable */
   purpose?: string | null;
+  /**
+     * Optional UPI ID for payment reference.
+     * @nullable
+     */
+  upiId?: string | null;
 }
 
 export interface LoanRequestUpdate {

@@ -168,6 +168,7 @@ const loanRequestSchema = z.object({
     .positive("Tenure must be at least 1 day"),
   returnDate: z.string().optional(),
   purpose: z.string().optional(),
+  upiId: z.string().optional(),
 });
 
 type LoanRequestValues = z.infer<typeof loanRequestSchema>;
@@ -257,6 +258,7 @@ function LoanRequestDialog({
           amount: data.amount,
           tenureDays: data.tenureDays,
           purpose: data.purpose || null,
+          upiId: data.upiId || null,
         },
       },
       {
@@ -427,6 +429,23 @@ function LoanRequestDialog({
                 </FormItem>
               )}
             />
+            <FormField
+              control={form.control}
+              name="upiId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>UPI ID (optional)</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="e.g. name@upi"
+                      {...field}
+                      value={field.value ?? ""}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
             {loanPreview && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-3 space-y-2">
                 <p className="text-xs font-semibold text-amber-900 dark:text-amber-300">Estimated breakdown</p>
@@ -503,6 +522,7 @@ const emiRequestSchema = z.object({
     .int()
     .positive("Tenure must be at least 1 month"),
   purpose: z.string().optional(),
+  upiId: z.string().optional(),
 });
 
 type EmiRequestValues = z.infer<typeof emiRequestSchema>;
@@ -558,6 +578,7 @@ function EmiRequestDialog({
           tenureMonths: data.tenureMonths,
           type: "EMI",
           purpose: data.purpose || null,
+          upiId: data.upiId || null,
         }),
       });
       if (!res.ok) {
@@ -661,6 +682,23 @@ function EmiRequestDialog({
                       placeholder="Brief reason for the loan…"
                       rows={2}
                       {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="upiId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>UPI ID (optional)</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="e.g. name@upi"
+                      {...field}
+                      value={field.value ?? ""}
                     />
                   </FormControl>
                   <FormMessage />

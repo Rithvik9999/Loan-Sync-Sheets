@@ -25,6 +25,7 @@ const CreateLoanRequestBodyFlex = z.object({
   tenureMonths: z.coerce.number().int().min(1).optional().nullable(),
   type: z.enum(["Loan", "EMI"]).optional().default("Loan"),
   purpose: z.string().optional().nullable(),
+  upiId: z.string().optional().nullable(),
 });
 
 router.get("/loan-requests", async (req, res): Promise<void> => {
@@ -50,7 +51,7 @@ router.post("/loan-requests", async (req, res): Promise<void> => {
     return;
   }
 
-  const { amount, tenureDays, tenureMonths, type, purpose } = parsed.data;
+  const { amount, tenureDays, tenureMonths, type, purpose, upiId } = parsed.data;
 
   // ── Credit-limit enforcement ──────────────────────────────────────────────
   if (info.borrowerId) {
@@ -117,6 +118,7 @@ router.post("/loan-requests", async (req, res): Promise<void> => {
     tenureMonths: type === "EMI" ? (tenureMonths ?? null) : null,
     type,
     purpose: purpose ?? null,
+    upiId: upiId ?? null,
   });
   res.status(201).json(CreateLoanRequestResponse.parse(request));
 });

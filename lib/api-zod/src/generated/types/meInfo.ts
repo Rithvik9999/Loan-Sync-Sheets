@@ -15,4 +15,9 @@ export interface MeInfo {
   name?: string | null;
   /** @nullable */
   phone?: string | null;
+  /**
+     * Maximum total principal the borrower may have outstanding; null means no limit set. Always null for staff.
+     * @nullable
+     */
+  creditLimit?: number | null;
 }

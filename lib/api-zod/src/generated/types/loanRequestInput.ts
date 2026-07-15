@@ -13,4 +13,9 @@ export interface LoanRequestInput {
   tenureDays: number;
   /** @nullable */
   purpose?: string | null;
+  /**
+     * Optional UPI ID for payment reference.
+     * @nullable
+     */
+  upiId?: string | null;
 }
