@@ -52,36 +52,21 @@ export function SharedLayout({ children }: { children: React.ReactNode }) {
           <Logo />
         </div>
         <nav className="flex-1 space-y-1">
-          {role === "staff" ? (
-            staffNav.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  location.startsWith(item.href)
-                    ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                    : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                )}
-              >
-                <item.icon className="h-4 w-4" />
-                {item.title}
-              </Link>
-            ))
-          ) : (
+          {role === "staff" && staffNav.map((item) => (
             <Link
-              href="/portal"
+              key={item.href}
+              href={item.href}
               className={cn(
                 "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                location.startsWith("/portal")
+                location.startsWith(item.href)
                   ? "bg-sidebar-primary text-sidebar-primary-foreground"
                   : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
               )}
             >
-              <LayoutDashboard className="h-4 w-4" />
-              My Loans
+              <item.icon className="h-4 w-4" />
+              {item.title}
             </Link>
-          )}
+          ))}
         </nav>
         <div className="mt-auto">
           <Button
@@ -98,15 +83,16 @@ export function SharedLayout({ children }: { children: React.ReactNode }) {
       {/* Mobile Topnav */}
       <header className="flex h-16 items-center justify-between border-b bg-sidebar px-4 md:hidden">
         <Logo />
-        <Button variant="ghost" size="icon" onClick={handleLogout}>
+        <Button variant="ghost" size="sm" className="gap-2" onClick={handleLogout}>
           <LogOut className="h-5 w-5" />
+          <span className="text-sm font-medium">Sign Out</span>
         </Button>
       </header>
 
-      {/* Mobile Nav Links */}
-      <div className="md:hidden flex overflow-x-auto border-b bg-sidebar px-2 py-2 hide-scrollbar">
-        {role === "staff" ? (
-          staffNav.map((item) => (
+      {/* Mobile Nav Links — staff only */}
+      {role === "staff" && (
+        <div className="md:hidden flex overflow-x-auto border-b bg-sidebar px-2 py-2 hide-scrollbar">
+          {staffNav.map((item) => (
             <Link
               key={item.href}
               href={item.href}
@@ -120,22 +106,9 @@ export function SharedLayout({ children }: { children: React.ReactNode }) {
               <item.icon className="h-4 w-4" />
               {item.title}
             </Link>
-          ))
-        ) : (
-          <Link
-            href="/portal"
-            className={cn(
-              "flex shrink-0 items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors mx-1",
-              location.startsWith("/portal")
-                ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                : "text-sidebar-foreground hover:bg-sidebar-accent",
-            )}
-          >
-            <LayoutDashboard className="h-4 w-4" />
-            My Loans
-          </Link>
-        )}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto">

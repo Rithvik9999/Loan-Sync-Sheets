@@ -380,7 +380,7 @@ components:
 
     LoanStatus:
       type: string
-      enum: [Pending, Clear, Temp]
+      enum: [Pending, Clear, Temp, Archived]
 
     LoginBody:
       type: object

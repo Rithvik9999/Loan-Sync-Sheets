@@ -192,9 +192,7 @@ export default function LoanRequests() {
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">
-          Loan Requests
-        </h1>
+        <div />
         {pending.length > 0 && (
           <span className="inline-flex items-center justify-center h-6 px-2.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">
             {pending.length} pending

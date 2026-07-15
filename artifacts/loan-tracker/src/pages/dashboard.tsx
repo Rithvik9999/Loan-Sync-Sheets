@@ -81,7 +81,7 @@ export default function Dashboard() {
       (allLoans ?? [])
         .filter((l) => {
           if (l.status !== "Pending") return false;
-          if (l.lateDays != null && l.lateDays > 0) return false; // already overdue
+          if (l.lateDays != null && l.lateDays > 0) return false;
           if (!l.returnDate) return false;
           const due = new Date(l.returnDate);
           const diffDays =
@@ -259,7 +259,7 @@ export default function Dashboard() {
                     href={`/loans/${loan.id}`}
                     className="flex items-center justify-between rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm hover:bg-destructive/10 transition-colors"
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <span className="font-medium truncate block">
                         {loan.name}
                       </span>
@@ -269,7 +269,7 @@ export default function Dashboard() {
                       </span>
                     </div>
                     <div className="text-right shrink-0 ml-3">
-                      <div className="font-numeric font-semibold">
+                      <div className="font-numeric font-semibold text-sm">
                         {loan.finalAmount != null
                           ? formatCurrency(loan.finalAmount)
                           : "—"}
@@ -334,7 +334,7 @@ export default function Dashboard() {
                     href={`/loans/${loan.id}`}
                     className="flex items-center justify-between rounded-lg border bg-card px-3 py-2 text-sm hover:bg-muted/30 transition-colors"
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <span className="font-medium truncate block">
                         {loan.name}
                       </span>
@@ -343,7 +343,7 @@ export default function Dashboard() {
                       </span>
                     </div>
                     <div className="text-right shrink-0 ml-3">
-                      <div className="font-numeric font-semibold">
+                      <div className="font-numeric font-semibold text-sm">
                         {loan.finalAmount != null
                           ? formatCurrency(loan.finalAmount)
                           : "—"}
@@ -383,7 +383,7 @@ export default function Dashboard() {
             {activityData?.items && activityData.items.length > 0 ? (
               <div className="space-y-4">
                 {activityData.items.map((item, i) => (
-                  <div key={i} className="flex items-center gap-3">
+                  <div key={i} className="flex items-center gap-3 min-w-0">
                     <div
                       className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${
                         item.type === "loan_settled"
@@ -398,10 +398,10 @@ export default function Dashboard() {
                       )}
                     </div>
                     <div className="flex-1 min-w-0 space-y-0.5">
-                      <p className="text-sm font-medium leading-none truncate">
+                      <p className="text-sm font-medium leading-none truncate max-w-[180px] sm:max-w-full">
                         {item.description}
                       </p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-muted-foreground truncate">
                         {item.borrowerName}
                       </p>
                     </div>

@@ -235,9 +235,7 @@ export default function EmiLoansList() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">EMI Loans</h1>
-        </div>
+        <div />
         <Button onClick={() => setIsCreateOpen(true)} className="w-full sm:w-auto shadow-sm">
           <Plus className="mr-2 h-4 w-4" /> Record EMI Loan
         </Button>
@@ -286,11 +284,9 @@ export default function EmiLoansList() {
               />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="bg-background w-full sm:w-44">
-                <div className="flex items-center gap-2">
-                  <Filter className="h-4 w-4 text-muted-foreground" />
-                  <SelectValue placeholder="Filter Status" />
-                </div>
+              <SelectTrigger className="bg-background w-full sm:w-44 gap-2">
+                <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
+                <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
@@ -300,11 +296,9 @@ export default function EmiLoansList() {
               </SelectContent>
             </Select>
             <Select value={sortField} onValueChange={(v) => setSortField(v as SortField)}>
-              <SelectTrigger className="bg-background w-full sm:w-56">
-                <div className="flex items-center gap-2">
-                  <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
-                  <SelectValue placeholder="Sort" />
-                </div>
+              <SelectTrigger className="bg-background w-full sm:w-56 gap-2">
+                <ArrowUpDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                <SelectValue placeholder="Sort by…" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="next-payment-asc">Next Payment (soonest/overdue first)</SelectItem>

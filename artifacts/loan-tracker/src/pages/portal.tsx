@@ -77,8 +77,14 @@ import { computeEarlyPaymentDiscount } from "@/lib/early-payment-discount";
 
 const UPI_VPA = "9438556400@slc";
 const WA_ADMIN = "8917656405";
+const SITE_NAME = "openr3.in";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Returns true for loans that should be hidden from cards but kept in totals. */
+function isPayDailyLoan(whatsapp: string | null | undefined): boolean {
+  return (whatsapp ?? "").toLowerCase().includes("pay daily");
+}
 
 function openUpi(amount: number, note = "Loan Repayment") {
   const link = `upi://pay?pa=${UPI_VPA}&am=${amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(note)}`;
@@ -92,6 +98,7 @@ function openWhatsApp(params: {
   amount: number;
   tenure: string;
   purpose?: string | null;
+  loanId?: string;
 }) {
   const lines = [
     `🏦 New ${params.type === "emi" ? "EMI " : ""}Loan Request`,
@@ -100,8 +107,10 @@ function openWhatsApp(params: {
     `💰 Amount: ₹${params.amount.toLocaleString("en-IN")}`,
     `📅 Tenure: ${params.tenure}`,
   ];
+  if (params.loanId) lines.push(`🔖 ID: ${params.loanId}`);
   if (params.purpose) lines.push(`📝 Purpose: ${params.purpose}`);
   lines.push(`🗓 Date: ${new Date().toLocaleDateString("en-IN")}`);
+  lines.push(SITE_NAME);
   const msg = lines.join("\n");
   window.open(`https://wa.me/91${WA_ADMIN}?text=${encodeURIComponent(msg)}`, "_blank");
 }
@@ -111,15 +120,18 @@ function notifyAdminPaymentMade(params: {
   name: string;
   amount: number;
   label: string;
+  loanId?: string;
 }) {
-  const msg = [
+  const lines = [
     `💸 Payment Made`,
     `👤 ${params.name}`,
+    params.loanId ? `🔖 ID: ${params.loanId}` : null,
     `📌 ${params.label}`,
     `💰 Amount: ₹${params.amount.toLocaleString("en-IN")}`,
     `Please verify and mark as paid. 🙏`,
-  ].join("\n");
-  window.open(`https://wa.me/91${WA_ADMIN}?text=${encodeURIComponent(msg)}`, "_blank");
+    SITE_NAME,
+  ].filter(Boolean) as string[];
+  window.open(`https://wa.me/91${WA_ADMIN}?text=${encodeURIComponent(lines.join("\n"))}`, "_blank");
 }
 
 // ─── Loan Request Dialog ──────────────────────────────────────────────────────
@@ -488,16 +500,18 @@ function PaymentConfirmDialog({
   onOpenChange,
   amount,
   label,
+  loanId,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   amount: number;
   label: string;
+  loanId?: string;
 }) {
   const { name } = useAppAuth();
 
   const handleYes = () => {
-    notifyAdminPaymentMade({ name: name ?? "Borrower", amount, label });
+    notifyAdminPaymentMade({ name: name ?? "Borrower", amount, label, loanId });
     onOpenChange(false);
   };
 
@@ -540,6 +554,7 @@ function RepayDialog({
   label,
   outstanding,
   earlyDiscount = 0,
+  loanId,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -547,6 +562,7 @@ function RepayDialog({
   outstanding: number;
   /** Estimated early-payment discount (rupees), if this loan qualifies. */
   earlyDiscount?: number;
+  loanId?: string;
 }) {
   const [mode, setMode] = useState<"full" | "custom">("full");
   const [custom, setCustom] = useState("");
@@ -689,6 +705,7 @@ function RepayDialog({
         onOpenChange={setConfirmOpen}
         amount={amount}
         label={label}
+        loanId={loanId}
       />
     </Dialog>
   );
@@ -791,6 +808,8 @@ function BulkRepayDialog({
 type RepayItem = {
   key: string;
   id: string;
+  /** Human-readable loan/EMI ID (e.g. L042, E003) */
+  loanId?: string;
   type: "loan" | "emi";
   label: string;
   subLabel: string;
@@ -813,6 +832,7 @@ function buildRepaymentItems(
 
   for (const l of loans ?? []) {
     if (l.status === "Clear") continue;
+    if (isPayDailyLoan(l.whatsapp)) continue; // hidden from cards, kept in totals
     const outstanding = Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0);
     if (outstanding <= 0) continue;
     let dueDate: Date | null = null;
@@ -847,6 +867,7 @@ function buildRepaymentItems(
     items.push({
       key: `loan-${l.id}`,
       id: l.id,
+      loanId: l.loanId,
       type: "loan",
       label: `${formatCurrency(l.principal)} Loan`,
       subLabel: dueDate
@@ -863,6 +884,7 @@ function buildRepaymentItems(
 
   for (const e of emiLoans ?? []) {
     if (e.status === "Clear") continue;
+    if (isPayDailyLoan((e as any).whatsapp)) continue; // hidden from cards, kept in totals
     const monthly = e.monthlyPayment ?? 0;
     if (monthly <= 0) continue;
     const dueDate = e.nextPaymentDate ? new Date(e.nextPaymentDate) : null;
@@ -870,6 +892,7 @@ function buildRepaymentItems(
     items.push({
       key: `emi-${e.id}`,
       id: e.id,
+      loanId: (e as any).emiId,
       type: "emi",
       label: `${formatCurrency(e.principal)} EMI`,
       subLabel: dueDate
@@ -923,16 +946,6 @@ function RepayItemCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-sm">{item.label}</span>
-            <Badge
-              variant="outline"
-              className={`text-xs ${
-                item.type === "emi"
-                  ? "border-blue-200 text-blue-700"
-                  : "border-slate-200 text-slate-600"
-              }`}
-            >
-              {item.type === "emi" ? "EMI" : "Loan"}
-            </Badge>
             {item.isOverdue && (
               <Badge variant="destructive" className="text-xs gap-1">
                 <AlertTriangle className="h-2.5 w-2.5" />
@@ -992,6 +1005,7 @@ function RepayItemCard({
         label={item.label}
         outstanding={item.outstanding}
         earlyDiscount={item.earlyDiscount}
+        loanId={item.loanId}
       />
     </>
   );
@@ -1289,6 +1303,7 @@ function LoanCard({ loan }: { loan: Loan }) {
         label={`${formatCurrency(loan.principal)} Loan`}
         outstanding={Math.max(outstanding, 0)}
         earlyDiscount={earlyDiscount}
+        loanId={loan.loanId}
       />
     </>
   );
@@ -1550,6 +1565,150 @@ function AlreadyPaidSection({
   );
 }
 
+// ─── Loans Tab (My Loans with multi-select prepayment) ───────────────────────
+
+function LoansTab({
+  loans,
+  isLoading,
+  onRequestLoan,
+}: {
+  loans: Loan[];
+  isLoading: boolean;
+  onRequestLoan: () => void;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const now = new Date();
+
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  // Filter out pay-daily loans from display
+  const displayLoans = loans.filter((l) => !isPayDailyLoan(l.whatsapp));
+
+  const selectedItems = displayLoans.filter((l) => selected.has(l.id));
+  const bulkTotal = selectedItems.reduce(
+    (s, l) => s + Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0),
+    0,
+  );
+  const bulkDiscountTotal = selectedItems.reduce((s, l) => {
+    const outstanding = Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0);
+    const dueDate = l.returnDate
+      ? new Date(l.returnDate)
+      : l.transactionDate && l.tenureDays
+        ? (() => {
+            const d = new Date(l.transactionDate);
+            d.setDate(d.getDate() + l.tenureDays);
+            return d;
+          })()
+        : null;
+    const isOverdue = !!(dueDate && dueDate < now);
+    const daysUntilDue = dueDate
+      ? Math.ceil((dueDate.getTime() - now.getTime()) / 86400000)
+      : null;
+    if (
+      !isOverdue &&
+      daysUntilDue !== null &&
+      daysUntilDue > EARLY_PAYMENT_WINDOW_DAYS
+    ) {
+      return (
+        s +
+        Math.min(
+          computeEarlyPaymentDiscount({
+            principal: l.principal,
+            tenureDays: l.tenureDays,
+            transactionDate: l.transactionDate,
+            partPayment: l.partPayment,
+            flatFee: l.flatFee,
+            interest: l.interest,
+            paymentDate: now,
+          }).discount,
+          outstanding,
+        )
+      );
+    }
+    return s;
+  }, 0);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-40 w-full" />
+        <Skeleton className="h-40 w-full" />
+      </div>
+    );
+  }
+
+  if (displayLoans.length === 0) {
+    return (
+      <div className="py-10">
+        <EmptyState
+          title="No active loans"
+          description="You don't have any active loans. Request one to get started."
+          icon={<CreditCard />}
+          action={
+            <Button onClick={onRequestLoan}>
+              <Plus className="mr-2 h-4 w-4" /> Request a Loan
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {selected.size > 0 && (
+        <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm">
+            <CheckSquare className="h-4 w-4 text-primary" />
+            <span className="font-medium">{selected.size} selected</span>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setSelected(new Set())}>
+              Clear
+            </Button>
+            <Button
+              size="sm"
+              className="bg-emerald-700 hover:bg-emerald-800 text-white"
+              onClick={() => setBulkOpen(true)}
+            >
+              <Banknote className="mr-1.5 h-3.5 w-3.5" />
+              Pay {formatCurrency(Math.max(bulkTotal - bulkDiscountTotal, 0))}
+            </Button>
+          </div>
+        </div>
+      )}
+      <div className="grid gap-3">
+        {displayLoans.map((loan) => (
+          <div key={loan.id} className="flex items-start gap-2">
+            <Checkbox
+              className="mt-4 shrink-0"
+              checked={selected.has(loan.id)}
+              onCheckedChange={() => toggle(loan.id)}
+              aria-label={`Select ${formatCurrency(loan.principal)} loan`}
+            />
+            <div className="flex-1 min-w-0">
+              <LoanCard loan={loan} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <BulkRepayDialog
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        total={bulkTotal}
+        count={selected.size}
+        discountTotal={bulkDiscountTotal}
+      />
+    </div>
+  );
+}
+
 // ─── Portal Page ──────────────────────────────────────────────────────────────
 
 export default function Portal() {
@@ -1704,7 +1863,7 @@ export default function Portal() {
             </CardHeader>
             <CardContent className="px-3 pb-3">
               <div
-                className={`text-2xl font-bold font-numeric ${hasOverdue ? "text-destructive" : ""}`}
+                className={`text-xl font-bold font-numeric leading-tight truncate ${hasOverdue ? "text-destructive" : ""}`}
               >
                 {formatCurrency(totalOutstanding)}
               </div>
@@ -1771,33 +1930,15 @@ export default function Portal() {
         </TabsContent>
 
         {/* ── My Loans Tab ── */}
-        <TabsContent value="loans" className="mt-4 space-y-4">
-          {isLoadingLoans ? (
-            <div className="space-y-4">
-              <Skeleton className="h-40 w-full" />
-              <Skeleton className="h-40 w-full" />
-            </div>
-          ) : !loans || activeLoans.length === 0 ? (
-            <div className="py-10">
-              <EmptyState
-                title="No active loans"
-                description="You don't have any active loans. Request one to get started."
-                icon={<CreditCard />}
-                action={
-                  <Button onClick={() => setLoanRequestOpen(true)}>
-                    <Plus className="mr-2 h-4 w-4" /> Request a Loan
-                  </Button>
-                }
-              />
-            </div>
-          ) : (
-            <div className="grid gap-4">
-              {activeLoans.map((loan) => (
-                <LoanCard key={loan.id} loan={loan} />
-              ))}
-            </div>
-          )}
-          <MyLoanRequests />
+        <TabsContent value="loans" className="mt-4">
+          <LoansTab
+            loans={activeLoans}
+            isLoading={isLoadingLoans}
+            onRequestLoan={() => setLoanRequestOpen(true)}
+          />
+          <div className="mt-4">
+            <MyLoanRequests />
+          </div>
         </TabsContent>
 
         {/* ── My EMI Tab ── */}

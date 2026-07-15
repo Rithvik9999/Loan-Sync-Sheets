@@ -23,7 +23,7 @@
  *  F(5)  principal          - input
  *  G(6)  tenureDays         - input
  *  H(7)  whatsapp           - input (phone, sometimes with free-form notes)
- *  I(8)  status             - input ("Pending" | "Clear" | "Temp")
+ *  I(8)  status             - input ("Pending" | "Clear" | "Temp" | "Archived")
  *  J(9)  flatFee            - COMPUTED
  *  K(10) interestPct        - COMPUTED
  *  L(11) interest           - COMPUTED
@@ -71,7 +71,7 @@ const COL = {
   NOTES: 21,
 } as const;
 
-export type LoanStatus = "Pending" | "Clear" | "Temp";
+export type LoanStatus = "Pending" | "Clear" | "Temp" | "Archived";
 
 export interface LoanRow {
   id: string;

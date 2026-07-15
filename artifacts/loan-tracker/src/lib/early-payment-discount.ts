@@ -12,7 +12,7 @@
  * This module estimates a fair discount for early repayment by re-running
  * the *same* tiered flat-fee / interest formulas the sheet uses, but with
  * the tenure replaced by how many days the loan was actually held (plus a
- * 3-day grace/processing buffer), and comparing that to what the sheet
+ * 10-day prepayment fee buffer), and comparing that to what the sheet
  * already charged for the full agreed tenure.
  *
  * IMPORTANT: this is an estimate shown to the borrower as an incentive to
@@ -136,4 +136,29 @@ export function computeEarlyPaymentDiscount(
   );
 
   return { elapsedDays, chargeDays, discount };
+}
+
+/**
+ * Estimates the total final amount the borrower will owe,
+ * mirroring the Heat Map sheet's formulas.
+ * Used for preview in loan request dialogs and admin approval pages.
+ */
+export function estimateFinalAmount(params: {
+  principal: number;
+  tenureDays: number;
+  discount?: number;
+}): { flatFee: number; interest: number; finalAmount: number } {
+  const { principal, tenureDays, discount = 0 } = params;
+  if (!principal || !tenureDays) {
+    return { flatFee: 0, interest: 0, finalAmount: principal - discount };
+  }
+  const flatFee = Math.round(principal * flatFeeTierRate(tenureDays));
+  const interest = Math.round(
+    principal *
+      (0.1 + tenureInterestTierRate(tenureDays) + principalInterestTierRate(principal)) /
+      30 *
+      tenureDays,
+  );
+  const finalAmount = Math.max(0, principal + flatFee + interest - discount);
+  return { flatFee, interest, finalAmount };
 }

@@ -21,6 +21,7 @@ import { Link } from "@/components/ui/link";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { estimateFinalAmount } from "@/lib/early-payment-discount";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -42,18 +43,42 @@ function sanitizePhoneForWa(raw: string): string {
   return digits.slice(0, 10);
 }
 
-function notifyBorrowerPaymentConfirmed(params: {
+function notifyBorrowerLoanApproved(params: {
   phone: string;
   name: string;
-  amount: number;
+  principal: number;
+  tenureLabel: string;
+  flatFee: number;
+  interest: number;
+  discount: number;
+  finalAmount: number;
+  transactionDate: string;
+  repaymentDueDate: string;
+  requestId?: string;
 }): void {
   const phone = sanitizePhoneForWa(params.phone);
   if (phone.length !== 10) return;
-  const msg = [
-    `✅ Payment Confirmed`,
-    `Hi ${params.name}, we've recorded your payment of ₹${params.amount.toLocaleString("en-IN")}.`,
-    `Thank you!`,
-  ].join("\n");
+  const lines = [
+    `✅ Loan Approved — Hi ${params.name}!`,
+    ``,
+    `📋 Loan Summary:`,
+    `• Principal: ₹${params.principal.toLocaleString("en-IN")}`,
+    `• Tenure: ${params.tenureLabel}`,
+    `• Flat Fee (est.): ₹${params.flatFee.toLocaleString("en-IN")}`,
+    `• Interest (est.): ₹${params.interest.toLocaleString("en-IN")}`,
+  ];
+  if (params.discount > 0) {
+    lines.push(`• Discount: −₹${params.discount.toLocaleString("en-IN")}`);
+  }
+  lines.push(
+    `• Final Amount (est.): ₹${params.finalAmount.toLocaleString("en-IN")}`,
+    ``,
+    `📅 Transaction Date: ${params.transactionDate}`,
+    `📅 Repayment Due: ${params.repaymentDueDate}`,
+  );
+  if (params.requestId) lines.push(`🔖 ID: ${params.requestId}`);
+  lines.push(``, `openr3.in`);
+  const msg = lines.join("\n");
   window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`, "_blank");
 }
 
@@ -86,12 +111,16 @@ export default function LoanRequestDetail() {
 
   const discountNum = Number(discount) || 0;
   const principal = req?.amount ?? 0;
+  const tenureDays = req?.tenureDays ?? 0;
   // NOTE: discount is stored as a negative discountOrCharges in the sheet.
   // The sheet's array formula computes: finalAmount = principal + flatFee + interest + discountOrCharges + lateFees.
-  // At approval time we don't have the sheet-computed finalAmount yet, so we show an estimate:
-  // the admin enters the disbursed principal, and the discount will reduce the sheet-computed final total.
-  // We write discountOrCharges = -discountNum so the sheet formula applies it to the full final amount.
-  const estimatedFinalAmount = Math.max(0, principal - discountNum);
+  // We estimate flat fee + interest using the same tiered formulas from early-payment-discount.ts.
+  // The admin-entered discount reduces this estimated final amount.
+  const {
+    flatFee: estimatedFlatFee,
+    interest: estimatedInterest,
+    finalAmount: estimatedFinalAmount,
+  } = estimateFinalAmount({ principal, tenureDays, discount: discountNum });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const reqAny = req as any;
@@ -128,10 +157,26 @@ export default function LoanRequestDetail() {
         description: "Loan entry has been recorded in your sheet. Opening WhatsApp to confirm with the borrower…",
       });
       if (req.phone) {
-        notifyBorrowerPaymentConfirmed({
+        const isEmiReq = (req as any).type === "EMI";
+        const tenureLabel = isEmiReq
+          ? `${(req as any).tenureMonths ?? "—"} months`
+          : `${req.tenureDays} days`;
+        const txDate = new Date(transactionDate);
+        const dueDate = new Date(txDate);
+        dueDate.setDate(dueDate.getDate() + (req.tenureDays ?? 0));
+        const dueDateStr = dueDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+        notifyBorrowerLoanApproved({
           phone: req.phone,
           name: req.name,
-          amount: estimatedFinalAmount,
+          principal,
+          tenureLabel,
+          flatFee: estimatedFlatFee,
+          interest: estimatedInterest,
+          discount: discountNum,
+          finalAmount: estimatedFinalAmount,
+          transactionDate,
+          repaymentDueDate: dueDateStr,
+          requestId: req.id,
         });
       }
       setLocation("/loan-requests");
@@ -334,22 +379,33 @@ export default function LoanRequestDetail() {
             {/* Live breakdown */}
             <div className="rounded-lg border bg-background p-4 space-y-2.5">
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Principal (disbursed)</span>
+                <span className="text-muted-foreground">Principal</span>
                 <span className="font-numeric font-medium">
                   {formatCurrency(principal)}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Discount on final amount</span>
-                <span className="font-numeric text-emerald-700">
-                  − {formatCurrency(discountNum)}
-                </span>
+                <span className="text-muted-foreground">Est. flat fee</span>
+                <span className="font-numeric">+ {formatCurrency(estimatedFlatFee)}</span>
               </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Est. interest</span>
+                <span className="font-numeric">+ {formatCurrency(estimatedInterest)}</span>
+              </div>
+              {discountNum > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Discount (applied to final)</span>
+                  <span className="font-numeric text-emerald-700">
+                    − {formatCurrency(discountNum)}
+                  </span>
+                </div>
+              )}
               <div className="flex items-start gap-2 rounded bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                <span>Discount is stored as a negative charge in the sheet; it reduces the sheet-computed final amount (principal + fees + interest), not just the principal.</span>
+                <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <span>Estimates mirror the sheet's tiered formula. The sheet's array formula is the authoritative final figure once the loan row is created.</span>
               </div>
               <div className="flex justify-between border-t pt-2.5 mt-1">
-                <span className="font-semibold text-sm">Estimated Amount Collected</span>
+                <span className="font-semibold text-sm">Estimated Final Amount</span>
                 <span className="font-bold font-numeric text-xl">
                   {formatCurrency(estimatedFinalAmount)}
                 </span>
