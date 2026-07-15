@@ -89,6 +89,31 @@ async function ensureSheetTab(title: string, headers: string[]): Promise<void> {
   ensuredTabs.add(title);
 }
 
+/**
+ * Read the header row of a sheet tab and return a map of header name → 0-based column index.
+ * Falls back to the positional index for any header not present in the sheet's row 1.
+ */
+async function getSheetHeaderMap(
+  title: string,
+  fallbackHeaders: string[],
+): Promise<Map<string, number>> {
+  const sheets = getSheets();
+  const spreadsheetId = getSpreadsheetId();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${title}!1:1`,
+  });
+  const sheetHeaderRow = (res.data.values?.[0] ?? []).map(String);
+  const map = new Map<string, number>();
+  // Populate from the sheet's actual header row first
+  sheetHeaderRow.forEach((h, idx) => map.set(h, idx));
+  // Fill in any expected headers that are missing from the sheet using positional fallback
+  fallbackHeaders.forEach((h, idx) => {
+    if (!map.has(h)) map.set(h, idx);
+  });
+  return map;
+}
+
 export async function readTab(
   title: string,
   headers: string[],
@@ -96,9 +121,17 @@ export async function readTab(
   await ensureSheetTab(title, headers);
   const sheets = getSheets();
   const spreadsheetId = getSpreadsheetId();
+
+  // Read the actual header row so we can map by column name rather than positional
+  // index. This tolerates sheets whose column order differs from the `headers` array
+  // (e.g. a tab that existed before a new column was added to the code).
+  const headerMap = await getSheetHeaderMap(title, headers);
+
+  // Determine the furthest right column we need to fetch
+  const maxColIdx = Math.max(...headers.map((h) => headerMap.get(h) ?? 0));
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${title}!A2:${columnLetter(headers.length)}`,
+    range: `${title}!A2:${columnLetter(Math.max(maxColIdx + 1, headers.length))}`,
   });
   const values = res.data.values ?? [];
   const rows: SheetRow[] = [];
@@ -106,8 +139,9 @@ export async function readTab(
   values.forEach((row, i) => {
     if (row.every((cell) => cell === undefined || cell === "")) return;
     const obj: SheetRow = {};
-    headers.forEach((h, idx) => {
-      obj[h] = row[idx] !== undefined && row[idx] !== null ? String(row[idx]) : "";
+    headers.forEach((h) => {
+      const colIdx = headerMap.get(h) ?? 0;
+      obj[h] = row[colIdx] !== undefined && row[colIdx] !== null ? String(row[colIdx]) : "";
     });
     rows.push(obj);
     rowNumbers.push(i + 2);
@@ -123,12 +157,23 @@ export async function appendRow(
   await ensureSheetTab(title, headers);
   const sheets = getSheets();
   const spreadsheetId = getSpreadsheetId();
+
+  // Use the sheet's actual column order so we write values into the right cells
+  // even if the sheet's column order differs from the `headers` array.
+  const headerMap = await getSheetHeaderMap(title, headers);
+  const maxColIdx = Math.max(...headers.map((h) => headerMap.get(h) ?? 0));
+  const rowData: string[] = new Array(maxColIdx + 1).fill("");
+  headers.forEach((h) => {
+    const colIdx = headerMap.get(h) ?? headers.indexOf(h);
+    rowData[colIdx] = row[h] ?? "";
+  });
+
   await sheets.spreadsheets.values.append({
     spreadsheetId,
     range: `${title}!A:A`,
     valueInputOption: "RAW",
     insertDataOption: "INSERT_ROWS",
-    requestBody: { values: [headers.map((h) => row[h] ?? "")] },
+    requestBody: { values: [rowData] },
   });
 }
 
@@ -140,11 +185,21 @@ export async function updateRowAt(
 ): Promise<void> {
   const sheets = getSheets();
   const spreadsheetId = getSpreadsheetId();
+
+  // Use the sheet's actual column order so we write values into the right cells.
+  const headerMap = await getSheetHeaderMap(title, headers);
+  const maxColIdx = Math.max(...headers.map((h) => headerMap.get(h) ?? 0));
+  const rowData: string[] = new Array(maxColIdx + 1).fill("");
+  headers.forEach((h) => {
+    const colIdx = headerMap.get(h) ?? headers.indexOf(h);
+    rowData[colIdx] = row[h] ?? "";
+  });
+
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `${title}!A${rowNumber}:${columnLetter(headers.length)}${rowNumber}`,
+    range: `${title}!A${rowNumber}:${columnLetter(maxColIdx + 1)}${rowNumber}`,
     valueInputOption: "RAW",
-    requestBody: { values: [headers.map((h) => row[h] ?? "")] },
+    requestBody: { values: [rowData] },
   });
 }
 
