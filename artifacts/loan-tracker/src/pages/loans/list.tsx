@@ -5,6 +5,7 @@ import {
   Loan,
 } from "@workspace/api-client-react";
 import { useState, useMemo, useEffect } from "react";
+import { useLocation } from "wouter";
 import { Link } from "@/components/ui/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -233,6 +234,7 @@ function LoansTable({
       />
     );
   }
+  const [, setLocation] = useLocation();
   return (
     <div className="overflow-x-auto">
       <Table>
@@ -256,7 +258,7 @@ function LoansTable({
             <TableRow
               key={loan.id}
               className={`group cursor-pointer ${selected.has(loan.id) ? "bg-primary/5" : ""}`}
-              onClick={() => onToggle(loan.id)}
+              onClick={() => setLocation(`/loans/${loan.id}`)}
             >
               <TableCell onClick={(e) => e.stopPropagation()}>
                 <Checkbox
@@ -368,12 +370,23 @@ export default function LoansList() {
     [allLoans],
   );
 
-  // Date range min/max for slider
+  // Helper: compute repayment/due date timestamp for a loan
+  const getLoanDueTs = (l: Loan): number | null => {
+    if (l.returnDate) return new Date(l.returnDate).getTime();
+    if (l.transactionDate && l.tenureDays) {
+      const d = new Date(l.transactionDate);
+      d.setDate(d.getDate() + l.tenureDays);
+      return d.getTime();
+    }
+    return null;
+  };
+
+  // Date range min/max based on repayment/due date
   const { minLoanTs, maxLoanTs } = useMemo(() => {
     const dates = (allLoans ?? [])
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .filter((l) => (l.status as any) !== "Archived")
-      .map((l) => (l.transactionDate ? new Date(l.transactionDate).getTime() : null))
+      .map(getLoanDueTs)
       .filter(Boolean) as number[];
     if (dates.length === 0) return { minLoanTs: 0, maxLoanTs: 0 };
     return { minLoanTs: Math.min(...dates), maxLoanTs: Math.max(...dates) };
@@ -402,9 +415,9 @@ export default function LoansList() {
         .filter((l) => l.name.toLowerCase().includes(search.toLowerCase()))
         .filter((l) => {
           if (!dateRange || minLoanTs === maxLoanTs) return true;
-          if (!l.transactionDate) return true;
-          const ts = new Date(l.transactionDate).getTime();
-          return ts >= effectiveDateRange[0] && ts <= effectiveDateRange[1];
+          const dueTs = getLoanDueTs(l);
+          if (dueTs === null) return true;
+          return dueTs >= effectiveDateRange[0] && dueTs <= effectiveDateRange[1];
         })
         .sort((a, b) => {
           // Always sort by latest transaction date first
@@ -722,7 +735,9 @@ export default function LoansList() {
                 </div>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger className="bg-background w-full sm:w-44">
-                    <SelectValue placeholder="Pending" />
+                    <SelectValue>
+                      {statusFilter === "all" ? "All (excl. Cleared)" : (statusFilter || "Filter")}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All (excl. Cleared)</SelectItem>

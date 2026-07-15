@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { useLocation } from "wouter";
 import { PieChart, Pie, Cell } from "recharts";
 import { addDays, differenceInCalendarDays, parseISO, format as dateFnsFormat } from "date-fns";
 import { Link } from "@/components/ui/link";
@@ -1148,24 +1149,31 @@ function RepayItemCard({
   showCheckbox: boolean;
 }) {
   const [repayOpen, setRepayOpen] = useState(false);
+  const [, setLocation] = useLocation();
   const detailHref =
     item.type === "loan" ? `/loans/${item.id}` : `/emi-loans/${item.id}`;
 
   return (
     <>
       <div
-        className={`flex items-center gap-3 rounded-xl border px-4 py-3 transition-colors ${
+        role="button"
+        tabIndex={0}
+        className={`flex items-center gap-3 rounded-xl border px-4 py-3 transition-colors cursor-pointer ${
           item.isOverdue
             ? "border-destructive/40 bg-destructive/5"
             : "border-border bg-card"
         } ${selected ? "ring-2 ring-primary/30" : ""}`}
+        onClick={() => setLocation(detailHref)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setLocation(detailHref); }}
       >
         {showCheckbox && (
-          <Checkbox
-            checked={selected}
-            onCheckedChange={onToggle}
-            aria-label={`Select ${item.label}`}
-          />
+          <div onClick={(e) => e.stopPropagation()}>
+            <Checkbox
+              checked={selected}
+              onCheckedChange={onToggle}
+              aria-label={`Select ${item.label}`}
+            />
+          </div>
         )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -1201,7 +1209,7 @@ function RepayItemCard({
               {formatCurrency(item.outstanding)}
             </div>
           )}
-          <div className="flex gap-1.5">
+          <div className="flex gap-1.5" onClick={(e) => e.stopPropagation()}>
             <Button
               size="sm"
               variant="ghost"
@@ -1839,10 +1847,8 @@ function AlreadyPaidSection({
                 </span>
                 <div className="text-xs text-muted-foreground mt-0.5">
                   Paid on {(item as Loan).dateOfPartPayment
-                ? formatDate((item as Loan).dateOfPartPayment!)
-                : (item as Loan).returnDate
-                  ? formatDate((item as Loan).returnDate!)
-                  : "—"}
+                    ? formatDate((item as Loan).dateOfPartPayment!)
+                    : "—"}
                 </div>
               </div>
               <div className="text-right">
@@ -1944,11 +1950,20 @@ function LoansTab({
   // Filter out pay-daily loans from display
   const displayLoans = loans.filter((l) => !isPayDailyLoan(l.whatsapp));
 
-  // Date range min/max from displayLoans
+  // Compute due/repayment timestamp for a loan (used for date range slider)
+  const getLoanDueTs = (l: Loan): number | null => {
+    if (l.returnDate) return new Date(l.returnDate).getTime();
+    if (l.transactionDate && l.tenureDays) {
+      const d = new Date(l.transactionDate);
+      d.setDate(d.getDate() + l.tenureDays);
+      return d.getTime();
+    }
+    return null;
+  };
+
+  // Date range min/max based on repayment/due date
   const { minTs, maxTs } = useMemo(() => {
-    const dates = displayLoans
-      .map((l) => (l.transactionDate ? new Date(l.transactionDate).getTime() : null))
-      .filter(Boolean) as number[];
+    const dates = displayLoans.map(getLoanDueTs).filter(Boolean) as number[];
     if (dates.length === 0) return { minTs: 0, maxTs: 0 };
     return { minTs: Math.min(...dates), maxTs: Math.max(...dates) };
   }, [displayLoans]);
@@ -1962,14 +1977,14 @@ function LoansTab({
 
   const effectiveDateRange = dateRange ?? [minTs, maxTs];
 
-  // Filter displayLoans by date range
+  // Filter displayLoans by repayment/due date range
   const dateFilteredLoans = useMemo(() => {
     if (minTs === 0 && maxTs === 0) return displayLoans;
     const [start, end] = effectiveDateRange;
     return displayLoans.filter((l) => {
-      if (!l.transactionDate) return true;
-      const ts = new Date(l.transactionDate).getTime();
-      return ts >= start && ts <= end;
+      const dueTs = getLoanDueTs(l);
+      if (dueTs === null) return true;
+      return dueTs >= start && dueTs <= end;
     });
   }, [displayLoans, effectiveDateRange, minTs, maxTs]);
 

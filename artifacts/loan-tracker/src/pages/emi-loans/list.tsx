@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { useLocation } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@/components/ui/link";
 import { Button } from "@/components/ui/button";
@@ -172,10 +173,10 @@ export default function EmiLoansList() {
 
   const now = new Date();
 
-  // Date range min/max for slider
+  // Date range min/max based on next payment date (repayment date)
   const { minEmiTs, maxEmiTs } = useMemo(() => {
     const dates = (loans ?? [])
-      .map((l) => (l.transactionDate ? new Date(l.transactionDate).getTime() : null))
+      .map((l) => (l.nextPaymentDate ? new Date(l.nextPaymentDate).getTime() : null))
       .filter(Boolean) as number[];
     if (dates.length === 0) return { minEmiTs: 0, maxEmiTs: 0 };
     return { minEmiTs: Math.min(...dates), maxEmiTs: Math.max(...dates) };
@@ -203,8 +204,8 @@ export default function EmiLoansList() {
         })
         .filter((l) => {
           if (!dateRange || minEmiTs === maxEmiTs) return true;
-          if (!l.transactionDate) return true;
-          const ts = new Date(l.transactionDate).getTime();
+          if (!l.nextPaymentDate) return true;
+          const ts = new Date(l.nextPaymentDate).getTime();
           return ts >= effectiveDateRange[0] && ts <= effectiveDateRange[1];
         })
         .sort((a, b) => {
@@ -234,6 +235,7 @@ export default function EmiLoansList() {
     }
   };
 
+  const [, setLocation] = useLocation();
   const selectedLoans = (filtered ?? []).filter((l) => selected.has(l.id));
   const pendingSelected = selectedLoans.filter((l) => l.status !== "Clear");
 
@@ -290,7 +292,9 @@ export default function EmiLoansList() {
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="bg-background w-full sm:w-44">
-                <SelectValue placeholder="Pending" />
+                <SelectValue>
+                  {statusFilter === "all" ? "All (excl. Cleared)" : (statusFilter || "Filter")}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All (excl. Cleared)</SelectItem>
@@ -373,7 +377,7 @@ export default function EmiLoansList() {
                     <TableRow
                       key={loan.id}
                       className={`group cursor-pointer ${selected.has(loan.id) ? "bg-primary/5" : ""}`}
-                      onClick={() => toggleRow(loan.id)}
+                      onClick={() => setLocation(`/emi-loans/${loan.id}`)}
                     >
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <Checkbox
