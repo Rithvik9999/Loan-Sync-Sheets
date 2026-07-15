@@ -11,7 +11,7 @@ import * as loanRequestsRepo from "../lib/repositories/loanRequests";
 import * as borrowersRepo from "../lib/repositories/borrowers";
 import * as loansRepo from "../lib/repositories/loans";
 import * as emiSheet from "../lib/emiSheet";
-import { extractPhoneFromWhatsapp, normalizePhone } from "../lib/authTokens";
+import { extractPhoneFromWhatsapp, normalizePhone, normalizeName } from "../lib/authTokens";
 
 const router: IRouter = Router();
 
@@ -57,7 +57,7 @@ router.post("/loan-requests", async (req, res): Promise<void> => {
       const borrower = await borrowersRepo.getBorrower(info.borrowerId);
       if (borrower?.creditLimit != null && borrower.creditLimit > 0) {
         const myPhone = normalizePhone(info.phone ?? "");
-        const myName = info.name.trim().toLowerCase();
+        const myName = normalizeName(info.name);
 
         const [loans, emiLoans] = await Promise.all([
           loansRepo.listLoans(),
@@ -70,7 +70,7 @@ router.post("/loan-requests", async (req, res): Promise<void> => {
         ) => {
           const normRow = rowPhone ? normalizePhone(rowPhone) : null;
           const phoneMatch = !!(normRow && myPhone && normRow === myPhone);
-          const nameMatch = rowName.trim().toLowerCase() === myName;
+          const nameMatch = normalizeName(rowName) === myName;
           return phoneMatch || nameMatch;
         };
 

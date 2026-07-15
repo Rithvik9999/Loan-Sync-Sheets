@@ -14,7 +14,7 @@ import { toPublic } from "../lib/repositories/borrowers";
 
 const router: IRouter = Router();
 
-router.use(attachRole, requireStaff);
+router.use("/borrowers", attachRole, requireStaff);
 
 // Inline schemas (email removed — phone is the primary identity)
 const PIN_SCHEMA = z.string().regex(/^\d{6}$/, "PIN must be exactly 6 digits");

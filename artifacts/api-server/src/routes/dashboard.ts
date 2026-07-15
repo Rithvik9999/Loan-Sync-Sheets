@@ -9,7 +9,7 @@ import * as borrowersRepo from "../lib/repositories/borrowers";
 
 const router: IRouter = Router();
 
-router.use(attachRole, requireStaff);
+router.use("/dashboard", attachRole, requireStaff);
 
 const DUE_SOON_DAYS = 7;
 

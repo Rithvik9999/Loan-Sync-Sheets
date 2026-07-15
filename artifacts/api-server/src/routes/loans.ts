@@ -31,11 +31,11 @@ router.get("/loans", async (req, res): Promise<void> => {
 
   if (info.role === "borrower") {
     const myPhone = normalizePhone(info.phone ?? "");
-    const myName = info.name.trim().toLowerCase();
+    const myName = normalizeName(info.name);
     enriched = enriched.filter((l) => {
       const rowPhone = extractPhoneFromWhatsapp(l.whatsapp);
       const phoneMatch = !!(rowPhone && myPhone && rowPhone === myPhone);
-      const nameMatch = l.name.trim().toLowerCase() === myName;
+      const nameMatch = normalizeName(l.name) === myName;
       // Accept if phone matches OR name matches — a phone format mismatch
       // between the sheet's WhatsApp column and the Borrowers tab should not
       // silently hide loans that clearly belong to this borrower by name.
@@ -105,11 +105,9 @@ router.get("/loans/:id", async (req, res): Promise<void> => {
   if (info.role === "borrower") {
     const myPhone = normalizePhone(info.phone ?? "");
     const rowPhone = extractPhoneFromWhatsapp(loan.whatsapp);
-    const allowed =
-      rowPhone && myPhone
-        ? rowPhone === myPhone
-        : loan.name.trim().toLowerCase() === info.name.trim().toLowerCase();
-    if (!allowed) {
+    const phoneMatch = !!(rowPhone && myPhone && rowPhone === myPhone);
+    const nameMatch = normalizeName(loan.name) === normalizeName(info.name);
+    if (!phoneMatch && !nameMatch) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }

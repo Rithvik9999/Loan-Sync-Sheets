@@ -18,11 +18,11 @@ router.get("/emi-loans", async (req, res): Promise<void> => {
   let result = rows;
   if (info.role === "borrower") {
     const myPhone = normalizePhone(info.phone ?? "");
-    const myName = info.name.trim().toLowerCase();
+    const myName = normalizeName(info.name);
     result = rows.filter((r) => {
       const rowPhone = extractPhoneFromWhatsapp(r.whatsapp);
       const phoneMatch = !!(rowPhone && myPhone && rowPhone === myPhone);
-      const nameMatch = r.name.trim().toLowerCase() === myName;
+      const nameMatch = normalizeName(r.name) === myName;
       // Accept if phone matches OR name matches — a phone format mismatch
       // between the sheet's WhatsApp column and the Borrowers tab should not
       // silently hide loans that clearly belong to this borrower by name.
@@ -38,7 +38,7 @@ router.get("/emi-loans", async (req, res): Promise<void> => {
       : undefined;
     if (!b) {
       b = borrowers.find(
-        (bw) => bw.name.trim().toLowerCase() === r.name.trim().toLowerCase(),
+        (bw) => normalizeName(bw.name) === normalizeName(r.name),
       );
     }
     return { ...r, borrowerId: b?.id ?? null };
