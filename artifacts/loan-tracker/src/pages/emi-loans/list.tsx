@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@/components/ui/link";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus, Search, ChevronRight, CalendarClock, CheckSquare, CheckCircle2, Loader2 } from "lucide-react";
+import { Plus, Search, ChevronRight, CalendarClock, CheckSquare, CheckCircle2, Loader2, CalendarRange } from "lucide-react";
+import { Slider } from "@/components/ui/slider";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { Input } from "@/components/ui/input";
@@ -158,7 +159,8 @@ function BulkMarkPaidDialog({
 
 export default function EmiLoansList() {
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("Pending");
+  const [dateRange, setDateRange] = useState<[number, number] | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkPaidOpen, setBulkPaidOpen] = useState(false);
@@ -170,20 +172,48 @@ export default function EmiLoansList() {
 
   const now = new Date();
 
+  // Date range min/max for slider
+  const { minEmiTs, maxEmiTs } = useMemo(() => {
+    const dates = (loans ?? [])
+      .map((l) => (l.transactionDate ? new Date(l.transactionDate).getTime() : null))
+      .filter(Boolean) as number[];
+    if (dates.length === 0) return { minEmiTs: 0, maxEmiTs: 0 };
+    return { minEmiTs: Math.min(...dates), maxEmiTs: Math.max(...dates) };
+  }, [loans]);
+
+  // Initialise dateRange when data loads
+  useEffect(() => {
+    if (minEmiTs > 0 && maxEmiTs > 0 && dateRange === null) {
+      setDateRange([minEmiTs, maxEmiTs]);
+    }
+  }, [minEmiTs, maxEmiTs]);
+
+  const effectiveDateRange = dateRange ?? [minEmiTs, maxEmiTs];
+
   // Sort by latest transaction date (newest first), no sort dropdown.
   // "All" excludes Clear loans; you must explicitly select "Clear" to see them.
-  const filtered = loans
-    ?.filter((l) => {
-      const nameMatch = l.name.toLowerCase().includes(search.toLowerCase());
-      const statusMatch =
-        statusFilter === "all" ? l.status !== "Clear" : l.status === statusFilter;
-      return nameMatch && statusMatch;
-    })
-    .sort((a, b) => {
-      const da = a.transactionDate ? new Date(a.transactionDate).getTime() : 0;
-      const db = b.transactionDate ? new Date(b.transactionDate).getTime() : 0;
-      return db - da;
-    });
+  const filtered = useMemo(
+    () =>
+      (loans ?? [])
+        .filter((l) => {
+          const nameMatch = l.name.toLowerCase().includes(search.toLowerCase());
+          const statusMatch =
+            statusFilter === "all" ? l.status !== "Clear" : l.status === statusFilter;
+          return nameMatch && statusMatch;
+        })
+        .filter((l) => {
+          if (!dateRange || minEmiTs === maxEmiTs) return true;
+          if (!l.transactionDate) return true;
+          const ts = new Date(l.transactionDate).getTime();
+          return ts >= effectiveDateRange[0] && ts <= effectiveDateRange[1];
+        })
+        .sort((a, b) => {
+          const da = a.transactionDate ? new Date(a.transactionDate).getTime() : 0;
+          const db = b.transactionDate ? new Date(b.transactionDate).getTime() : 0;
+          return db - da;
+        }),
+    [loans, search, statusFilter, dateRange, effectiveDateRange, minEmiTs, maxEmiTs],
+  );
 
   const toggleRow = (id: string) => {
     setSelected((prev) => {
@@ -260,7 +290,7 @@ export default function EmiLoansList() {
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="bg-background w-full sm:w-44">
-                <SelectValue placeholder="All (excl. Cleared)" />
+                <SelectValue placeholder="Pending" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All (excl. Cleared)</SelectItem>
@@ -270,6 +300,34 @@ export default function EmiLoansList() {
               </SelectContent>
             </Select>
           </div>
+          {/* Date range slider */}
+          {minEmiTs > 0 && maxEmiTs > 0 && minEmiTs !== maxEmiTs && (
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                  <CalendarRange className="h-3.5 w-3.5" /> Date Range
+                </span>
+                <button
+                  className="text-xs text-muted-foreground underline"
+                  onClick={() => setDateRange([minEmiTs, maxEmiTs])}
+                >
+                  Reset
+                </button>
+              </div>
+              <Slider
+                min={minEmiTs}
+                max={maxEmiTs}
+                step={86400000}
+                value={effectiveDateRange}
+                onValueChange={(v) => setDateRange([v[0], v[1]])}
+                className="w-full"
+              />
+              <div className="flex justify-between text-[11px] text-muted-foreground">
+                <span>{new Date(effectiveDateRange[0]).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+                <span>{new Date(effectiveDateRange[1]).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+              </div>
+            </div>
+          )}
         </CardHeader>
         <CardContent>
           {isLoading ? (

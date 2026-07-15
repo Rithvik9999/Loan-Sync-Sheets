@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { PieChart, Pie, Cell } from "recharts";
 import { addDays, differenceInCalendarDays, parseISO, format as dateFnsFormat } from "date-fns";
 import { Link } from "@/components/ui/link";
@@ -45,6 +45,7 @@ import {
   ChevronDown,
   ChevronUp,
   BadgeCheck,
+  CalendarRange,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -66,6 +67,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -80,6 +89,16 @@ import { computeEarlyPaymentDiscount, estimateFinalAmount } from "@/lib/early-pa
 const UPI_VPA = "9438556400@slc";
 const WA_ADMIN = "8917656405";
 const SITE_NAME = "openr3.in";
+
+// ─── Loan Type Options with Discounts ─────────────────────────────────────────
+
+const LOAN_TYPE_OPTIONS = [
+  { value: "direct", label: "Direct Loan Request", discountPct: 0 },
+  { value: "bgmi-uc", label: "BGMI UC Code Request", discountPct: 0.06 },
+  { value: "google-play", label: "Google Play Redeem Code Request", discountPct: 0.04 },
+  { value: "other-gift-card", label: "Other Gift Card Request", discountPct: 0.02 },
+  { value: "mobile-recharge", label: "Mobile or Other Recharges", discountPct: 0.02 },
+] as const;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -171,6 +190,8 @@ function LoanRequestDialog({
   const queryClient = useQueryClient();
   const createLoanRequest = useCreateLoanRequest();
   const today = dateFnsFormat(new Date(), "yyyy-MM-dd");
+  const [loanType, setLoanType] = useState<string>("direct");
+  const typeDiscountPct = LOAN_TYPE_OPTIONS.find((o) => o.value === loanType)?.discountPct ?? 0;
 
   const form = useForm<LoanRequestValues>({
     resolver: zodResolver(loanRequestSchema),
@@ -189,8 +210,10 @@ function LoanRequestDialog({
     const p = Number(watchedAmount);
     const t = Number(watchedTenure);
     if (!p || !t || p <= 0 || t <= 0) return null;
-    return estimateFinalAmount({ principal: p, tenureDays: t });
-  }, [watchedAmount, watchedTenure]);
+    const base = estimateFinalAmount({ principal: p, tenureDays: t });
+    const typeDiscountAmt = Math.round(base.finalAmount * typeDiscountPct);
+    return { ...base, typeDiscountAmt, discountedFinalAmount: base.finalAmount - typeDiscountAmt };
+  }, [watchedAmount, watchedTenure, typeDiscountPct]);
 
   // Credit limit validation
   const creditLimitError = useMemo(() => {
@@ -300,6 +323,23 @@ function LoanRequestDialog({
             onSubmit={form.handleSubmit(onSubmit)}
             className="space-y-4 pt-2"
           >
+            {/* Loan Type */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Request Type</label>
+              <Select value={loanType} onValueChange={setLoanType}>
+                <SelectTrigger className="bg-background">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {LOAN_TYPE_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <FormField
               control={form.control}
               name="amount"
@@ -400,11 +440,29 @@ function LoanRequestDialog({
                   </div>
                   <div>
                     <p className="text-amber-700 dark:text-amber-400">Total to repay</p>
-                    <p className="font-bold font-numeric text-amber-900 dark:text-amber-200">{formatCurrency(loanPreview.finalAmount)}</p>
+                    <p className={`font-bold font-numeric text-amber-900 dark:text-amber-200 ${loanPreview.typeDiscountAmt > 0 ? "line-through opacity-60 text-xs" : ""}`}>
+                      {formatCurrency(loanPreview.finalAmount)}
+                    </p>
                   </div>
                 </div>
-                <p className="text-[10px] text-amber-600">Estimate only — admin will give further discount.</p>
+                {loanPreview.typeDiscountAmt > 0 && (
+                  <div className="flex items-center justify-between rounded bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 px-2 py-1.5 text-xs">
+                    <span className="text-emerald-700 dark:text-emerald-400">You pay (after discount)</span>
+                    <span className="font-bold font-numeric text-emerald-800 dark:text-emerald-300 text-sm">{formatCurrency(loanPreview.discountedFinalAmount)}</span>
+                  </div>
+                )}
+                <p className="text-[10px] text-amber-600">Estimate only — admin will confirm the exact amount.</p>
+                {loanType !== "direct" && (
+                  <p className="text-[10px] text-muted-foreground border-t border-amber-200 pt-1.5 mt-0.5">
+                    ⏱ Requests other than direct loans may take up to 60 minutes to process.
+                  </p>
+                )}
               </div>
+            )}
+            {loanType !== "direct" && !loanPreview && (
+              <p className="text-[10px] text-muted-foreground bg-muted/40 border border-border/60 rounded px-2 py-1.5">
+                ⏱ Requests other than direct loans may take up to 60 minutes to process.
+              </p>
             )}
             <DialogFooter className="pt-2 flex-col sm:flex-row gap-2">
               <Button
@@ -1780,7 +1838,11 @@ function AlreadyPaidSection({
                   {formatCurrency((item as Loan).principal)} Loan
                 </span>
                 <div className="text-xs text-muted-foreground mt-0.5">
-                  Paid on {(item as Loan).returnDate ? formatDate((item as Loan).returnDate!) : "—"}
+                  Paid on {(item as Loan).dateOfPartPayment
+                ? formatDate((item as Loan).dateOfPartPayment!)
+                : (item as Loan).returnDate
+                  ? formatDate((item as Loan).returnDate!)
+                  : "—"}
                 </div>
               </div>
               <div className="text-right">
@@ -1869,6 +1931,7 @@ function LoansTab({
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [dateRange, setDateRange] = useState<[number, number] | null>(null);
   const now = new Date();
 
   const toggle = (id: string) =>
@@ -1881,7 +1944,36 @@ function LoansTab({
   // Filter out pay-daily loans from display
   const displayLoans = loans.filter((l) => !isPayDailyLoan(l.whatsapp));
 
-  const selectedItems = displayLoans.filter((l) => selected.has(l.id));
+  // Date range min/max from displayLoans
+  const { minTs, maxTs } = useMemo(() => {
+    const dates = displayLoans
+      .map((l) => (l.transactionDate ? new Date(l.transactionDate).getTime() : null))
+      .filter(Boolean) as number[];
+    if (dates.length === 0) return { minTs: 0, maxTs: 0 };
+    return { minTs: Math.min(...dates), maxTs: Math.max(...dates) };
+  }, [displayLoans]);
+
+  // Initialise date range when data loads
+  useEffect(() => {
+    if (minTs > 0 && maxTs > 0 && dateRange === null) {
+      setDateRange([minTs, maxTs]);
+    }
+  }, [minTs, maxTs]);
+
+  const effectiveDateRange = dateRange ?? [minTs, maxTs];
+
+  // Filter displayLoans by date range
+  const dateFilteredLoans = useMemo(() => {
+    if (minTs === 0 && maxTs === 0) return displayLoans;
+    const [start, end] = effectiveDateRange;
+    return displayLoans.filter((l) => {
+      if (!l.transactionDate) return true;
+      const ts = new Date(l.transactionDate).getTime();
+      return ts >= start && ts <= end;
+    });
+  }, [displayLoans, effectiveDateRange, minTs, maxTs]);
+
+  const selectedItems = dateFilteredLoans.filter((l) => selected.has(l.id));
   const bulkTotal = selectedItems.reduce(
     (s, l) => s + Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0),
     0,
@@ -1953,6 +2045,35 @@ function LoansTab({
 
   return (
     <div className="space-y-3">
+      {/* Date range slider */}
+      {minTs > 0 && maxTs > 0 && minTs !== maxTs && (
+        <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-3 space-y-2">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5 font-medium text-foreground text-sm">
+              <CalendarRange className="h-3.5 w-3.5" /> Date Range
+            </span>
+            <button
+              className="text-xs underline"
+              onClick={() => setDateRange([minTs, maxTs])}
+            >
+              Reset
+            </button>
+          </div>
+          <Slider
+            min={minTs}
+            max={maxTs}
+            step={86400000}
+            value={effectiveDateRange}
+            onValueChange={(v) => setDateRange([v[0], v[1]])}
+            className="w-full"
+          />
+          <div className="flex justify-between text-[11px] text-muted-foreground">
+            <span>{new Date(effectiveDateRange[0]).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+            <span>{new Date(effectiveDateRange[1]).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+          </div>
+        </div>
+      )}
+
       {selected.size > 0 && (
         <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
           <div className="flex items-center gap-2 text-sm">
@@ -1975,7 +2096,7 @@ function LoansTab({
         </div>
       )}
       <div className="grid gap-3">
-        {displayLoans.map((loan) => (
+        {dateFilteredLoans.map((loan) => (
           <div key={loan.id} className="flex items-start gap-2">
             <Checkbox
               className="mt-4 shrink-0"

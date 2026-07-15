@@ -4,7 +4,7 @@ import {
   getListLoansQueryKey,
   Loan,
 } from "@workspace/api-client-react";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Link } from "@/components/ui/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -31,7 +31,9 @@ import {
   AlertCircle,
   Clock,
   MessageCircle,
+  CalendarRange,
 } from "lucide-react";
+import { Slider } from "@/components/ui/slider";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { Input } from "@/components/ui/input";
@@ -310,7 +312,8 @@ function LoansTable({
 
 export default function LoansList() {
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("Pending");
+  const [dateRange, setDateRange] = useState<[number, number] | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkPaidOpen, setBulkPaidOpen] = useState(false);
@@ -365,6 +368,26 @@ export default function LoansList() {
     [allLoans],
   );
 
+  // Date range min/max for slider
+  const { minLoanTs, maxLoanTs } = useMemo(() => {
+    const dates = (allLoans ?? [])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .filter((l) => (l.status as any) !== "Archived")
+      .map((l) => (l.transactionDate ? new Date(l.transactionDate).getTime() : null))
+      .filter(Boolean) as number[];
+    if (dates.length === 0) return { minLoanTs: 0, maxLoanTs: 0 };
+    return { minLoanTs: Math.min(...dates), maxLoanTs: Math.max(...dates) };
+  }, [allLoans]);
+
+  // Initialise dateRange when data loads
+  useEffect(() => {
+    if (minLoanTs > 0 && maxLoanTs > 0 && dateRange === null) {
+      setDateRange([minLoanTs, maxLoanTs]);
+    }
+  }, [minLoanTs, maxLoanTs]);
+
+  const effectiveDateRange = dateRange ?? [minLoanTs, maxLoanTs];
+
   // Main "Loans" tab — sorted by latest input date (transactionDate), excludes archived.
   // "All" does NOT include Clear loans; you must explicitly select "Clear" to see them.
   const filtered = useMemo(
@@ -377,13 +400,19 @@ export default function LoansList() {
           return (l.status as string) === statusFilter;
         })
         .filter((l) => l.name.toLowerCase().includes(search.toLowerCase()))
+        .filter((l) => {
+          if (!dateRange || minLoanTs === maxLoanTs) return true;
+          if (!l.transactionDate) return true;
+          const ts = new Date(l.transactionDate).getTime();
+          return ts >= effectiveDateRange[0] && ts <= effectiveDateRange[1];
+        })
         .sort((a, b) => {
           // Always sort by latest transaction date first
           const da = a.transactionDate ? new Date(a.transactionDate).getTime() : 0;
           const db = b.transactionDate ? new Date(b.transactionDate).getTime() : 0;
           return db - da;
         }),
-    [allLoans, statusFilter, search],
+    [allLoans, statusFilter, search, dateRange, effectiveDateRange, minLoanTs, maxLoanTs],
   );
 
   const toggleRow = (id: string) => {
@@ -693,7 +722,7 @@ export default function LoansList() {
                 </div>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger className="bg-background w-full sm:w-44">
-                    <SelectValue placeholder="All Statuses" />
+                    <SelectValue placeholder="Pending" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All (excl. Cleared)</SelectItem>
@@ -703,6 +732,34 @@ export default function LoansList() {
                   </SelectContent>
                 </Select>
               </div>
+              {/* Date range slider */}
+              {minLoanTs > 0 && maxLoanTs > 0 && minLoanTs !== maxLoanTs && (
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                      <CalendarRange className="h-3.5 w-3.5" /> Date Range
+                    </span>
+                    <button
+                      className="text-xs text-muted-foreground underline"
+                      onClick={() => setDateRange([minLoanTs, maxLoanTs])}
+                    >
+                      Reset
+                    </button>
+                  </div>
+                  <Slider
+                    min={minLoanTs}
+                    max={maxLoanTs}
+                    step={86400000}
+                    value={effectiveDateRange}
+                    onValueChange={(v) => setDateRange([v[0], v[1]])}
+                    className="w-full"
+                  />
+                  <div className="flex justify-between text-[11px] text-muted-foreground">
+                    <span>{new Date(effectiveDateRange[0]).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+                    <span>{new Date(effectiveDateRange[1]).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+                  </div>
+                </div>
+              )}
             </CardHeader>
             <CardContent>
               {filtered && filtered.length > 0 ? (
