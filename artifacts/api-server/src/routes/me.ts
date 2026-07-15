@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { MeInfo } from "@workspace/api-zod";
+import { GetMeResponse } from "@workspace/api-zod";
 import { attachRole } from "../middlewares/auth";
 
 const router: IRouter = Router();
@@ -7,7 +7,7 @@ const router: IRouter = Router();
 router.get("/me", attachRole, (req, res): void => {
   const info = req.roleInfo!;
   res.json(
-    MeInfo.parse({
+    GetMeResponse.parse({
       role: info.role,
       borrowerId: info.borrowerId,
       name: info.name || null,

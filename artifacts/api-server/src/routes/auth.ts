@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { LoginBody, MeInfo } from "@workspace/api-zod";
+import { LoginBody, LoginResponse } from "@workspace/api-zod";
 import {
   ADMIN_PHONE,
   SESSION_COOKIE,
@@ -42,7 +42,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     });
     res.cookie(SESSION_COOKIE, token, COOKIE_OPTIONS);
     res.json(
-      MeInfo.parse({
+      LoginResponse.parse({
         role: "staff",
         borrowerId: null,
         name: "Admin",
@@ -69,7 +69,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   });
   res.cookie(SESSION_COOKIE, token, COOKIE_OPTIONS);
   res.json(
-    MeInfo.parse({
+    LoginResponse.parse({
       role: "borrower",
       borrowerId: borrower.id,
       name: borrower.name,

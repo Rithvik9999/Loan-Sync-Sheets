@@ -2,21 +2,27 @@ import { Link, useLocation } from "wouter";
 import { useAppAuth } from "@/hooks/use-app-auth";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Users, CreditCard, LogOut, Loader2, Menu } from "lucide-react";
-import { useClerk } from "@clerk/react";
+import {
+  LayoutDashboard,
+  Users,
+  CreditCard,
+  LogOut,
+  Loader2,
+  ClipboardList,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const staffNav = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { title: "Borrowers", href: "/borrowers", icon: Users },
   { title: "Loans", href: "/loans", icon: CreditCard },
+  { title: "Loan Requests", href: "/loan-requests", icon: ClipboardList },
 ];
 
 export function SharedLayout({ children }: { children: React.ReactNode }) {
-  const { role, isLoaded, isSignedIn } = useAppAuth();
+  const { role, isLoaded, isSignedIn, logout } = useAppAuth();
   const [location] = useLocation();
-  const { signOut } = useClerk();
-  
+
   if (!isLoaded) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
@@ -25,10 +31,14 @@ export function SharedLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // If not signed in, render just the content (should only happen for public pages catching this layout)
   if (!isSignedIn) {
     return <>{children}</>;
   }
+
+  const handleLogout = async () => {
+    await logout();
+    window.location.href = (import.meta.env.BASE_URL || "/").replace(/\/$/, "") + "/sign-in";
+  };
 
   return (
     <div className="flex min-h-screen bg-muted/30 flex-col md:flex-row">
@@ -40,14 +50,14 @@ export function SharedLayout({ children }: { children: React.ReactNode }) {
         <nav className="flex-1 space-y-1">
           {role === "staff" ? (
             staffNav.map((item) => (
-              <Link 
-                key={item.href} 
+              <Link
+                key={item.href}
                 href={item.href}
                 className={cn(
                   "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  location.startsWith(item.href) 
-                    ? "bg-sidebar-primary text-sidebar-primary-foreground" 
-                    : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  location.startsWith(item.href)
+                    ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                    : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                 )}
               >
                 <item.icon className="h-4 w-4" />
@@ -55,25 +65,25 @@ export function SharedLayout({ children }: { children: React.ReactNode }) {
               </Link>
             ))
           ) : (
-            <Link 
+            <Link
               href="/portal"
               className={cn(
                 "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                location.startsWith("/portal") 
-                  ? "bg-sidebar-primary text-sidebar-primary-foreground" 
-                  : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                location.startsWith("/portal")
+                  ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                  : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
               )}
             >
               <LayoutDashboard className="h-4 w-4" />
-              My Portal
+              My Loans
             </Link>
           )}
         </nav>
         <div className="mt-auto">
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             className="w-full justify-start gap-3 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-            onClick={() => signOut({ redirectUrl: import.meta.env.BASE_URL.replace(/\/$/, '') || "/" })}
+            onClick={handleLogout}
           >
             <LogOut className="h-4 w-4" />
             Sign Out
@@ -84,27 +94,23 @@ export function SharedLayout({ children }: { children: React.ReactNode }) {
       {/* Mobile Topnav */}
       <header className="flex h-16 items-center justify-between border-b bg-sidebar px-4 md:hidden">
         <Logo />
-        <Button 
-          variant="ghost" 
-          size="icon"
-          onClick={() => signOut({ redirectUrl: import.meta.env.BASE_URL.replace(/\/$/, '') || "/" })}
-        >
+        <Button variant="ghost" size="icon" onClick={handleLogout}>
           <LogOut className="h-5 w-5" />
         </Button>
       </header>
-      
-      {/* Mobile Nav Links - sticky bottom or just let them use top for now since simple */}
+
+      {/* Mobile Nav Links */}
       <div className="md:hidden flex overflow-x-auto border-b bg-sidebar px-2 py-2 hide-scrollbar">
         {role === "staff" ? (
           staffNav.map((item) => (
-            <Link 
-              key={item.href} 
+            <Link
+              key={item.href}
               href={item.href}
               className={cn(
                 "flex shrink-0 items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors mx-1",
-                location.startsWith(item.href) 
-                  ? "bg-sidebar-primary text-sidebar-primary-foreground" 
-                  : "text-sidebar-foreground hover:bg-sidebar-accent"
+                location.startsWith(item.href)
+                  ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                  : "text-sidebar-foreground hover:bg-sidebar-accent",
               )}
             >
               <item.icon className="h-4 w-4" />
@@ -112,17 +118,17 @@ export function SharedLayout({ children }: { children: React.ReactNode }) {
             </Link>
           ))
         ) : (
-          <Link 
+          <Link
             href="/portal"
             className={cn(
               "flex shrink-0 items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors mx-1",
-              location.startsWith("/portal") 
-                ? "bg-sidebar-primary text-sidebar-primary-foreground" 
-                : "text-sidebar-foreground hover:bg-sidebar-accent"
+              location.startsWith("/portal")
+                ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                : "text-sidebar-foreground hover:bg-sidebar-accent",
             )}
           >
             <LayoutDashboard className="h-4 w-4" />
-            My Portal
+            My Loans
           </Link>
         )}
       </div>

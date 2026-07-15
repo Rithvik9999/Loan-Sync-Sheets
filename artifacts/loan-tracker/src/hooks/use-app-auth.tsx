@@ -1,41 +1,115 @@
-import { useAuth, useUser } from "@clerk/react";
-import { useGetMe } from "@workspace/api-client-react";
-import { createContext, useContext, ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  ReactNode,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+} from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
-type AuthContextType = {
+export type AppRole = "staff" | "borrower";
+
+type AuthState = {
   isLoaded: boolean;
   isSignedIn: boolean;
-  role: "staff" | "borrower" | null;
+  role: AppRole | null;
   borrowerId: string | null;
+  name: string | null;
+  phone: string | null;
 };
 
-const AuthContext = createContext<AuthContextType>({
+type AuthContextType = AuthState & {
+  login: (phone: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
+};
+
+const defaultState: AuthState = {
   isLoaded: false,
   isSignedIn: false,
   role: null,
   borrowerId: null,
+  name: null,
+  phone: null,
+};
+
+const AuthContext = createContext<AuthContextType>({
+  ...defaultState,
+  login: async () => {},
+  logout: async () => {},
 });
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const { isLoaded: isClerkLoaded, isSignedIn } = useAuth();
-  
-  const { data: me, isLoading: isMeLoading } = useGetMe({ 
-    query: { 
-      enabled: isClerkLoaded && !!isSignedIn, 
-      queryKey: ["/api/me"],
-      staleTime: 1000 * 60 * 5, // 5 mins
-    } 
-  });
+async function fetchMe(): Promise<AuthState> {
+  try {
+    const res = await fetch("/api/me", { credentials: "include" });
+    if (!res.ok) {
+      return { ...defaultState, isLoaded: true };
+    }
+    const data = await res.json();
+    return {
+      isLoaded: true,
+      isSignedIn: true,
+      role: data.role ?? null,
+      borrowerId: data.borrowerId ?? null,
+      name: data.name ?? null,
+      phone: data.phone ?? null,
+    };
+  } catch {
+    return { ...defaultState, isLoaded: true };
+  }
+}
 
-  const isLoaded = isClerkLoaded && (isSignedIn ? !isMeLoading : true);
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<AuthState>(defaultState);
+  const queryClient = useQueryClient();
+  const prevSignedInRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    fetchMe().then(setState);
+  }, []);
+
+  // Clear react-query cache on sign-in/sign-out transitions
+  useEffect(() => {
+    if (!state.isLoaded) return;
+    if (prevSignedInRef.current !== null && prevSignedInRef.current !== state.isSignedIn) {
+      queryClient.clear();
+    }
+    prevSignedInRef.current = state.isSignedIn;
+  }, [state.isSignedIn, state.isLoaded, queryClient]);
+
+  const login = useCallback(async (phone: string, password: string) => {
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone, password }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Login failed" }));
+      throw new Error(err.error || "Invalid phone number or password");
+    }
+    const data = await res.json();
+    setState({
+      isLoaded: true,
+      isSignedIn: true,
+      role: data.role ?? null,
+      borrowerId: data.borrowerId ?? null,
+      name: data.name ?? null,
+      phone: data.phone ?? null,
+    });
+  }, []);
+
+  const logout = useCallback(async () => {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "include",
+    });
+    setState({ ...defaultState, isLoaded: true });
+  }, []);
 
   return (
-    <AuthContext.Provider value={{
-      isLoaded,
-      isSignedIn: !!isSignedIn,
-      role: me?.role ?? null,
-      borrowerId: me?.borrowerId ?? null
-    }}>
+    <AuthContext.Provider value={{ ...state, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

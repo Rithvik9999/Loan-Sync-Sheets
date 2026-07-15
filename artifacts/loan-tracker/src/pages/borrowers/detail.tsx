@@ -135,13 +135,13 @@ export default function BorrowerDetail() {
               </div>
             </div>
 
-            {borrower.clerkUserId && (
+            {borrower.hasPassword && (
               <div className="mt-4 pt-4 border-t border-border/50">
                 <Badge variant="secondary" className="bg-emerald-100 text-emerald-800 font-normal hover:bg-emerald-100 flex w-fit">
-                  Account Linked
+                  Portal Access Enabled
                 </Badge>
                 <p className="text-xs text-muted-foreground mt-2">
-                  This borrower can sign in to view their portal.
+                  This borrower can sign in to view their loans.
                 </p>
               </div>
             )}
