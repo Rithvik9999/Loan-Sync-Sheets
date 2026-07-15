@@ -133,40 +133,82 @@ export default function BorrowersList() {
 
   const isLoading = isLoadingBorrowers || isLoadingLoans;
 
-  // Build unified borrower list
+  // Build unified borrower list. Loan-sheet rows and Borrowers-tab records are
+  // matched primarily by normalized phone number (more reliable than name,
+  // since names can differ slightly in spacing/case/nicknames between the two
+  // sheets) and fall back to normalized name when no phone is available.
   const directory: BorrowerEntry[] = (() => {
-    const nameMap = new Map<string, BorrowerEntry>();
+    const normPhone = (p: string) => p.replace(/\D/g, "").replace(/^91(?=\d{10}$)/, "").replace(/^0(?=\d{10}$)/, "");
+    const normName = (n: string) => n.trim().toLowerCase().replace(/\s+/g, "");
+
+    const entries: BorrowerEntry[] = [];
+    const byPhone = new Map<string, BorrowerEntry>();
+    const byName = new Map<string, BorrowerEntry>();
+
+    const findExisting = (phone: string, name: string): BorrowerEntry | undefined => {
+      const p = normPhone(phone);
+      if (p && byPhone.has(p)) return byPhone.get(p);
+      const n = normName(name);
+      if (n && byName.has(n)) return byName.get(n);
+      return undefined;
+    };
+
+    const index = (entry: BorrowerEntry) => {
+      const p = normPhone(entry.phone);
+      const n = normName(entry.name);
+      if (p) byPhone.set(p, entry);
+      if (n) byName.set(n, entry);
+    };
 
     for (const loan of loans ?? []) {
-      const key = loan.name.trim().toLowerCase();
-      if (!nameMap.has(key)) {
-        const phone = (loan.whatsapp ?? "").split("\n")[0].trim();
-        nameMap.set(key, { id: null, name: loan.name.trim(), phone, hasPin: false, creditLimit: null, loanCount: 0 });
+      const phone = (loan.whatsapp ?? "").split("\n")[0].trim();
+      const existing = findExisting(phone, loan.name);
+      if (existing) {
+        existing.loanCount++;
+        if (!existing.phone && phone) {
+          existing.phone = phone;
+          index(existing);
+        }
+      } else {
+        const entry: BorrowerEntry = {
+          id: null,
+          name: loan.name.trim(),
+          phone,
+          hasPin: false,
+          creditLimit: null,
+          loanCount: 1,
+        };
+        entries.push(entry);
+        index(entry);
       }
-      nameMap.get(key)!.loanCount++;
     }
 
     for (const b of borrowers ?? []) {
-      const key = b.name.trim().toLowerCase();
-      if (nameMap.has(key)) {
-        const entry = nameMap.get(key)!;
-        entry.id = b.id;
-        entry.hasPin = b.hasPin ?? false;
-        entry.creditLimit = b.creditLimit ?? null;
-        if (!entry.phone && b.phone) entry.phone = b.phone;
+      const existing = findExisting(b.phone ?? "", b.name);
+      if (existing) {
+        existing.id = b.id;
+        existing.hasPin = b.hasPin ?? false;
+        existing.creditLimit = b.creditLimit ?? null;
+        existing.name = b.name.trim();
+        if (b.phone) {
+          existing.phone = b.phone;
+        }
+        index(existing);
       } else {
-        nameMap.set(key, {
+        const entry: BorrowerEntry = {
           id: b.id,
           name: b.name.trim(),
           phone: b.phone ?? "",
           hasPin: b.hasPin ?? false,
           creditLimit: b.creditLimit ?? null,
           loanCount: 0,
-        });
+        };
+        entries.push(entry);
+        index(entry);
       }
     }
 
-    return Array.from(nameMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return entries.sort((a, b) => a.name.localeCompare(b.name));
   })();
 
   const filtered = directory.filter(

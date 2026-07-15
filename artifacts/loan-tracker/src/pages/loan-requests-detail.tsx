@@ -30,7 +30,32 @@ import {
   User,
   CalendarDays,
   Info,
+  MessageCircle,
 } from "lucide-react";
+
+const ADMIN_WHATSAPP = "8917656405";
+
+/** Digits only, strips a leading 91/+91 country code, capped at 10 digits. */
+function sanitizePhoneForWa(raw: string): string {
+  let digits = raw.replace(/\D/g, "");
+  if (digits.length > 10 && digits.startsWith("91")) digits = digits.slice(2);
+  return digits.slice(0, 10);
+}
+
+function notifyBorrowerPaymentConfirmed(params: {
+  phone: string;
+  name: string;
+  amount: number;
+}): void {
+  const phone = sanitizePhoneForWa(params.phone);
+  if (phone.length !== 10) return;
+  const msg = [
+    `✅ Payment Confirmed`,
+    `Hi ${params.name}, we've recorded your payment of ₹${params.amount.toLocaleString("en-IN")}.`,
+    `Thank you!`,
+  ].join("\n");
+  window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+}
 
 const STATUS_CLASSES: Record<string, string> = {
   Pending: "bg-amber-50 text-amber-700 border border-amber-200",
@@ -93,8 +118,15 @@ export default function LoanRequestDetail() {
       queryClient.invalidateQueries({ queryKey: getListLoanRequestsQueryKey() });
       toast({
         title: "Marked as Paid",
-        description: "Loan entry has been recorded in your sheet.",
+        description: "Loan entry has been recorded in your sheet. Opening WhatsApp to confirm with the borrower…",
       });
+      if (req.phone) {
+        notifyBorrowerPaymentConfirmed({
+          phone: req.phone,
+          name: req.name,
+          amount: finalAmount,
+        });
+      }
       setLocation("/loan-requests");
     } catch (err) {
       toast({

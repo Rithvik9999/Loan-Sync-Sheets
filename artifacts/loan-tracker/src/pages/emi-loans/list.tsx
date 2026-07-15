@@ -1,17 +1,28 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@/components/ui/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, ChevronRight, CalendarClock, Filter, ArrowUpDown } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Plus, Search, ChevronRight, CalendarClock, Filter, ArrowUpDown, CheckSquare, CheckCircle2, Loader2 } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import EmiLoanFormDialog, { EmiLoan, EMI_LOANS_QUERY_KEY, fetchEmiLoans } from "./components/emi-loan-form-dialog";
+import { useToast } from "@/hooks/use-toast";
+import { format } from "date-fns";
+import EmiLoanFormDialog, { EmiLoan, EMI_LOANS_QUERY_KEY, fetchEmiLoans, updateEmiLoan } from "./components/emi-loan-form-dialog";
 
 type SortField = "next-payment-asc" | "date-desc" | "date-asc" | "name-asc" | "name-desc" | "amount-desc" | "amount-asc";
 
@@ -28,11 +39,132 @@ function EmiStatusBadge({ status }: { status: string }) {
   }
 }
 
+// ─── Bulk Mark as Paid Dialog ─────────────────────────────────────────────────
+
+function BulkMarkPaidDialog({
+  open,
+  onOpenChange,
+  loans,
+  onDone,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  loans: EmiLoan[];
+  onDone: () => void;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [isPending, setIsPending] = useState(false);
+  const [paidDate, setPaidDate] = useState(format(new Date(), "yyyy-MM-dd"));
+
+  const totalMonthly = loans.reduce((s, l) => s + (l.monthlyPayment ?? 0), 0);
+
+  const handleConfirm = async () => {
+    setIsPending(true);
+    try {
+      await Promise.all(
+        loans.map((l) =>
+          updateEmiLoan(l.id, {
+            status: "Clear",
+            statusNotes: `Marked as paid in full on ${paidDate}`,
+          }),
+        ),
+      );
+      queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
+      toast({
+        title: `${loans.length} EMI loan${loans.length !== 1 ? "s" : ""} marked as paid`,
+      });
+      onDone();
+      onOpenChange(false);
+    } catch {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Some EMI loans could not be updated. Please retry.",
+      });
+    } finally {
+      setIsPending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[440px]">
+        <DialogHeader>
+          <DialogTitle>
+            Mark {loans.length} EMI Loan{loans.length !== 1 ? "s" : ""} as Paid
+          </DialogTitle>
+          <DialogDescription>
+            This will set status to Clear for each selected EMI loan.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Date Paid</label>
+            <Input
+              type="date"
+              value={paidDate}
+              onChange={(e) => setPaidDate(e.target.value)}
+            />
+          </div>
+
+          <div className="rounded-lg border bg-muted/30 divide-y max-h-52 overflow-y-auto">
+            {loans.map((l) => (
+              <div
+                key={l.id}
+                className="flex items-center justify-between px-3 py-2 text-sm"
+              >
+                <span className="font-medium truncate">{l.name}</span>
+                <span className="font-numeric font-semibold shrink-0 ml-3">
+                  {l.monthlyPayment != null ? formatCurrency(l.monthlyPayment) : "—"}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg bg-primary/5 border border-primary/20 px-4 py-3">
+            <span className="font-semibold text-sm">Total (monthly)</span>
+            <span className="font-bold font-numeric text-lg">
+              {formatCurrency(totalMonthly)}
+            </span>
+          </div>
+        </div>
+
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <Button
+            variant="outline"
+            className="w-full sm:w-auto"
+            onClick={() => onOpenChange(false)}
+            disabled={isPending}
+          >
+            Cancel
+          </Button>
+          <Button
+            className="w-full sm:w-auto bg-emerald-700 hover:bg-emerald-800 text-white"
+            onClick={handleConfirm}
+            disabled={isPending}
+          >
+            {isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="mr-2 h-4 w-4" />
+            )}
+            Confirm Mark as Paid
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function EmiLoansList() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sortField, setSortField] = useState<SortField>("next-payment-asc");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkPaidOpen, setBulkPaidOpen] = useState(false);
 
   const { data: loans, isLoading } = useQuery<EmiLoan[]>({
     queryKey: EMI_LOANS_QUERY_KEY,
@@ -78,6 +210,28 @@ export default function EmiLoansList() {
       }
     });
 
+  const toggleRow = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (!filtered) return;
+    const ids = filtered.map((l) => l.id);
+    const allSelected = ids.every((id) => selected.has(id));
+    if (allSelected) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(ids));
+    }
+  };
+
+  const selectedLoans = (filtered ?? []).filter((l) => selected.has(l.id));
+  const pendingSelected = selectedLoans.filter((l) => l.status !== "Clear");
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -88,6 +242,36 @@ export default function EmiLoansList() {
           <Plus className="mr-2 h-4 w-4" /> Record EMI Loan
         </Button>
       </div>
+
+      {selected.size > 0 && (
+        <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm">
+            <CheckSquare className="h-4 w-4 text-primary" />
+            <span className="font-medium">{selected.size} selected</span>
+            {pendingSelected.length > 0 && (
+              <>
+                <span className="text-muted-foreground">·</span>
+                <span className="text-muted-foreground">{pendingSelected.length} unpaid</span>
+              </>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setSelected(new Set())}>
+              Clear
+            </Button>
+            {pendingSelected.length > 0 && (
+              <Button
+                size="sm"
+                className="bg-emerald-700 hover:bg-emerald-800 text-white"
+                onClick={() => setBulkPaidOpen(true)}
+              >
+                <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+                Mark {pendingSelected.length} as Paid
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       <Card className="shadow-sm border-border/60">
         <CardHeader className="pb-4">
@@ -152,6 +336,13 @@ export default function EmiLoansList() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={filtered.length > 0 && filtered.every((l) => selected.has(l.id))}
+                      onCheckedChange={toggleAll}
+                      aria-label="Select all"
+                    />
+                  </TableHead>
                   <TableHead>Borrower</TableHead>
                   <TableHead>Principal</TableHead>
                   <TableHead>Monthly Payment</TableHead>
@@ -168,7 +359,18 @@ export default function EmiLoansList() {
                     new Date(loan.nextPaymentDate) < now &&
                     loan.status !== "Clear";
                   return (
-                    <TableRow key={loan.id} className="group cursor-pointer">
+                    <TableRow
+                      key={loan.id}
+                      className={`group cursor-pointer ${selected.has(loan.id) ? "bg-primary/5" : ""}`}
+                      onClick={() => toggleRow(loan.id)}
+                    >
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selected.has(loan.id)}
+                          onCheckedChange={() => toggleRow(loan.id)}
+                          aria-label={`Select ${loan.name}`}
+                        />
+                      </TableCell>
                       <TableCell className="font-medium">{loan.name}</TableCell>
                       <TableCell className="font-numeric">{formatCurrency(loan.principal)}</TableCell>
                       <TableCell className="font-numeric">
@@ -184,7 +386,7 @@ export default function EmiLoansList() {
                       <TableCell>
                         <EmiStatusBadge status={loan.status} />
                       </TableCell>
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <Button variant="ghost" size="icon" asChild className="opacity-0 group-hover:opacity-100 transition-opacity">
                           <Link href={`/emi-loans/${loan.id}`}>
                             <ChevronRight className="h-4 w-4" />
@@ -208,6 +410,13 @@ export default function EmiLoansList() {
       </Card>
 
       <EmiLoanFormDialog open={isCreateOpen} onOpenChange={setIsCreateOpen} />
+
+      <BulkMarkPaidDialog
+        open={bulkPaidOpen}
+        onOpenChange={setBulkPaidOpen}
+        loans={pendingSelected}
+        onDone={() => setSelected(new Set())}
+      />
     </div>
   );
 }

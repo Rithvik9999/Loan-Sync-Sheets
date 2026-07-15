@@ -131,14 +131,12 @@ function RequestRow({ req }: { req: LoanRequest }) {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {req.status === "Pending" && (
-            <Button size="sm" variant="outline" asChild>
-              <Link href={`/loan-requests/${req.id}`}>
-                View Details
-                <ChevronRight className="ml-1 h-3.5 w-3.5" />
-              </Link>
-            </Button>
-          )}
+          <Button size="sm" variant="outline" asChild>
+            <Link href={`/loan-requests/${req.id}`}>
+              View Details
+              <ChevronRight className="ml-1 h-3.5 w-3.5" />
+            </Link>
+          </Button>
           <Button
             size="icon"
             variant="ghost"

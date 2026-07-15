@@ -130,7 +130,7 @@ export default function SignIn() {
             Don't have access or forgot your PIN?
           </p>
           <a
-            href={`https://wa.me/${ADMIN_WHATSAPP}`}
+            href={`https://wa.me/91${ADMIN_WHATSAPP}`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 text-sm font-medium text-emerald-700 hover:text-emerald-800 transition-colors"

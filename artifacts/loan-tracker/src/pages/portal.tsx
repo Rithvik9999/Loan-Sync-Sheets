@@ -102,7 +102,23 @@ function openWhatsApp(params: {
   if (params.purpose) lines.push(`📝 Purpose: ${params.purpose}`);
   lines.push(`🗓 Date: ${new Date().toLocaleDateString("en-IN")}`);
   const msg = lines.join("\n");
-  window.open(`https://wa.me/${WA_ADMIN}?text=${encodeURIComponent(msg)}`, "_blank");
+  window.open(`https://wa.me/91${WA_ADMIN}?text=${encodeURIComponent(msg)}`, "_blank");
+}
+
+/** Opens WhatsApp to notify the admin that a payment was just made and needs verification. */
+function notifyAdminPaymentMade(params: {
+  name: string;
+  amount: number;
+  label: string;
+}) {
+  const msg = [
+    `💸 Payment Made`,
+    `👤 ${params.name}`,
+    `📌 ${params.label}`,
+    `💰 Amount: ₹${params.amount.toLocaleString("en-IN")}`,
+    `Please verify and mark as paid. 🙏`,
+  ].join("\n");
+  window.open(`https://wa.me/91${WA_ADMIN}?text=${encodeURIComponent(msg)}`, "_blank");
 }
 
 // ─── Loan Request Dialog ──────────────────────────────────────────────────────
@@ -464,6 +480,57 @@ function EmiRequestDialog({
   );
 }
 
+// ─── Post-payment confirmation dialog ────────────────────────────────────────
+
+function PaymentConfirmDialog({
+  open,
+  onOpenChange,
+  amount,
+  label,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  amount: number;
+  label: string;
+}) {
+  const { name } = useAppAuth();
+
+  const handleYes = () => {
+    notifyAdminPaymentMade({ name: name ?? "Borrower", amount, label });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[360px]">
+        <DialogHeader>
+          <DialogTitle>Did you make the payment?</DialogTitle>
+          <DialogDescription>
+            Let us know if the {formatCurrency(amount)} payment for {label}{" "}
+            went through so we can notify the admin to verify it.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <Button
+            variant="outline"
+            className="w-full sm:w-auto"
+            onClick={() => onOpenChange(false)}
+          >
+            Not yet
+          </Button>
+          <Button
+            className="w-full sm:w-auto bg-emerald-700 hover:bg-emerald-800 text-white"
+            onClick={handleYes}
+          >
+            <MessageCircle className="mr-2 h-4 w-4" />
+            Yes, notify admin
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Single Repay Dialog ──────────────────────────────────────────────────────
 
 function RepayDialog({
@@ -479,6 +546,7 @@ function RepayDialog({
 }) {
   const [mode, setMode] = useState<"full" | "custom">("full");
   const [custom, setCustom] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const amount =
     mode === "full" ? Math.max(outstanding, 0) : Number(custom);
@@ -487,6 +555,7 @@ function RepayDialog({
   const handlePay = () => {
     openUpi(amount);
     onOpenChange(false);
+    setTimeout(() => setConfirmOpen(true), 800);
   };
 
   return (
@@ -587,6 +656,12 @@ function RepayDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+      <PaymentConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        amount={amount}
+        label={label}
+      />
     </Dialog>
   );
 }
@@ -604,6 +679,8 @@ function BulkRepayDialog({
   total: number;
   count: number;
 }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[380px]">
@@ -641,6 +718,7 @@ function BulkRepayDialog({
             onClick={() => {
               openUpi(total, `Loan Repayment (${count} items)`);
               onOpenChange(false);
+              setTimeout(() => setConfirmOpen(true), 800);
             }}
             className="w-full sm:w-auto bg-emerald-700 hover:bg-emerald-800 text-white"
           >
@@ -649,6 +727,12 @@ function BulkRepayDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+      <PaymentConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        amount={total}
+        label={`${count} item${count !== 1 ? "s" : ""}`}
+      />
     </Dialog>
   );
 }

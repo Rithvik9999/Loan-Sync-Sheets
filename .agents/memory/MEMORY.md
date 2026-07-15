@@ -8,3 +8,5 @@
 - [Express path-scoped router middleware](express-path-middleware-scope.md) — router.use(middleware) without a path blocks ALL requests entering that router; always scope to router.use("/prefix", middleware).
 - [Orval barrel re-export conflict](orval-barrel-reexport-conflict.md) — api-spec codegen re-appends duplicate wildcard exports to lib/api-zod/src/index.ts; strip them after every codegen run or typecheck breaks.
 - [Sheets column rename is positional](sheets-column-rename.md) — sheetsClient maps by header array order, not sheet header text; renaming a field in code needs no data migration.
+- [wa.me link country code](wa-me-links.md) — always prepend 91 to sanitized 10-digit phone before building a wa.me link, or WhatsApp fails to open the chat.
+- [Borrower directory merge key](borrower-directory-merge.md) — merge loan-sheet and Borrowers-tab records by normalized phone first, name only as fallback.
