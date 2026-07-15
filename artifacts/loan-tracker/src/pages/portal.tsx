@@ -542,7 +542,6 @@ export default function Portal() {
           <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">
             {name ? `Hi, ${name}` : "My Loans"}
           </h1>
-          <p className="text-muted-foreground mt-1">Your active and past loans.</p>
         </div>
         <Button onClick={() => setRequestOpen(true)} className="w-full sm:w-auto">
           <Plus className="mr-2 h-4 w-4" />

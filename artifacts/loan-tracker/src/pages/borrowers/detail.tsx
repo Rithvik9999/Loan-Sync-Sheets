@@ -93,7 +93,6 @@ export default function BorrowerDetail() {
         </Button>
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">{borrower.name}</h1>
-          <p className="text-muted-foreground mt-1">Borrower Profile</p>
         </div>
         <div className="ml-auto flex gap-2">
           <Button variant="outline" size="sm" onClick={() => setIsEditOpen(true)}>

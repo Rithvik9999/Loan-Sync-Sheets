@@ -1,6 +1,6 @@
 import { useAppAuth } from "@/hooks/use-app-auth";
 import { useGetDashboardSummary, useGetRecentActivity, getGetDashboardSummaryQueryKey, getGetRecentActivityQueryKey } from "@workspace/api-client-react";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Activity, Users, CreditCard, DollarSign, AlertCircle, ArrowRight } from "lucide-react";
@@ -54,7 +54,6 @@ export default function Dashboard() {
     <div className="space-y-8">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">Portfolio Overview</h1>
-        <p className="text-muted-foreground mt-1">Live from your Heat Map sheet — the sheet's own formulas compute every figure below.</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -129,7 +128,7 @@ export default function Dashboard() {
                         {item.description}
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        {item.borrowerName} • {formatDate(item.occurredAt)}
+                        {item.borrowerName} • {formatDateTime(item.occurredAt)}
                       </p>
                     </div>
                     {item.amount != null && (

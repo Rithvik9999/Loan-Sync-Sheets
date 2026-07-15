@@ -211,9 +211,6 @@ export default function LoanRequests() {
         <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">
           Loan Requests
         </h1>
-        <p className="text-muted-foreground mt-1">
-          Review and action borrower-submitted loan requests.
-        </p>
       </div>
 
       {!requests || requests.length === 0 ? (

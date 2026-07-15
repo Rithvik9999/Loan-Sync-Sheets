@@ -83,7 +83,6 @@ export default function EmiLoansList() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">EMI Loans</h1>
-          <p className="text-muted-foreground mt-1">Backed live by your EMI sheet — fees and monthly payments are computed there.</p>
         </div>
         <Button onClick={() => setIsCreateOpen(true)} className="w-full sm:w-auto shadow-sm">
           <Plus className="mr-2 h-4 w-4" /> Record EMI Loan
@@ -92,8 +91,8 @@ export default function EmiLoansList() {
 
       <Card className="shadow-sm border-border/60">
         <CardHeader className="pb-4">
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1 max-w-sm">
+          <div className="flex flex-wrap gap-3">
+            <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search by borrower name…"

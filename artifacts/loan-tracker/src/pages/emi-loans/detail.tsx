@@ -146,13 +146,6 @@ export default function EmiLoanDetail() {
               </h1>
               <EmiStatusBadge status={loan.status} />
             </div>
-            <p className="text-muted-foreground mt-1">
-              {isStaff && loan.borrowerId ? (
-                <>Borrower profile: <Link href={`/borrowers/${loan.borrowerId}`} className="text-primary hover:underline">{loan.name}</Link></>
-              ) : (
-                "EMI Loan Details"
-              )}
-            </p>
           </div>
         </div>
 

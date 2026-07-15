@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Loader2 } from "lucide-react";
+import { Loader2, MessageCircle, CheckCircle2 } from "lucide-react";
 
 /** Digits only, strips a leading 91/+91 country code, capped at 10 digits. */
 function sanitizePhoneInput(raw: string): string {
@@ -34,6 +34,11 @@ function sanitizePhoneInput(raw: string): string {
     digits = digits.slice(2);
   }
   return digits.slice(0, 10);
+}
+
+function buildWhatsAppLink(phone: string, name: string, pin: string): string {
+  const message = `Hello ${name}! 👋\n\nYour BorrowApp login credentials:\n📱 Phone: ${phone}\n🔑 PIN: ${pin}\n\nUse these to check your loan details.`;
+  return `https://wa.me/91${phone}?text=${encodeURIComponent(message)}`;
 }
 
 const borrowerSchema = z.object({
@@ -57,6 +62,9 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
   const queryClient = useQueryClient();
   const isEditing = !!borrower;
 
+  // Holds the last saved phone+pin so we can offer WhatsApp share after save
+  const [savedCredentials, setSavedCredentials] = useState<{ name: string; phone: string; pin: string } | null>(null);
+
   const form = useForm<BorrowerFormValues>({
     resolver: zodResolver(borrowerSchema),
     defaultValues: {
@@ -69,6 +77,12 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
   const createBorrower = useCreateBorrower();
   const updateBorrower = useUpdateBorrower();
   const isPending = createBorrower.isPending || updateBorrower.isPending;
+
+  // Watch pin for the live WhatsApp share button
+  const watchPhone = form.watch("phone");
+  const watchPin = form.watch("pin");
+  const watchName = form.watch("name");
+  const canShareNow = watchPhone.length === 10 && /^\d{6}$/.test(watchPin ?? "");
 
   function onSubmit(data: BorrowerFormValues) {
     const payload = {
@@ -84,8 +98,12 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
           onSuccess: (updatedBorrower) => {
             queryClient.setQueryData(getGetBorrowerQueryKey(borrower.id), updatedBorrower);
             queryClient.invalidateQueries({ queryKey: getListBorrowersQueryKey() });
-            toast({ title: "Profile updated", description: "Changes saved." });
-            onOpenChange(false);
+            if (data.pin) {
+              setSavedCredentials({ name: data.name, phone: data.phone, pin: data.pin });
+            } else {
+              toast({ title: "Profile updated", description: "Changes saved." });
+              onOpenChange(false);
+            }
           },
           onError: () => {
             toast({ variant: "destructive", title: "Error", description: "Could not update borrower." });
@@ -98,9 +116,13 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
         {
           onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: getListBorrowersQueryKey() });
-            toast({ title: "Portal access enabled", description: `${data.name} can now log in with their phone number.` });
-            form.reset();
-            onOpenChange(false);
+            if (data.pin) {
+              setSavedCredentials({ name: data.name, phone: data.phone, pin: data.pin });
+            } else {
+              toast({ title: "Portal access enabled", description: `${data.name} can now log in.` });
+              form.reset();
+              onOpenChange(false);
+            }
           },
           onError: () => {
             toast({ variant: "destructive", title: "Error", description: "Could not set up portal access." });
@@ -110,8 +132,14 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
     }
   }
 
+  function handleClose() {
+    setSavedCredentials(null);
+    onOpenChange(false);
+  }
+
   useEffect(() => {
     if (open) {
+      setSavedCredentials(null);
       form.reset({
         name: borrower?.name || defaultName || "",
         phone: sanitizePhoneInput(borrower?.phone || defaultPhone || ""),
@@ -119,6 +147,51 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
       });
     }
   }, [open, borrower, defaultName, defaultPhone, form]);
+
+  // --- Success state: show WhatsApp share option ---
+  if (savedCredentials) {
+    return (
+      <Dialog open={open} onOpenChange={handleClose}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+              Access {isEditing ? "Updated" : "Enabled"}
+            </DialogTitle>
+            <DialogDescription>
+              {savedCredentials.name}'s login credentials are saved. Share them via WhatsApp now.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-lg border bg-muted/40 p-4 space-y-1 text-sm font-mono">
+            <div><span className="text-muted-foreground">Phone: </span>{savedCredentials.phone}</div>
+            <div><span className="text-muted-foreground">PIN:&nbsp;&nbsp; </span>{savedCredentials.pin}</div>
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={handleClose} className="sm:mr-auto">
+              Done
+            </Button>
+            <Button
+              type="button"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+              asChild
+            >
+              <a
+                href={buildWhatsAppLink(savedCredentials.phone, savedCredentials.name, savedCredentials.pin)}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={handleClose}
+              >
+                <MessageCircle className="h-4 w-4" />
+                Share on WhatsApp
+              </a>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -192,17 +265,34 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
                     />
                   </FormControl>
                   <FormDescription>
-                    You set and share this PIN with the borrower directly — there's no self-service reset.
+                    You set and share this PIN with the borrower — there's no self-service reset.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
 
-            <DialogFooter className="pt-4">
+            <DialogFooter className="pt-4 flex-col sm:flex-row gap-2">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
+              {canShareNow && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="gap-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                  asChild
+                >
+                  <a
+                    href={buildWhatsAppLink(watchPhone, watchName, watchPin ?? "")}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                    Preview WhatsApp
+                  </a>
+                </Button>
+              )}
               <Button type="submit" disabled={isPending}>
                 {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {isEditing ? "Save Changes" : "Enable Access"}

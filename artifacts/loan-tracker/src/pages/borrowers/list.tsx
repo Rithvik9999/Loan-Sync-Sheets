@@ -88,9 +88,6 @@ export default function BorrowersList() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">Borrowers</h1>
-          <p className="text-muted-foreground mt-1">
-            All borrowers from your Heat Map sheet. Set up portal access so they can log in.
-          </p>
         </div>
       </div>
 
@@ -156,19 +153,32 @@ export default function BorrowersList() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-1">
                         {b.id ? (
-                          <Button variant="ghost" size="icon" asChild>
-                            <Link href={`/borrowers/${b.id}`}>
-                              <ChevronRight className="h-4 w-4" />
-                              <span className="sr-only">View</span>
-                            </Link>
-                          </Button>
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-xs h-7"
+                              onClick={() => {
+                                setSetupName(b.name);
+                                setSetupPhone(b.phone);
+                              }}
+                            >
+                              Edit PIN
+                            </Button>
+                            <Button variant="ghost" size="icon" asChild>
+                              <Link href={`/borrowers/${b.id}`}>
+                                <ChevronRight className="h-4 w-4" />
+                                <span className="sr-only">View</span>
+                              </Link>
+                            </Button>
+                          </>
                         ) : (
                           <Button
-                            variant="ghost"
+                            variant="default"
                             size="sm"
-                            className="text-xs"
+                            className="text-xs h-7"
                             onClick={() => {
                               setSetupName(b.name);
                               setSetupPhone(b.phone);

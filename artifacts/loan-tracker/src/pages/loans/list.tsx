@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { LoanStatusBadge } from "@/components/status-badges";
 import { Plus, Search, ChevronRight, CreditCard, Filter, ArrowUpDown } from "lucide-react";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -71,7 +71,6 @@ export default function LoansList() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">Loans</h1>
-          <p className="text-muted-foreground mt-1">Backed live by your Heat Map sheet — fees and totals are computed there.</p>
         </div>
         <Button onClick={() => setIsCreateOpen(true)} className="w-full sm:w-auto shadow-sm">
           <Plus className="mr-2 h-4 w-4" /> Record Loan
@@ -80,8 +79,8 @@ export default function LoansList() {
 
       <Card className="shadow-sm border-border/60">
         <CardHeader className="pb-4">
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1 max-w-sm">
+          <div className="flex flex-wrap gap-3">
+            <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search by borrower name…"
@@ -150,7 +149,7 @@ export default function LoansList() {
                   <TableHead>Borrower</TableHead>
                   <TableHead>Principal</TableHead>
                   <TableHead>Tenure</TableHead>
-                  <TableHead>Transaction Date</TableHead>
+                  <TableHead>Transaction Date & Time</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Final Amount</TableHead>
                   <TableHead className="w-[80px]"></TableHead>
@@ -162,7 +161,7 @@ export default function LoansList() {
                     <TableCell className="font-medium">{loan.name}</TableCell>
                     <TableCell className="font-numeric">{formatCurrency(loan.principal)}</TableCell>
                     <TableCell className="text-muted-foreground">{loan.tenureDays}d</TableCell>
-                    <TableCell className="text-muted-foreground">{formatDate(loan.transactionDate)}</TableCell>
+                    <TableCell className="text-muted-foreground">{formatDateTime(loan.transactionDate)}</TableCell>
                     <TableCell>
                       <LoanStatusBadge status={loan.status} />
                     </TableCell>

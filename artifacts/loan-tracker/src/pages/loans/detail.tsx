@@ -106,13 +106,6 @@ export default function LoanDetail() {
               </h1>
               <LoanStatusBadge status={loan.status} />
             </div>
-            <p className="text-muted-foreground mt-1">
-              {isStaff && loan.borrowerId ? (
-                <>Borrower profile: <Link href={`/borrowers/${loan.borrowerId}`} className="text-primary hover:underline">{loan.name}</Link></>
-              ) : (
-                "Loan Details"
-              )}
-            </p>
           </div>
         </div>
 
