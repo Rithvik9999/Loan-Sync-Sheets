@@ -55,6 +55,8 @@ export interface Borrower {
   phone?: string | null;
   /** Whether staff has set a login PIN for this borrower. */
   hasPin?: boolean;
+  /** Optional credit limit set by staff, in rupees. @nullable */
+  creditLimit?: number | null;
   createdAt: string;
 }
 
@@ -69,6 +71,8 @@ export interface BorrowerInput {
      * @pattern ^[0-9]{6}$
      */
   pin?: string | null;
+  /** Optional credit limit in rupees. @nullable */
+  creditLimit?: number | null;
 }
 
 export interface BorrowerUpdate {
@@ -82,6 +86,8 @@ export interface BorrowerUpdate {
      * @pattern ^[0-9]{6}$
      */
   pin?: string | null;
+  /** Optional credit limit in rupees. @nullable */
+  creditLimit?: number | null;
 }
 
 export interface Loan {
@@ -204,6 +210,8 @@ export const LoanRequestStatus = {
   Rejected: 'Rejected',
 } as const;
 
+export type LoanRequestType = 'Loan' | 'EMI';
+
 export interface LoanRequest {
   id: string;
   name: string;
@@ -212,6 +220,10 @@ export interface LoanRequest {
   borrowerId: string | null;
   amount: number;
   tenureDays: number;
+  /** @nullable */
+  tenureMonths?: number | null;
+  /** Loan type: regular loan or EMI loan. */
+  type?: LoanRequestType;
   /** @nullable */
   purpose: string | null;
   status: LoanRequestStatus;
@@ -222,7 +234,11 @@ export interface LoanRequestInput {
   /** @minimum 0 */
   amount: number;
   /** @minimum 0 */
-  tenureDays: number;
+  tenureDays?: number;
+  /** Number of monthly EMI instalments. Required when type is EMI. @nullable */
+  tenureMonths?: number | null;
+  /** Loan type: Loan (default) or EMI. */
+  type?: LoanRequestType;
   /** @nullable */
   purpose?: string | null;
 }

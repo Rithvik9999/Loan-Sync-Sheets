@@ -7,6 +7,8 @@
  */
 import type { LoanRequestStatus } from './loanRequestStatus';
 
+export type LoanRequestType = 'Loan' | 'EMI';
+
 export interface LoanRequest {
   id: string;
   name: string;
@@ -15,6 +17,10 @@ export interface LoanRequest {
   borrowerId: string | null;
   amount: number;
   tenureDays: number;
+  /** @nullable */
+  tenureMonths?: number | null;
+  /** Loan type: regular loan or EMI. */
+  type?: LoanRequestType;
   /** @nullable */
   purpose: string | null;
   status: LoanRequestStatus;

@@ -23,12 +23,14 @@ const CreateBorrowerBodyLocal = z.object({
   name: z.string().min(1),
   phone: z.string().nullish(),
   pin: PIN_SCHEMA.nullish(),
+  creditLimit: z.coerce.number().positive().nullish(),
 });
 
 const UpdateBorrowerBodyLocal = z.object({
   name: z.string().min(1).optional(),
   phone: z.string().nullish(),
   pin: PIN_SCHEMA.nullish(),
+  creditLimit: z.coerce.number().positive().nullish(),
 });
 
 router.get("/borrowers", async (_req, res): Promise<void> => {

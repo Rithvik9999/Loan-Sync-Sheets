@@ -17,4 +17,6 @@ export interface BorrowerUpdate {
      * @pattern ^[0-9]{6}$
      */
   pin?: string | null;
+  /** Optional credit limit in rupees. @nullable */
+  creditLimit?: number | null;
 }

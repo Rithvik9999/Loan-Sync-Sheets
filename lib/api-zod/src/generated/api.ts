@@ -69,6 +69,7 @@ export const ListBorrowersResponseItem = zod.object({
   "name": zod.string(),
   "phone": zod.string().nullish(),
   "hasPin": zod.boolean().optional().describe('Whether staff has set a login PIN for this borrower.'),
+  "creditLimit": zod.number().nullish().describe('Optional credit limit set by staff, in rupees.'),
   "createdAt": zod.string()
 })
 export const ListBorrowersResponse = zod.array(ListBorrowersResponseItem)
@@ -92,6 +93,7 @@ export const CreateBorrowerResponse = zod.object({
   "name": zod.string(),
   "phone": zod.string().nullish(),
   "hasPin": zod.boolean().optional().describe('Whether staff has set a login PIN for this borrower.'),
+  "creditLimit": zod.number().nullish().describe('Optional credit limit set by staff, in rupees.'),
   "createdAt": zod.string()
 })
 
@@ -108,6 +110,7 @@ export const GetBorrowerResponse = zod.object({
   "name": zod.string(),
   "phone": zod.string().nullish(),
   "hasPin": zod.boolean().optional().describe('Whether staff has set a login PIN for this borrower.'),
+  "creditLimit": zod.number().nullish().describe('Optional credit limit set by staff, in rupees.'),
   "createdAt": zod.string()
 })
 
@@ -134,6 +137,7 @@ export const UpdateBorrowerResponse = zod.object({
   "name": zod.string(),
   "phone": zod.string().nullish(),
   "hasPin": zod.boolean().optional().describe('Whether staff has set a login PIN for this borrower.'),
+  "creditLimit": zod.number().nullish().describe('Optional credit limit set by staff, in rupees.'),
   "createdAt": zod.string()
 })
 
@@ -336,6 +340,8 @@ export const ListLoanRequestsResponseItem = zod.object({
   "borrowerId": zod.string().nullable(),
   "amount": zod.number(),
   "tenureDays": zod.number(),
+  "tenureMonths": zod.number().nullish(),
+  "type": zod.enum(['Loan', 'EMI']).optional(),
   "purpose": zod.string().nullable(),
   "status": zod.enum(['Pending', 'Approved', 'Rejected']),
   "createdAt": zod.string()
@@ -355,7 +361,9 @@ export const createLoanRequestBodyTenureDaysMin = 0;
 
 export const CreateLoanRequestBody = zod.object({
   "amount": zod.number().min(createLoanRequestBodyAmountMin),
-  "tenureDays": zod.number().min(createLoanRequestBodyTenureDaysMin),
+  "tenureDays": zod.number().min(createLoanRequestBodyTenureDaysMin).optional(),
+  "tenureMonths": zod.number().int().min(1).nullish(),
+  "type": zod.enum(['Loan', 'EMI']).optional(),
   "purpose": zod.string().nullish()
 })
 
@@ -366,6 +374,8 @@ export const CreateLoanRequestResponse = zod.object({
   "borrowerId": zod.string().nullable(),
   "amount": zod.number(),
   "tenureDays": zod.number(),
+  "tenureMonths": zod.number().nullish(),
+  "type": zod.enum(['Loan', 'EMI']).optional(),
   "purpose": zod.string().nullable(),
   "status": zod.enum(['Pending', 'Approved', 'Rejected']),
   "createdAt": zod.string()
@@ -390,6 +400,8 @@ export const UpdateLoanRequestResponse = zod.object({
   "borrowerId": zod.string().nullable(),
   "amount": zod.number(),
   "tenureDays": zod.number(),
+  "tenureMonths": zod.number().nullish(),
+  "type": zod.enum(['Loan', 'EMI']).optional(),
   "purpose": zod.string().nullable(),
   "status": zod.enum(['Pending', 'Approved', 'Rejected']),
   "createdAt": zod.string()
