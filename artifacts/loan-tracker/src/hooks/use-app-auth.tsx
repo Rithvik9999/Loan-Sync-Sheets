@@ -18,6 +18,7 @@ type AuthState = {
   borrowerId: string | null;
   name: string | null;
   phone: string | null;
+  creditLimit: number | null;
 };
 
 type AuthContextType = AuthState & {
@@ -32,6 +33,7 @@ const defaultState: AuthState = {
   borrowerId: null,
   name: null,
   phone: null,
+  creditLimit: null,
 };
 
 const AuthContext = createContext<AuthContextType>({
@@ -54,6 +56,7 @@ async function fetchMe(): Promise<AuthState> {
       borrowerId: data.borrowerId ?? null,
       name: data.name ?? null,
       phone: data.phone ?? null,
+      creditLimit: typeof data.creditLimit === "number" ? data.creditLimit : null,
     };
   } catch {
     return { ...defaultState, isLoaded: true };
@@ -98,6 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       borrowerId: data.borrowerId ?? null,
       name: data.name ?? null,
       phone: data.phone ?? null,
+      creditLimit: typeof data.creditLimit === "number" ? data.creditLimit : null,
     });
   }, []);
 

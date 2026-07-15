@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { PieChart, Pie, Cell } from "recharts";
 import { Link } from "@/components/ui/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -1776,7 +1777,7 @@ function LoansTab({
 // ─── Portal Page ──────────────────────────────────────────────────────────────
 
 export default function Portal() {
-  const { isLoaded, role, name } = useAppAuth();
+  const { isLoaded, role, name, creditLimit } = useAppAuth();
   const [loanRequestOpen, setLoanRequestOpen] = useState(false);
   const [emiRequestOpen, setEmiRequestOpen] = useState(false);
 
@@ -1854,6 +1855,21 @@ export default function Portal() {
     [activeLoans, activeEmi],
   );
 
+  // Credit limit utilisation
+  const usedPrincipal = useMemo(
+    () =>
+      activeLoans.reduce((s, l) => s + (l.principal ?? 0), 0) +
+      activeEmi.reduce((s, e) => s + (e.principal ?? 0), 0),
+    [activeLoans, activeEmi],
+  );
+  const availableCredit =
+    creditLimit != null ? Math.max(creditLimit - usedPrincipal, 0) : null;
+  const usedPct =
+    creditLimit && creditLimit > 0
+      ? Math.min(Math.round((usedPrincipal / creditLimit) * 100), 100)
+      : null;
+  const isOverLimit = creditLimit != null && usedPrincipal > creditLimit;
+
   // borrower phone for WhatsApp — extract from session via me endpoint if needed
   // We pass borrowerName and phone to the dialogs
   const borrowerPhone = "";  // phone not exposed via useAppAuth; admin sees it in the request sheet
@@ -1888,55 +1904,139 @@ export default function Portal() {
 
       {/* Summary Cards */}
       {isLoading ? (
-        <div className="grid grid-cols-3 gap-3">
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-20 w-full rounded-xl" />
-          ))}
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <Skeleton className="h-20 w-full rounded-xl" />
+            <Skeleton className="h-20 w-full rounded-xl" />
+          </div>
+          <Skeleton className="h-28 w-full rounded-xl" />
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-3">
-          <Card className="shadow-sm border-border/60">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1 pt-3 px-3">
-              <CardTitle className="text-xs font-medium text-muted-foreground leading-tight">
-                Active Loans
-              </CardTitle>
-              <CreditCard className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            </CardHeader>
-            <CardContent className="px-3 pb-3">
-              <div className="text-2xl font-bold font-numeric">
-                {activeLoans.length}
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="shadow-sm border-border/60">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1 pt-3 px-3">
-              <CardTitle className="text-xs font-medium text-muted-foreground leading-tight">
-                Active EMIs
-              </CardTitle>
-              <CalendarClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            </CardHeader>
-            <CardContent className="px-3 pb-3">
-              <div className="text-2xl font-bold font-numeric">
-                {activeEmi.length}
-              </div>
-            </CardContent>
-          </Card>
+        <div className="space-y-3">
+          {/* Count cards */}
+          <div className="grid grid-cols-2 gap-3">
+            <Card className="shadow-sm border-border/60">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1 pt-3 px-3">
+                <CardTitle className="text-xs font-medium text-muted-foreground leading-tight">
+                  Active Loans
+                </CardTitle>
+                <CreditCard className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              </CardHeader>
+              <CardContent className="px-3 pb-3">
+                <div className="text-2xl font-bold font-numeric">
+                  {activeLoans.length}
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="shadow-sm border-border/60">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1 pt-3 px-3">
+                <CardTitle className="text-xs font-medium text-muted-foreground leading-tight">
+                  Active EMIs
+                </CardTitle>
+                <CalendarClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              </CardHeader>
+              <CardContent className="px-3 pb-3">
+                <div className="text-2xl font-bold font-numeric">
+                  {activeEmi.length}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Credit limit utilisation card */}
           <Card
-            className={`shadow-sm ${hasOverdue ? "border-destructive/30 bg-destructive/5" : "border-border/60"}`}
+            className={`shadow-sm ${isOverLimit ? "border-destructive/40 bg-destructive/5" : "border-border/60"}`}
           >
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1 pt-3 px-3">
-              <CardTitle className="text-xs font-medium text-muted-foreground leading-tight">
-                Total Due
-              </CardTitle>
-              <Wallet
-                className={`h-3.5 w-3.5 shrink-0 ${hasOverdue ? "text-destructive" : "text-muted-foreground"}`}
-              />
-            </CardHeader>
-            <CardContent className="px-3 pb-3">
-              <div
-                className={`text-sm font-bold font-numeric leading-tight break-all ${hasOverdue ? "text-destructive" : ""}`}
-              >
-                {formatCurrency(totalOutstanding)}
+            <CardContent className="px-4 py-3">
+              <div className="flex items-center gap-4">
+                {/* Donut chart */}
+                <div className="relative shrink-0" style={{ width: 84, height: 84 }}>
+                  <PieChart width={84} height={84}>
+                    <Pie
+                      data={
+                        creditLimit != null && creditLimit > 0
+                          ? [
+                              { name: "Used", value: Math.min(usedPrincipal, creditLimit) },
+                              { name: "Available", value: Math.max(creditLimit - usedPrincipal, 0) },
+                              ...(isOverLimit
+                                ? [{ name: "Over", value: usedPrincipal - creditLimit }]
+                                : []),
+                            ]
+                          : usedPrincipal > 0
+                          ? [{ name: "Used", value: 1 }]
+                          : [{ name: "Empty", value: 1 }]
+                      }
+                      cx={38}
+                      cy={38}
+                      innerRadius={26}
+                      outerRadius={38}
+                      strokeWidth={0}
+                      startAngle={90}
+                      endAngle={-270}
+                      dataKey="value"
+                    >
+                      {creditLimit != null && creditLimit > 0 ? (
+                        <>
+                          <Cell fill={isOverLimit ? "hsl(var(--destructive))" : "hsl(var(--primary))"} />
+                          <Cell fill="hsl(var(--muted))" />
+                          {isOverLimit && <Cell fill="hsl(var(--destructive) / 0.4)" />}
+                        </>
+                      ) : usedPrincipal > 0 ? (
+                        <Cell fill="hsl(var(--primary))" />
+                      ) : (
+                        <Cell fill="hsl(var(--muted))" />
+                      )}
+                    </Pie>
+                  </PieChart>
+                  {/* Centre label */}
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <span
+                      className={`text-xs font-bold font-numeric ${isOverLimit ? "text-destructive" : "text-foreground"}`}
+                    >
+                      {usedPct != null ? `${usedPct}%` : "—"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Stats */}
+                <div className="flex-1 min-w-0 space-y-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Credit Limit
+                  </p>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">Used</p>
+                      <p
+                        className={`text-sm font-bold font-numeric leading-tight ${isOverLimit ? "text-destructive" : ""}`}
+                      >
+                        {formatCurrency(usedPrincipal)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">
+                        {creditLimit != null ? "Available" : "Limit"}
+                      </p>
+                      <p className="text-sm font-bold font-numeric leading-tight">
+                        {creditLimit != null
+                          ? formatCurrency(availableCredit ?? 0)
+                          : <span className="text-muted-foreground font-normal text-xs">No limit set</span>}
+                      </p>
+                    </div>
+                  </div>
+                  {creditLimit != null && (
+                    <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${isOverLimit ? "bg-destructive" : "bg-primary"}`}
+                        style={{ width: `${Math.min((usedPrincipal / creditLimit) * 100, 100)}%` }}
+                      />
+                    </div>
+                  )}
+                  {creditLimit != null && (
+                    <p className="text-[10px] text-muted-foreground">
+                      of {formatCurrency(creditLimit)} total limit
+                    </p>
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>

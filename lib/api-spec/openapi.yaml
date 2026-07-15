@@ -409,6 +409,9 @@ components:
           type: ["string", "null"]
         phone:
           type: ["string", "null"]
+        creditLimit:
+          type: ["number", "null"]
+          description: Maximum total principal the borrower may have outstanding; null means no limit set. Always null for staff.
 
     Borrower:
       type: object

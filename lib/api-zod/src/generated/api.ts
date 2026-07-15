@@ -57,7 +57,8 @@ export const GetMeResponse = zod.object({
   "role": zod.enum(['staff', 'borrower']),
   "borrowerId": zod.string().nullish(),
   "name": zod.string().nullish(),
-  "phone": zod.string().nullish()
+  "phone": zod.string().nullish(),
+  "creditLimit": zod.number().nullish().describe('Maximum total principal the borrower may have outstanding; null means no limit set. Always null for staff.')
 })
 
 
