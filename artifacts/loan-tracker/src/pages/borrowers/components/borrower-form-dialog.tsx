@@ -37,7 +37,7 @@ function sanitizePhoneInput(raw: string): string {
 }
 
 function buildWhatsAppLink(phone: string, name: string, pin: string): string {
-  const message = `Hello ${name}! 👋\n\nYour BorrowApp login credentials:\n📱 Phone: ${phone}\n🔑 PIN: ${pin}\n\nUse these to check your loan details.`;
+  const message = `Hello ${name}! 👋\n\nYour BorrowApp login credentials:\n📱 Phone: ${phone}\n🔑 PIN: ${pin}\n\nUse these to check your loan details at openr3.in\n\nIf you need to change your pin, ask me.`;
   return `https://wa.me/91${phone}?text=${encodeURIComponent(message)}`;
 }
 
