@@ -1,10 +1,19 @@
 import { useState, useMemo } from "react";
 import { Link } from "@/components/ui/link";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { useAppAuth } from "@/hooks/use-app-auth";
 import { useQuery } from "@tanstack/react-query";
-import { EmiLoan, EMI_LOANS_QUERY_KEY, fetchEmiLoans } from "@/pages/emi-loans/components/emi-loan-form-dialog";
+import {
+  EmiLoan,
+  EMI_LOANS_QUERY_KEY,
+  fetchEmiLoans,
+} from "@/pages/emi-loans/components/emi-loan-form-dialog";
 import {
   useListLoans,
   useCreateLoanRequest,
@@ -30,6 +39,10 @@ import {
   Wallet,
   ListChecks,
   CheckSquare,
+  MessageCircle,
+  ChevronDown,
+  ChevronUp,
+  BadgeCheck,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -59,13 +72,37 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
 
-// ─── UPI VPA ──────────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const UPI_VPA = "9438556400@slc";
+const WA_ADMIN = "8917656405";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function openUpi(amount: number, note = "Loan Repayment") {
   const link = `upi://pay?pa=${UPI_VPA}&am=${amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(note)}`;
   window.location.href = link;
+}
+
+function openWhatsApp(params: {
+  type: "loan" | "emi";
+  name: string;
+  phone: string;
+  amount: number;
+  tenure: string;
+  purpose?: string | null;
+}) {
+  const lines = [
+    `🏦 New ${params.type === "emi" ? "EMI " : ""}Loan Request`,
+    `👤 Name: ${params.name}`,
+    `📱 Phone: ${params.phone}`,
+    `💰 Amount: ₹${params.amount.toLocaleString("en-IN")}`,
+    `📅 Tenure: ${params.tenure}`,
+  ];
+  if (params.purpose) lines.push(`📝 Purpose: ${params.purpose}`);
+  lines.push(`🗓 Date: ${new Date().toLocaleDateString("en-IN")}`);
+  const msg = lines.join("\n");
+  window.open(`https://wa.me/${WA_ADMIN}?text=${encodeURIComponent(msg)}`, "_blank");
 }
 
 // ─── Loan Request Dialog ──────────────────────────────────────────────────────
@@ -86,9 +123,13 @@ type LoanRequestValues = z.infer<typeof loanRequestSchema>;
 function LoanRequestDialog({
   open,
   onOpenChange,
+  borrowerName,
+  borrowerPhone,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  borrowerName: string;
+  borrowerPhone: string;
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -101,16 +142,36 @@ function LoanRequestDialog({
 
   function onSubmit(data: LoanRequestValues) {
     createLoanRequest.mutate(
-      { data: { amount: data.amount, tenureDays: data.tenureDays, purpose: data.purpose || null } },
+      {
+        data: {
+          amount: data.amount,
+          tenureDays: data.tenureDays,
+          purpose: data.purpose || null,
+        },
+      },
       {
         onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: getListLoanRequestsQueryKey() });
-          toast({ title: "Request submitted", description: "Your loan request has been sent to the admin." });
+          queryClient.invalidateQueries({
+            queryKey: getListLoanRequestsQueryKey(),
+          });
+          toast({
+            title: "Request submitted",
+            description: "Opening WhatsApp to notify admin…",
+          });
+          openWhatsApp({
+            type: "loan",
+            name: borrowerName,
+            phone: borrowerPhone,
+            amount: data.amount,
+            tenure: `${data.tenureDays} days`,
+            purpose: data.purpose,
+          });
           form.reset();
           onOpenChange(false);
         },
         onError: (err: unknown) => {
-          const msg = err instanceof Error ? err.message : "Could not submit request.";
+          const msg =
+            err instanceof Error ? err.message : "Could not submit request.";
           toast({ variant: "destructive", title: "Error", description: msg });
         },
       },
@@ -119,45 +180,93 @@ function LoanRequestDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[420px]">
+      <DialogContent className="sm:max-w-[420px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Request a New Loan</DialogTitle>
-          <DialogDescription>Fill in the details and the admin will review your request.</DialogDescription>
+          <DialogDescription>
+            Fill in the details. Admin will be notified via WhatsApp.
+          </DialogDescription>
         </DialogHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-2">
-            <FormField control={form.control} name="amount" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Loan Amount (₹)</FormLabel>
-                <FormControl>
-                  <Input type="number" placeholder="e.g. 50000" min="1" step="1" {...field} value={field.value ?? ""} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="tenureDays" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Tenure (days)</FormLabel>
-                <FormControl>
-                  <Input type="number" placeholder="e.g. 30" min="1" step="1" {...field} value={field.value ?? ""} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="purpose" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Purpose (optional)</FormLabel>
-                <FormControl>
-                  <Textarea placeholder="Brief reason for the loan…" rows={2} {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <DialogFooter className="pt-2">
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-              <Button type="submit" disabled={createLoanRequest.isPending}>
-                {createLoanRequest.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Submit Request
+          <form
+            onSubmit={form.handleSubmit(onSubmit)}
+            className="space-y-4 pt-2"
+          >
+            <FormField
+              control={form.control}
+              name="amount"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Loan Amount (₹)</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      placeholder="e.g. 50000"
+                      min="1"
+                      step="1"
+                      {...field}
+                      value={field.value ?? ""}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="tenureDays"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Tenure (days)</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      placeholder="e.g. 30"
+                      min="1"
+                      step="1"
+                      {...field}
+                      value={field.value ?? ""}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="purpose"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Purpose (optional)</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      placeholder="Brief reason for the loan…"
+                      rows={2}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <DialogFooter className="pt-2 flex-col sm:flex-row gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full sm:w-auto"
+                onClick={() => onOpenChange(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="w-full sm:w-auto"
+                disabled={createLoanRequest.isPending}
+              >
+                {createLoanRequest.isPending && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Submit & Notify Admin
               </Button>
             </DialogFooter>
           </form>
@@ -185,9 +294,13 @@ type EmiRequestValues = z.infer<typeof emiRequestSchema>;
 function EmiRequestDialog({
   open,
   onOpenChange,
+  borrowerName,
+  borrowerPhone,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  borrowerName: string;
+  borrowerPhone: string;
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -195,7 +308,11 @@ function EmiRequestDialog({
 
   const form = useForm<EmiRequestValues>({
     resolver: zodResolver(emiRequestSchema),
-    defaultValues: { amount: undefined, tenureMonths: undefined, purpose: "" },
+    defaultValues: {
+      amount: undefined,
+      tenureMonths: undefined,
+      purpose: "",
+    },
   });
 
   async function onSubmit(data: EmiRequestValues) {
@@ -214,15 +331,35 @@ function EmiRequestDialog({
         }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Could not submit request." }));
+        const err = await res
+          .json()
+          .catch(() => ({ error: "Could not submit request." }));
         throw new Error(err.error || "Could not submit request.");
       }
-      queryClient.invalidateQueries({ queryKey: getListLoanRequestsQueryKey() });
-      toast({ title: "EMI request submitted", description: "Your EMI loan request has been sent to the admin." });
+      queryClient.invalidateQueries({
+        queryKey: getListLoanRequestsQueryKey(),
+      });
+      toast({
+        title: "EMI request submitted",
+        description: "Opening WhatsApp to notify admin…",
+      });
+      openWhatsApp({
+        type: "emi",
+        name: borrowerName,
+        phone: borrowerPhone,
+        amount: data.amount,
+        tenure: `${data.tenureMonths} months`,
+        purpose: data.purpose,
+      });
       form.reset();
       onOpenChange(false);
     } catch (err) {
-      toast({ variant: "destructive", title: "Error", description: err instanceof Error ? err.message : "Could not submit request." });
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description:
+          err instanceof Error ? err.message : "Could not submit request.",
+      });
     } finally {
       setIsPending(false);
     }
@@ -230,45 +367,94 @@ function EmiRequestDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[420px]">
+      <DialogContent className="sm:max-w-[420px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Request an EMI Loan</DialogTitle>
-          <DialogDescription>Request a loan with monthly EMI payments. Admin will review and set up the terms.</DialogDescription>
+          <DialogDescription>
+            Request a monthly instalment loan. Admin will be notified via
+            WhatsApp.
+          </DialogDescription>
         </DialogHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-2">
-            <FormField control={form.control} name="amount" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Loan Amount (₹)</FormLabel>
-                <FormControl>
-                  <Input type="number" placeholder="e.g. 100000" min="1" step="1" {...field} value={field.value ?? ""} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="tenureMonths" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Tenure (months)</FormLabel>
-                <FormControl>
-                  <Input type="number" placeholder="e.g. 12" min="1" step="1" {...field} value={field.value ?? ""} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="purpose" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Purpose (optional)</FormLabel>
-                <FormControl>
-                  <Textarea placeholder="Brief reason for the loan…" rows={2} {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <DialogFooter className="pt-2">
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-              <Button type="submit" disabled={isPending}>
-                {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Submit Request
+          <form
+            onSubmit={form.handleSubmit(onSubmit)}
+            className="space-y-4 pt-2"
+          >
+            <FormField
+              control={form.control}
+              name="amount"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Loan Amount (₹)</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      placeholder="e.g. 100000"
+                      min="1"
+                      step="1"
+                      {...field}
+                      value={field.value ?? ""}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="tenureMonths"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Tenure (months)</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      placeholder="e.g. 12"
+                      min="1"
+                      step="1"
+                      {...field}
+                      value={field.value ?? ""}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="purpose"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Purpose (optional)</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      placeholder="Brief reason for the loan…"
+                      rows={2}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <DialogFooter className="pt-2 flex-col sm:flex-row gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full sm:w-auto"
+                onClick={() => onOpenChange(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="w-full sm:w-auto"
+                disabled={isPending}
+              >
+                {isPending && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Submit & Notify Admin
               </Button>
             </DialogFooter>
           </form>
@@ -294,7 +480,8 @@ function RepayDialog({
   const [mode, setMode] = useState<"full" | "custom">("full");
   const [custom, setCustom] = useState("");
 
-  const amount = mode === "full" ? Math.max(outstanding, 0) : Number(custom);
+  const amount =
+    mode === "full" ? Math.max(outstanding, 0) : Number(custom);
   const isValid = amount > 0 && Number.isFinite(amount);
 
   const handlePay = () => {
@@ -308,15 +495,20 @@ function RepayDialog({
         <DialogHeader>
           <DialogTitle>Repay — {label}</DialogTitle>
           <DialogDescription>
-            This will open your UPI app to pay <strong>{UPI_VPA}</strong>.
+            Opens your UPI app to pay{" "}
+            <strong className="font-mono">{UPI_VPA}</strong>.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          <div className="rounded-lg bg-muted/50 p-4 space-y-1 text-sm">
-            <div className="flex justify-between border-t pt-2 mt-1">
-              <span className="text-muted-foreground font-medium">Outstanding</span>
-              <span className="font-bold font-numeric text-destructive">{formatCurrency(Math.max(outstanding, 0))}</span>
+          <div className="rounded-lg bg-muted/50 p-4 text-sm">
+            <div className="flex justify-between border-t pt-2">
+              <span className="text-muted-foreground font-medium">
+                Outstanding
+              </span>
+              <span className="font-bold font-numeric text-destructive">
+                {formatCurrency(Math.max(outstanding, 0))}
+              </span>
             </div>
           </div>
 
@@ -325,41 +517,71 @@ function RepayDialog({
               type="button"
               onClick={() => setMode("full")}
               className={`rounded-lg border p-3 text-sm font-medium transition-colors text-left ${
-                mode === "full" ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-muted/50"
+                mode === "full"
+                  ? "border-primary bg-primary/5 text-primary"
+                  : "border-border hover:bg-muted/50"
               }`}
             >
               <div className="font-semibold">Full amount</div>
-              <div className="text-muted-foreground font-numeric text-xs mt-0.5">{formatCurrency(Math.max(outstanding, 0))}</div>
+              <div className="text-muted-foreground font-numeric text-xs mt-0.5">
+                {formatCurrency(Math.max(outstanding, 0))}
+              </div>
             </button>
             <button
               type="button"
               onClick={() => setMode("custom")}
               className={`rounded-lg border p-3 text-sm font-medium transition-colors text-left ${
-                mode === "custom" ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-muted/50"
+                mode === "custom"
+                  ? "border-primary bg-primary/5 text-primary"
+                  : "border-border hover:bg-muted/50"
               }`}
             >
               <div className="font-semibold">Custom amount</div>
-              <div className="text-muted-foreground text-xs mt-0.5">Enter any amount</div>
+              <div className="text-muted-foreground text-xs mt-0.5">
+                Enter any amount
+              </div>
             </button>
           </div>
 
           {mode === "custom" && (
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Amount (₹)</label>
-              <Input type="number" placeholder="Enter amount" min="1" step="1" value={custom} onChange={(e) => setCustom(e.target.value)} autoFocus />
+              <Input
+                type="number"
+                placeholder="Enter amount"
+                min="1"
+                step="1"
+                value={custom}
+                onChange={(e) => setCustom(e.target.value)}
+                autoFocus
+              />
             </div>
           )}
 
           {isValid && (
             <p className="text-sm text-center text-muted-foreground">
-              You will pay <span className="font-semibold text-foreground">{formatCurrency(amount)}</span> to {UPI_VPA}
+              You will pay{" "}
+              <span className="font-semibold text-foreground">
+                {formatCurrency(amount)}
+              </span>{" "}
+              to {UPI_VPA}
             </p>
           )}
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handlePay} disabled={!isValid} className="bg-emerald-700 hover:bg-emerald-800 text-white">
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <Button
+            variant="outline"
+            className="w-full sm:w-auto"
+            onClick={() => onOpenChange(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handlePay}
+            disabled={!isValid}
+            className="w-full sm:w-auto bg-emerald-700 hover:bg-emerald-800 text-white"
+          >
             <Banknote className="mr-2 h-4 w-4" />
             Pay via UPI
           </Button>
@@ -382,16 +604,13 @@ function BulkRepayDialog({
   total: number;
   count: number;
 }) {
-  const handlePay = () => {
-    openUpi(total, `Loan Repayment (${count} items)`);
-    onOpenChange(false);
-  };
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[380px]">
         <DialogHeader>
-          <DialogTitle>Pay {count} item{count !== 1 ? "s" : ""}</DialogTitle>
+          <DialogTitle>
+            Pay {count} item{count !== 1 ? "s" : ""}
+          </DialogTitle>
           <DialogDescription>
             Opens your UPI app to pay <strong>{UPI_VPA}</strong>.
           </DialogDescription>
@@ -402,13 +621,29 @@ function BulkRepayDialog({
             <span className="font-semibold">{count}</span>
           </div>
           <div className="flex justify-between border-t pt-2 mt-1">
-            <span className="text-muted-foreground font-medium">Total amount</span>
-            <span className="font-bold font-numeric text-lg text-foreground">{formatCurrency(total)}</span>
+            <span className="text-muted-foreground font-medium">
+              Total amount
+            </span>
+            <span className="font-bold font-numeric text-lg">
+              {formatCurrency(total)}
+            </span>
           </div>
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handlePay} className="bg-emerald-700 hover:bg-emerald-800 text-white">
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <Button
+            variant="outline"
+            className="w-full sm:w-auto"
+            onClick={() => onOpenChange(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              openUpi(total, `Loan Repayment (${count} items)`);
+              onOpenChange(false);
+            }}
+            className="w-full sm:w-auto bg-emerald-700 hover:bg-emerald-800 text-white"
+          >
             <Banknote className="mr-2 h-4 w-4" />
             Pay {formatCurrency(total)} via UPI
           </Button>
@@ -418,10 +653,11 @@ function BulkRepayDialog({
   );
 }
 
-// ─── Unified Repayment List ───────────────────────────────────────────────────
+// ─── Repayment item type ──────────────────────────────────────────────────────
 
 type RepayItem = {
   key: string;
+  id: string;
   type: "loan" | "emi";
   label: string;
   subLabel: string;
@@ -430,7 +666,10 @@ type RepayItem = {
   isOverdue: boolean;
 };
 
-function buildRepaymentItems(loans: Loan[] | undefined, emiLoans: EmiLoan[] | undefined): RepayItem[] {
+function buildRepaymentItems(
+  loans: Loan[] | undefined,
+  emiLoans: EmiLoan[] | undefined,
+): RepayItem[] {
   const now = new Date();
   const items: RepayItem[] = [];
 
@@ -449,9 +688,14 @@ function buildRepaymentItems(loans: Loan[] | undefined, emiLoans: EmiLoan[] | un
     const isOverdue = !!(dueDate && dueDate < now);
     items.push({
       key: `loan-${l.id}`,
+      id: l.id,
       type: "loan",
       label: `${formatCurrency(l.principal)} Loan`,
-      subLabel: dueDate ? (isOverdue ? `Overdue since ${formatDate(dueDate.toISOString())}` : `Due ${formatDate(dueDate.toISOString())}`) : "No due date",
+      subLabel: dueDate
+        ? isOverdue
+          ? `Overdue since ${formatDate(dueDate.toISOString())}`
+          : `Due ${formatDate(dueDate.toISOString())}`
+        : "No due date set",
       outstanding,
       dueDate,
       isOverdue,
@@ -466,71 +710,173 @@ function buildRepaymentItems(loans: Loan[] | undefined, emiLoans: EmiLoan[] | un
     const isOverdue = !!(dueDate && dueDate < now);
     items.push({
       key: `emi-${e.id}`,
+      id: e.id,
       type: "emi",
-      label: `${formatCurrency(e.principal)} EMI Loan`,
-      subLabel: dueDate ? (isOverdue ? `Overdue since ${formatDate(e.nextPaymentDate!)}` : `Next payment ${formatDate(e.nextPaymentDate!)}`) : "No due date",
+      label: `${formatCurrency(e.principal)} EMI`,
+      subLabel: dueDate
+        ? isOverdue
+          ? `Overdue since ${formatDate(e.nextPaymentDate!)}`
+          : `Next payment ${formatDate(e.nextPaymentDate!)}`
+        : "No due date",
       outstanding: monthly,
       dueDate,
       isOverdue,
     });
   }
 
-  // Sort: overdue first, then by date ascending, then null dates last
-  items.sort((a, b) => {
-    if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
-    if (!a.dueDate && !b.dueDate) return 0;
-    if (!a.dueDate) return 1;
-    if (!b.dueDate) return -1;
-    return a.dueDate.getTime() - b.dueDate.getTime();
-  });
-
   return items;
 }
 
-function RepaymentList({ loans, emiLoans }: { loans: Loan[] | undefined; emiLoans: EmiLoan[] | undefined }) {
-  const items = useMemo(() => buildRepaymentItems(loans, emiLoans), [loans, emiLoans]);
+// ─── RepayItem Card ───────────────────────────────────────────────────────────
+
+function RepayItemCard({
+  item,
+  selected,
+  onToggle,
+  showCheckbox,
+}: {
+  item: RepayItem;
+  selected: boolean;
+  onToggle: () => void;
+  showCheckbox: boolean;
+}) {
+  const [repayOpen, setRepayOpen] = useState(false);
+  const detailHref =
+    item.type === "loan" ? `/loans/${item.id}` : `/emi-loans/${item.id}`;
+
+  return (
+    <>
+      <div
+        className={`flex items-center gap-3 rounded-xl border px-4 py-3 transition-colors ${
+          item.isOverdue
+            ? "border-destructive/40 bg-destructive/5"
+            : "border-border bg-card"
+        } ${selected ? "ring-2 ring-primary/30" : ""}`}
+      >
+        {showCheckbox && (
+          <Checkbox
+            checked={selected}
+            onCheckedChange={onToggle}
+            aria-label={`Select ${item.label}`}
+          />
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-sm">{item.label}</span>
+            <Badge
+              variant="outline"
+              className={`text-xs ${
+                item.type === "emi"
+                  ? "border-blue-200 text-blue-700"
+                  : "border-slate-200 text-slate-600"
+              }`}
+            >
+              {item.type === "emi" ? "EMI" : "Loan"}
+            </Badge>
+            {item.isOverdue && (
+              <Badge variant="destructive" className="text-xs gap-1">
+                <AlertTriangle className="h-2.5 w-2.5" />
+                Overdue
+              </Badge>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">{item.subLabel}</p>
+        </div>
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          <div
+            className={`font-bold font-numeric text-sm ${
+              item.isOverdue ? "text-destructive" : "text-foreground"
+            }`}
+          >
+            {formatCurrency(item.outstanding)}
+          </div>
+          <div className="flex gap-1.5">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 text-xs px-2"
+              asChild
+            >
+              <Link href={detailHref}>
+                Details <ChevronRight className="ml-0.5 h-3 w-3" />
+              </Link>
+            </Button>
+            <Button
+              size="sm"
+              className="h-6 text-xs px-2 bg-emerald-700 hover:bg-emerald-800 text-white"
+              onClick={() => setRepayOpen(true)}
+            >
+              <Banknote className="mr-1 h-3 w-3" />
+              Pay
+            </Button>
+          </div>
+        </div>
+      </div>
+      <RepayDialog
+        open={repayOpen}
+        onOpenChange={setRepayOpen}
+        label={item.label}
+        outstanding={item.outstanding}
+      />
+    </>
+  );
+}
+
+// ─── Overdue Tab ──────────────────────────────────────────────────────────────
+
+function OverdueTab({
+  items,
+}: {
+  items: RepayItem[];
+}) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [singleRepay, setSingleRepay] = useState<RepayItem | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
 
-  const toggleItem = (key: string) => {
+  const toggle = (key: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      next.has(key) ? next.delete(key) : next.add(key);
       return next;
     });
-  };
 
   const selectedItems = items.filter((i) => selected.has(i.key));
-  const bulkTotal = selectedItems.reduce((sum, i) => sum + i.outstanding, 0);
+  const bulkTotal = selectedItems.reduce((s, i) => s + i.outstanding, 0);
 
   if (items.length === 0) {
     return (
-      <div className="rounded-xl border bg-emerald-50/60 border-emerald-200 p-8 text-center">
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-8 text-center">
         <CheckCircle2 className="mx-auto h-8 w-8 text-emerald-500 mb-2" />
-        <p className="text-sm font-medium text-emerald-800">All clear!</p>
-        <p className="text-xs text-emerald-600 mt-0.5">You have no outstanding repayments.</p>
+        <p className="text-sm font-medium text-emerald-800">No overdue loans!</p>
+        <p className="text-xs text-emerald-600 mt-0.5">
+          Great — you are all caught up.
+        </p>
       </div>
     );
   }
 
   return (
     <div className="space-y-3">
-      {/* Bulk action bar */}
       {selected.size > 0 && (
         <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
           <div className="flex items-center gap-2 text-sm">
             <CheckSquare className="h-4 w-4 text-primary" />
             <span className="font-medium">{selected.size} selected</span>
             <span className="text-muted-foreground">·</span>
-            <span className="font-bold font-numeric text-foreground">{formatCurrency(bulkTotal)}</span>
+            <span className="font-bold font-numeric">{formatCurrency(bulkTotal)}</span>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setSelected(new Set())}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSelected(new Set())}
+            >
               Clear
             </Button>
-            <Button size="sm" className="bg-emerald-700 hover:bg-emerald-800 text-white" onClick={() => setBulkOpen(true)}>
+            <Button
+              size="sm"
+              className="bg-emerald-700 hover:bg-emerald-800 text-white"
+              onClick={() => setBulkOpen(true)}
+            >
               <Banknote className="mr-1.5 h-3.5 w-3.5" />
               Pay {formatCurrency(bulkTotal)}
             </Button>
@@ -538,70 +884,18 @@ function RepaymentList({ loans, emiLoans }: { loans: Loan[] | undefined; emiLoan
         </div>
       )}
 
-      {/* Repayment items */}
       <div className="space-y-2">
         {items.map((item) => (
-          <div
+          <RepayItemCard
             key={item.key}
-            className={`flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors ${
-              item.isOverdue ? "border-destructive/40 bg-destructive/5" : "border-border bg-card"
-            } ${selected.has(item.key) ? "ring-2 ring-primary/30" : ""}`}
-          >
-            <Checkbox
-              checked={selected.has(item.key)}
-              onCheckedChange={() => toggleItem(item.key)}
-              aria-label={`Select ${item.label}`}
-            />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-medium text-sm">{item.label}</span>
-                <Badge
-                  variant="outline"
-                  className={`text-xs ${
-                    item.type === "emi"
-                      ? "border-blue-200 text-blue-700"
-                      : "border-slate-200 text-slate-600"
-                  }`}
-                >
-                  {item.type === "emi" ? "EMI" : "Loan"}
-                </Badge>
-                {item.isOverdue && (
-                  <Badge variant="destructive" className="text-xs gap-1">
-                    <AlertTriangle className="h-2.5 w-2.5" />
-                    Overdue
-                  </Badge>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground mt-0.5">{item.subLabel}</p>
-            </div>
-            <div className="text-right shrink-0">
-              <div className={`font-bold font-numeric text-sm ${item.isOverdue ? "text-destructive" : "text-foreground"}`}>
-                {formatCurrency(item.outstanding)}
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 text-xs mt-1 px-2"
-                onClick={() => setSingleRepay(item)}
-              >
-                Pay
-              </Button>
-            </div>
-          </div>
+            item={item}
+            selected={selected.has(item.key)}
+            onToggle={() => toggle(item.key)}
+            showCheckbox
+          />
         ))}
       </div>
 
-      {/* Single repay dialog */}
-      {singleRepay && (
-        <RepayDialog
-          open={!!singleRepay}
-          onOpenChange={(o) => { if (!o) setSingleRepay(null); }}
-          label={singleRepay.label}
-          outstanding={singleRepay.outstanding}
-        />
-      )}
-
-      {/* Bulk repay dialog */}
       <BulkRepayDialog
         open={bulkOpen}
         onOpenChange={setBulkOpen}
@@ -612,7 +906,89 @@ function RepaymentList({ loans, emiLoans }: { loans: Loan[] | undefined; emiLoan
   );
 }
 
-// ─── Loan Card (detail view) ──────────────────────────────────────────────────
+// ─── Coming Up Tab ────────────────────────────────────────────────────────────
+
+function ComingUpTab({ items }: { items: RepayItem[] }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+
+  const toggle = (key: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+
+  const selectedItems = items.filter((i) => selected.has(i.key));
+  const bulkTotal = selectedItems.reduce((s, i) => s + i.outstanding, 0);
+
+  if (items.length === 0) {
+    return (
+      <div className="rounded-xl border bg-muted/30 p-8 text-center">
+        <ListChecks className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
+        <p className="text-sm font-medium text-muted-foreground">
+          Nothing due soon
+        </p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          No upcoming repayments found.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {selected.size > 0 && (
+        <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm">
+            <CheckSquare className="h-4 w-4 text-primary" />
+            <span className="font-medium">{selected.size} selected</span>
+            <span className="text-muted-foreground">·</span>
+            <span className="font-bold font-numeric">{formatCurrency(bulkTotal)}</span>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSelected(new Set())}
+            >
+              Clear
+            </Button>
+            <Button
+              size="sm"
+              className="bg-emerald-700 hover:bg-emerald-800 text-white"
+              onClick={() => setBulkOpen(true)}
+            >
+              <Banknote className="mr-1.5 h-3.5 w-3.5" />
+              Pay {formatCurrency(bulkTotal)}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {items.map((item) => (
+          <RepayItemCard
+            key={item.key}
+            item={item}
+            selected={selected.has(item.key)}
+            onToggle={() => toggle(item.key)}
+            showCheckbox
+          />
+        ))}
+      </div>
+
+      <BulkRepayDialog
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        total={bulkTotal}
+        count={selected.size}
+      />
+    </div>
+  );
+}
+
+// ─── Loan Card (for My Loans tab) ─────────────────────────────────────────────
 
 function LoanCard({ loan }: { loan: Loan }) {
   const [repayOpen, setRepayOpen] = useState(false);
@@ -621,19 +997,23 @@ function LoanCard({ loan }: { loan: Loan }) {
   return (
     <>
       <Card className="overflow-hidden shadow-sm border-border/60">
-        <div className="bg-primary/5 px-6 py-4 border-b flex justify-between items-center gap-2 flex-wrap">
+        <div className="bg-primary/5 px-4 py-3 border-b flex justify-between items-center gap-2 flex-wrap">
           <div>
-            <h2 className="text-lg font-medium font-serif flex items-center gap-3">
+            <h2 className="text-base font-semibold flex items-center gap-2 flex-wrap">
               {formatCurrency(loan.principal)} Loan
               <LoanStatusBadge status={loan.status} />
             </h2>
-            <p className="text-sm text-muted-foreground">
-              Taken {formatDate(loan.transactionDate)} · {loan.tenureDays} days
+            <p className="text-xs text-muted-foreground">
+              {formatDate(loan.transactionDate)} · {loan.tenureDays}d
             </p>
           </div>
           <div className="flex gap-2">
             {loan.status !== "Clear" && (
-              <Button size="sm" className="bg-emerald-700 hover:bg-emerald-800 text-white" onClick={() => setRepayOpen(true)}>
+              <Button
+                size="sm"
+                className="bg-emerald-700 hover:bg-emerald-800 text-white"
+                onClick={() => setRepayOpen(true)}
+              >
                 <Banknote className="mr-1.5 h-3.5 w-3.5" />
                 Repay
               </Button>
@@ -646,27 +1026,33 @@ function LoanCard({ loan }: { loan: Loan }) {
           </div>
         </div>
         <CardContent className="p-0">
-          <div className="grid md:grid-cols-3 divide-y md:divide-y-0 md:divide-x">
-            <div className="p-5 space-y-1">
+          <div className="grid grid-cols-3 divide-x text-center">
+            <div className="p-4 space-y-0.5">
               <div className="text-xs text-muted-foreground">Total Due</div>
-              <div className="text-2xl font-bold font-numeric text-foreground">
-                {loan.finalAmount != null ? formatCurrency(loan.finalAmount) : "—"}
+              <div className="text-lg font-bold font-numeric">
+                {loan.finalAmount != null
+                  ? formatCurrency(loan.finalAmount)
+                  : "—"}
               </div>
             </div>
-            <div className="p-5 bg-muted/10 space-y-1">
-              <div className="text-xs text-muted-foreground">Paid So Far</div>
-              <div className="text-xl font-semibold font-numeric text-emerald-700">{formatCurrency(loan.paid ?? 0)}</div>
+            <div className="p-4 bg-muted/10 space-y-0.5">
+              <div className="text-xs text-muted-foreground">Paid</div>
+              <div className="text-base font-semibold font-numeric text-emerald-700">
+                {formatCurrency(loan.paid ?? 0)}
+              </div>
             </div>
-            <div className="p-5 space-y-1">
+            <div className="p-4 space-y-0.5">
               <div className="text-xs text-muted-foreground">
                 {loan.status === "Clear" ? "Return Date" : "Outstanding"}
               </div>
               {loan.status === "Clear" ? (
-                <div className="text-xl font-semibold font-numeric">
+                <div className="text-base font-semibold font-numeric">
                   {loan.returnDate ? formatDate(loan.returnDate) : "—"}
                 </div>
               ) : (
-                <div className={`text-xl font-semibold font-numeric ${outstanding > 0 ? "text-destructive" : "text-emerald-700"}`}>
+                <div
+                  className={`text-base font-semibold font-numeric ${outstanding > 0 ? "text-destructive" : "text-emerald-700"}`}
+                >
                   {formatCurrency(Math.max(outstanding, 0))}
                 </div>
               )}
@@ -684,7 +1070,7 @@ function LoanCard({ loan }: { loan: Loan }) {
   );
 }
 
-// ─── Loan Requests Section ────────────────────────────────────────────────────
+// ─── Loan Requests section ────────────────────────────────────────────────────
 
 const requestStatusIcon = {
   Pending: <Clock className="h-4 w-4 text-amber-500" />,
@@ -701,8 +1087,11 @@ function MyLoanRequests() {
   if (!requests || requests.length === 0) return null;
 
   return (
-    <div className="space-y-3">
-      <h2 className="text-lg font-semibold font-serif">My Requests</h2>
+    <div className="space-y-3 pt-2">
+      <h2 className="text-base font-semibold flex items-center gap-2">
+        <ListChecks className="h-4 w-4 text-muted-foreground" />
+        My Requests
+      </h2>
       <div className="space-y-2">
         {requests.map((r) => (
           <div
@@ -712,9 +1101,22 @@ function MyLoanRequests() {
             <div className="flex items-center gap-3">
               {requestStatusIcon[r.status]}
               <div>
-                <span className="font-semibold font-numeric">{formatCurrency(r.amount)}</span>
-                <span className="text-muted-foreground ml-2">· {r.tenureDays > 0 ? `${r.tenureDays} days` : "EMI"}</span>
-                {r.purpose && <p className="text-xs text-muted-foreground mt-0.5">{r.purpose}</p>}
+                <span className="font-semibold font-numeric">
+                  {formatCurrency(r.amount)}
+                </span>
+                <span className="text-muted-foreground ml-2">
+                  ·{" "}
+                  {(r as any).type === "EMI"
+                    ? `${(r as any).tenureMonths ?? "?"} months EMI`
+                    : r.tenureDays > 0
+                      ? `${r.tenureDays} days`
+                      : "EMI"}
+                </span>
+                {r.purpose && (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {r.purpose}
+                  </p>
+                )}
               </div>
             </div>
             <span
@@ -722,8 +1124,8 @@ function MyLoanRequests() {
                 r.status === "Pending"
                   ? "bg-amber-50 text-amber-700 border border-amber-200"
                   : r.status === "Approved"
-                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                  : "bg-red-50 text-red-700 border border-red-200"
+                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                    : "bg-red-50 text-red-700 border border-red-200"
               }`}
             >
               {r.status}
@@ -735,56 +1137,84 @@ function MyLoanRequests() {
   );
 }
 
-// ─── EMI Loans Detail Section ─────────────────────────────────────────────────
+// ─── EMI Loans detail section ─────────────────────────────────────────────────
 
-function MyEmiLoans({ enabled }: { enabled: boolean }) {
-  const { data: emiLoans, isLoading } = useQuery<EmiLoan[]>({
-    queryKey: EMI_LOANS_QUERY_KEY,
-    queryFn: fetchEmiLoans,
-    enabled,
-  });
-
-  if (isLoading) return <Skeleton className="h-24 w-full" />;
-  if (!emiLoans || emiLoans.length === 0) return null;
-
+function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
   const now = new Date();
+  const active = emiLoans.filter((e) => e.status !== "Clear");
+
+  if (active.length === 0) {
+    return (
+      <div className="py-10 text-center">
+        <EmptyState
+          title="No active EMI loans"
+          description="You have no active EMI loans on record."
+          icon={<CalendarClock />}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-4">
-      {emiLoans.map((loan) => {
-        const isOverdue = loan.nextPaymentDate && new Date(loan.nextPaymentDate) < now && loan.status !== "Clear";
+      {active.map((loan) => {
+        const isOverdue =
+          loan.nextPaymentDate &&
+          new Date(loan.nextPaymentDate) < now &&
+          loan.status !== "Clear";
         return (
-          <Card key={loan.id} className="overflow-hidden shadow-sm border-border/60">
-            <div className="bg-primary/5 px-6 py-4 border-b flex justify-between items-center gap-2 flex-wrap">
+          <Card
+            key={loan.id}
+            className="overflow-hidden shadow-sm border-border/60"
+          >
+            <div className="bg-primary/5 px-4 py-3 border-b flex justify-between items-center gap-2 flex-wrap">
               <div>
-                <h3 className="text-lg font-medium font-serif">{formatCurrency(loan.principal)} EMI Loan</h3>
-                <p className="text-sm text-muted-foreground">
-                  Started {formatDate(loan.transactionDate)} · {loan.tenureMonths} months
+                <h3 className="text-base font-semibold">
+                  {formatCurrency(loan.principal)} EMI Loan
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  {formatDate(loan.transactionDate)} · {loan.tenureMonths} months
                 </p>
               </div>
               <Button variant="outline" size="sm" asChild>
-                <Link href={`/emi-loans/${loan.id}`}>Details <ChevronRight className="ml-1 h-4 w-4" /></Link>
+                <Link href={`/emi-loans/${loan.id}`}>
+                  Details <ChevronRight className="ml-1 h-4 w-4" />
+                </Link>
               </Button>
             </div>
             <CardContent className="p-0">
-              <div className="grid md:grid-cols-3 divide-y md:divide-y-0 md:divide-x">
-                <div className="p-5 space-y-1">
-                  <div className="text-xs text-muted-foreground">Monthly Payment</div>
-                  <div className="text-2xl font-bold font-numeric text-foreground">
-                    {loan.monthlyPayment != null ? formatCurrency(loan.monthlyPayment) : "—"}
+              <div className="grid grid-cols-3 divide-x text-center">
+                <div className="p-4 space-y-0.5">
+                  <div className="text-xs text-muted-foreground">Monthly</div>
+                  <div className="text-lg font-bold font-numeric">
+                    {loan.monthlyPayment != null
+                      ? formatCurrency(loan.monthlyPayment)
+                      : "—"}
                   </div>
                 </div>
-                <div className="p-5 bg-muted/10 space-y-1">
-                  <div className="text-xs text-muted-foreground">Next Payment</div>
-                  <div className={`text-xl font-semibold font-numeric ${isOverdue ? "text-destructive" : ""}`}>
-                    {loan.nextPaymentDate ? formatDate(loan.nextPaymentDate) : "—"}
-                    {isOverdue && <span className="block text-xs font-normal">Overdue</span>}
+                <div
+                  className={`p-4 space-y-0.5 ${isOverdue ? "bg-destructive/5" : "bg-muted/10"}`}
+                >
+                  <div className="text-xs text-muted-foreground">
+                    Next Payment
+                  </div>
+                  <div
+                    className={`text-sm font-semibold ${isOverdue ? "text-destructive" : ""}`}
+                  >
+                    {loan.nextPaymentDate
+                      ? formatDate(loan.nextPaymentDate)
+                      : "—"}
+                    {isOverdue && (
+                      <span className="block text-xs font-normal">Overdue</span>
+                    )}
                   </div>
                 </div>
-                <div className="p-5 space-y-1">
-                  <div className="text-xs text-muted-foreground">Remaining Months</div>
-                  <div className="text-xl font-semibold font-numeric">
-                    {loan.remainingMonths != null ? loan.remainingMonths : "—"}
+                <div className="p-4 space-y-0.5">
+                  <div className="text-xs text-muted-foreground">Remaining</div>
+                  <div className="text-base font-semibold">
+                    {loan.remainingMonths != null
+                      ? `${loan.remainingMonths} mo`
+                      : "—"}
                   </div>
                 </div>
               </div>
@@ -792,6 +1222,106 @@ function MyEmiLoans({ enabled }: { enabled: boolean }) {
           </Card>
         );
       })}
+    </div>
+  );
+}
+
+// ─── Already Paid Section ─────────────────────────────────────────────────────
+
+function AlreadyPaidSection({
+  loans,
+  emiLoans,
+}: {
+  loans: Loan[];
+  emiLoans: EmiLoan[];
+}) {
+  const [open, setOpen] = useState(false);
+
+  const paidLoans = loans.filter((l) => l.status === "Clear");
+  const paidEmi = emiLoans.filter((e) => e.status === "Clear");
+  const total = paidLoans.length + paidEmi.length;
+
+  if (total === 0) return null;
+
+  return (
+    <div className="border rounded-xl overflow-hidden">
+      <button
+        type="button"
+        className="w-full flex items-center justify-between px-4 py-3 bg-muted/30 hover:bg-muted/50 transition-colors text-left"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <div className="flex items-center gap-2">
+          <BadgeCheck className="h-4 w-4 text-emerald-600" />
+          <span className="font-semibold text-sm">
+            Already Paid ({total})
+          </span>
+        </div>
+        {open ? (
+          <ChevronUp className="h-4 w-4 text-muted-foreground" />
+        ) : (
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        )}
+      </button>
+
+      {open && (
+        <div className="divide-y">
+          {paidLoans.map((l) => (
+            <div
+              key={l.id}
+              className="flex items-center justify-between px-4 py-3 bg-emerald-50/30 text-sm"
+            >
+              <div>
+                <span className="font-semibold font-numeric">
+                  {formatCurrency(l.principal)} Loan
+                </span>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  Paid on {l.returnDate ? formatDate(l.returnDate) : "—"}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="font-bold font-numeric text-emerald-700">
+                  {l.paid != null ? formatCurrency(l.paid) : "—"}
+                </div>
+                <Button variant="ghost" size="sm" className="h-6 text-xs px-2 mt-0.5" asChild>
+                  <Link href={`/loans/${l.id}`}>
+                    Details <ChevronRight className="ml-0.5 h-3 w-3" />
+                  </Link>
+                </Button>
+              </div>
+            </div>
+          ))}
+          {paidEmi.map((e) => (
+            <div
+              key={e.id}
+              className="flex items-center justify-between px-4 py-3 bg-emerald-50/30 text-sm"
+            >
+              <div>
+                <span className="font-semibold font-numeric">
+                  {formatCurrency(e.principal)} EMI Loan
+                </span>
+                <Badge variant="outline" className="ml-2 text-xs border-blue-200 text-blue-700">
+                  EMI
+                </Badge>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  Completed
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="font-bold font-numeric text-emerald-700">
+                  {e.monthlyPayment != null
+                    ? `${formatCurrency(e.monthlyPayment)}/mo`
+                    : "—"}
+                </div>
+                <Button variant="ghost" size="sm" className="h-6 text-xs px-2 mt-0.5" asChild>
+                  <Link href={`/emi-loans/${e.id}`}>
+                    Details <ChevronRight className="ml-0.5 h-3 w-3" />
+                  </Link>
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -820,122 +1350,214 @@ export default function Portal() {
 
   const isLoading = isLoadingLoans || isLoadingEmi;
 
+  // Build repayment items (all active)
+  const allItems = useMemo(
+    () => buildRepaymentItems(loans, emiLoans),
+    [loans, emiLoans],
+  );
+
+  const overdueItems = useMemo(
+    () => allItems.filter((i) => i.isOverdue),
+    [allItems],
+  );
+
+  const comingUpItems = useMemo(
+    () =>
+      allItems
+        .filter((i) => !i.isOverdue)
+        .sort((a, b) => {
+          if (!a.dueDate && !b.dueDate) return 0;
+          if (!a.dueDate) return 1;
+          if (!b.dueDate) return -1;
+          return a.dueDate.getTime() - b.dueDate.getTime();
+        }),
+    [allItems],
+  );
+
+  const hasOverdue = overdueItems.length > 0;
+  const defaultTab = hasOverdue ? "overdue" : "coming-up";
+
   // Summary stats
-  const activeLoans = useMemo(() => (loans ?? []).filter((l) => l.status !== "Clear"), [loans]);
-  const activeEmi = useMemo(() => (emiLoans ?? []).filter((e) => e.status !== "Clear"), [emiLoans]);
+  const activeLoans = useMemo(
+    () => (loans ?? []).filter((l) => l.status !== "Clear"),
+    [loans],
+  );
+  const activeEmi = useMemo(
+    () => (emiLoans ?? []).filter((e) => e.status !== "Clear"),
+    [emiLoans],
+  );
   const totalOutstanding = useMemo(
     () =>
-      activeLoans.reduce((sum, l) => sum + Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0), 0) +
-      activeEmi.reduce((sum, e) => sum + (e.monthlyPayment ?? 0) * Math.max(e.remainingMonths ?? 0, 0), 0),
+      activeLoans.reduce(
+        (sum, l) => sum + Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0),
+        0,
+      ) +
+      activeEmi.reduce(
+        (sum, e) =>
+          sum + (e.monthlyPayment ?? 0) * Math.max(e.remainingMonths ?? 0, 0),
+        0,
+      ),
     [activeLoans, activeEmi],
   );
 
+  // borrower phone for WhatsApp — extract from session via me endpoint if needed
+  // We pass borrowerName and phone to the dialogs
+  const borrowerPhone = "";  // phone not exposed via useAppAuth; admin sees it in the request sheet
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 pb-8">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">
-          {name ? `Hi, ${name}` : "My Loans"}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground font-serif">
+          {name ? `Hi, ${name.split(" ")[0]}` : "My Loans"}
         </h1>
         <div className="flex gap-2 flex-wrap">
-          <Button onClick={() => setLoanRequestOpen(true)} variant="outline" className="flex-1 sm:flex-none">
-            <Plus className="mr-2 h-4 w-4" />
-            Request New Loan
+          <Button
+            onClick={() => setLoanRequestOpen(true)}
+            variant="outline"
+            size="sm"
+            className="flex-1 sm:flex-none"
+          >
+            <Plus className="mr-1.5 h-4 w-4" />
+            Request Loan
           </Button>
-          <Button onClick={() => setEmiRequestOpen(true)} className="flex-1 sm:flex-none">
-            <CalendarClock className="mr-2 h-4 w-4" />
-            Request New EMI
+          <Button
+            onClick={() => setEmiRequestOpen(true)}
+            size="sm"
+            className="flex-1 sm:flex-none"
+          >
+            <CalendarClock className="mr-1.5 h-4 w-4" />
+            Request EMI
           </Button>
         </div>
       </div>
 
       {/* Summary Cards */}
       {isLoading ? (
-        <div className="grid grid-cols-3 gap-4">
-          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}
+        <div className="grid grid-cols-3 gap-3">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-20 w-full rounded-xl" />
+          ))}
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-3 gap-3">
           <Card className="shadow-sm border-border/60">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1 pt-4 px-4">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Active Loans</CardTitle>
-              <CreditCard className="h-4 w-4 text-muted-foreground" />
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1 pt-3 px-3">
+              <CardTitle className="text-xs font-medium text-muted-foreground leading-tight">
+                Active Loans
+              </CardTitle>
+              <CreditCard className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <div className="text-2xl font-bold font-numeric">{activeLoans.length}</div>
+            <CardContent className="px-3 pb-3">
+              <div className="text-2xl font-bold font-numeric">
+                {activeLoans.length}
+              </div>
             </CardContent>
           </Card>
           <Card className="shadow-sm border-border/60">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1 pt-4 px-4">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Active EMIs</CardTitle>
-              <CalendarClock className="h-4 w-4 text-muted-foreground" />
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1 pt-3 px-3">
+              <CardTitle className="text-xs font-medium text-muted-foreground leading-tight">
+                Active EMIs
+              </CardTitle>
+              <CalendarClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <div className="text-2xl font-bold font-numeric">{activeEmi.length}</div>
+            <CardContent className="px-3 pb-3">
+              <div className="text-2xl font-bold font-numeric">
+                {activeEmi.length}
+              </div>
             </CardContent>
           </Card>
-          <Card className="shadow-sm border-border/60">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1 pt-4 px-4">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Total Due</CardTitle>
-              <Wallet className="h-4 w-4 text-muted-foreground" />
+          <Card
+            className={`shadow-sm ${hasOverdue ? "border-destructive/30 bg-destructive/5" : "border-border/60"}`}
+          >
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1 pt-3 px-3">
+              <CardTitle className="text-xs font-medium text-muted-foreground leading-tight">
+                Total Due
+              </CardTitle>
+              <Wallet
+                className={`h-3.5 w-3.5 shrink-0 ${hasOverdue ? "text-destructive" : "text-muted-foreground"}`}
+              />
             </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <div className="text-2xl font-bold font-numeric text-destructive">{formatCurrency(totalOutstanding)}</div>
+            <CardContent className="px-3 pb-3">
+              <div
+                className={`text-2xl font-bold font-numeric ${hasOverdue ? "text-destructive" : ""}`}
+              >
+                {formatCurrency(totalOutstanding)}
+              </div>
             </CardContent>
           </Card>
         </div>
       )}
 
-      {/* Repayments */}
-      <div className="space-y-3">
-        <h2 className="text-lg font-semibold font-serif flex items-center gap-2">
-          <ListChecks className="h-5 w-5 text-muted-foreground" />
-          Upcoming & Overdue Repayments
-        </h2>
-        {isLoading ? (
-          <div className="space-y-2">
-            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-16 w-full rounded-lg" />)}
-          </div>
-        ) : (
-          <RepaymentList loans={loans} emiLoans={emiLoans} />
-        )}
-      </div>
-
-      {/* Tabs — detail view */}
-      <Tabs defaultValue="loans">
-        <TabsList className="w-full sm:w-auto">
-          <TabsTrigger value="loans" className="flex-1 sm:flex-none gap-2">
-            <CreditCard className="h-4 w-4" />
-            My Loans
-            {activeLoans.length > 0 && (
-              <span className="ml-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                {activeLoans.length}
+      {/* Tabs */}
+      <Tabs defaultValue={defaultTab}>
+        <TabsList className="w-full overflow-x-auto flex-nowrap">
+          <TabsTrigger value="overdue" className="flex-1 gap-1.5 text-xs sm:text-sm">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            Overdue
+            {overdueItems.length > 0 && (
+              <span className="rounded-full bg-destructive/20 px-1.5 py-0.5 text-xs font-bold text-destructive">
+                {overdueItems.length}
               </span>
             )}
           </TabsTrigger>
-          <TabsTrigger value="emi" className="flex-1 sm:flex-none gap-2">
-            <CalendarClock className="h-4 w-4" />
-            My EMI Loans
-            {activeEmi.length > 0 && (
-              <span className="ml-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                {activeEmi.length}
+          <TabsTrigger value="coming-up" className="flex-1 gap-1.5 text-xs sm:text-sm">
+            <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+            Coming Up
+            {comingUpItems.length > 0 && (
+              <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
+                {comingUpItems.length}
               </span>
             )}
+          </TabsTrigger>
+          <TabsTrigger value="loans" className="flex-1 gap-1.5 text-xs sm:text-sm">
+            <CreditCard className="h-3.5 w-3.5 shrink-0" />
+            Loans
+          </TabsTrigger>
+          <TabsTrigger value="emi" className="flex-1 gap-1.5 text-xs sm:text-sm">
+            <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+            EMI
           </TabsTrigger>
         </TabsList>
 
-        {/* ── Loans Tab ── */}
-        <TabsContent value="loans" className="mt-6 space-y-6">
+        {/* ── Overdue Tab ── */}
+        <TabsContent value="overdue" className="mt-4">
+          {isLoading ? (
+            <div className="space-y-2">
+              {[1, 2].map((i) => (
+                <Skeleton key={i} className="h-20 w-full rounded-xl" />
+              ))}
+            </div>
+          ) : (
+            <OverdueTab items={overdueItems} />
+          )}
+        </TabsContent>
+
+        {/* ── Coming Up Tab ── */}
+        <TabsContent value="coming-up" className="mt-4">
+          {isLoading ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-20 w-full rounded-xl" />
+              ))}
+            </div>
+          ) : (
+            <ComingUpTab items={comingUpItems} />
+          )}
+        </TabsContent>
+
+        {/* ── My Loans Tab ── */}
+        <TabsContent value="loans" className="mt-4 space-y-4">
           {isLoadingLoans ? (
             <div className="space-y-4">
               <Skeleton className="h-40 w-full" />
               <Skeleton className="h-40 w-full" />
             </div>
-          ) : !loans || loans.length === 0 ? (
-            <div className="py-12">
+          ) : !loans || activeLoans.length === 0 ? (
+            <div className="py-10">
               <EmptyState
-                title="No loans yet"
-                description="You don't have any loans on record. Request one to get started."
+                title="No active loans"
+                description="You don't have any active loans. Request one to get started."
                 icon={<CreditCard />}
                 action={
                   <Button onClick={() => setLoanRequestOpen(true)}>
@@ -946,39 +1568,41 @@ export default function Portal() {
             </div>
           ) : (
             <div className="grid gap-4">
-              {loans.map((loan) => <LoanCard key={loan.id} loan={loan} />)}
+              {activeLoans.map((loan) => (
+                <LoanCard key={loan.id} loan={loan} />
+              ))}
             </div>
           )}
           <MyLoanRequests />
         </TabsContent>
 
-        {/* ── EMI Loans Tab ── */}
-        <TabsContent value="emi" className="mt-6 space-y-6">
+        {/* ── My EMI Tab ── */}
+        <TabsContent value="emi" className="mt-4">
           {isLoadingEmi ? (
-            <div className="space-y-4">
-              <Skeleton className="h-40 w-full" />
-            </div>
-          ) : !emiLoans || emiLoans.length === 0 ? (
-            <div className="py-12">
-              <EmptyState
-                title="No EMI loans yet"
-                description="You don't have any EMI loans on record."
-                icon={<CalendarClock />}
-                action={
-                  <Button onClick={() => setEmiRequestOpen(true)}>
-                    <Plus className="mr-2 h-4 w-4" /> Request an EMI Loan
-                  </Button>
-                }
-              />
-            </div>
+            <Skeleton className="h-40 w-full" />
           ) : (
-            <MyEmiLoans enabled={isReady} />
+            <MyEmiLoans emiLoans={emiLoans ?? []} />
           )}
         </TabsContent>
       </Tabs>
 
-      <LoanRequestDialog open={loanRequestOpen} onOpenChange={setLoanRequestOpen} />
-      <EmiRequestDialog open={emiRequestOpen} onOpenChange={setEmiRequestOpen} />
+      {/* Already Paid Section */}
+      {!isLoading && (
+        <AlreadyPaidSection loans={loans ?? []} emiLoans={emiLoans ?? []} />
+      )}
+
+      <LoanRequestDialog
+        open={loanRequestOpen}
+        onOpenChange={setLoanRequestOpen}
+        borrowerName={name ?? ""}
+        borrowerPhone={borrowerPhone}
+      />
+      <EmiRequestDialog
+        open={emiRequestOpen}
+        onOpenChange={setEmiRequestOpen}
+        borrowerName={name ?? ""}
+        borrowerPhone={borrowerPhone}
+      />
     </div>
   );
 }

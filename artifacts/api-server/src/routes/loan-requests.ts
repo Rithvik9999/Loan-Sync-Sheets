@@ -10,6 +10,7 @@ import { attachRole, requireStaff } from "../middlewares/auth";
 import * as loanRequestsRepo from "../lib/repositories/loanRequests";
 import * as borrowersRepo from "../lib/repositories/borrowers";
 import * as loansRepo from "../lib/repositories/loans";
+import { attachBorrowerId } from "../lib/repositories/loans";
 import * as emiSheet from "../lib/emiSheet";
 import { extractPhoneFromWhatsapp, normalizePhone, normalizeName } from "../lib/authTokens";
 
@@ -119,6 +120,61 @@ router.post("/loan-requests", async (req, res): Promise<void> => {
   });
   res.status(201).json(CreateLoanRequestResponse.parse(request));
 });
+
+// ── Pay a loan request: create a Clear loan row in the sheet ─────────────────
+const PayLoanRequestBody = z.object({
+  discount: z.coerce.number().min(0).default(0),
+  transactionDate: z.string().optional(),
+  notes: z.string().optional().nullable(),
+});
+
+router.post(
+  "/loan-requests/:id/pay",
+  requireStaff,
+  async (req, res): Promise<void> => {
+    const parsed = PayLoanRequestBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const requests = await loanRequestsRepo.listLoanRequests();
+    const loanRequest = requests.find((r) => r.id === req.params.id);
+    if (!loanRequest) {
+      res.status(404).json({ error: "Loan request not found" });
+      return;
+    }
+    if (loanRequest.status !== "Pending") {
+      res.status(400).json({ error: "Only pending requests can be marked as paid" });
+      return;
+    }
+
+    const { discount, transactionDate, notes } = parsed.data;
+    const principal = loanRequest.amount;
+    const finalPaid = Math.max(0, principal - discount);
+
+    // Create the loan row in the Heat Map sheet with Clear status
+    const loan = await loansRepo.createLoan({
+      name: loanRequest.name,
+      transactionDate: transactionDate ?? new Date().toISOString().slice(0, 10),
+      principal,
+      tenureDays: loanRequest.tenureDays > 0 ? loanRequest.tenureDays : 30,
+      whatsapp: loanRequest.phone,
+      status: "Clear",
+      discountOrCharges: discount > 0 ? -discount : 0,
+      notes: notes ?? loanRequest.purpose ?? undefined,
+    });
+
+    // Set the paid amount (separate update since createLoan doesn't accept paid)
+    await loansRepo.updateLoan(loan.id, { paid: finalPaid });
+
+    // Mark the request as Approved
+    await loanRequestsRepo.updateLoanRequestStatus(loanRequest.id, "Approved");
+
+    const borrowers = await borrowersRepo.listBorrowers();
+    res.status(201).json({ loan: attachBorrowerId(loan, borrowers) });
+  },
+);
 
 router.patch(
   "/loan-requests/:id",

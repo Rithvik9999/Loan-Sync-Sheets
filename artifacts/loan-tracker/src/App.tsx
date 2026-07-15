@@ -14,6 +14,7 @@ import BorrowerDetail from "@/pages/borrowers/detail";
 import LoansList from "@/pages/loans/list";
 import LoanDetail from "@/pages/loans/detail";
 import LoanRequests from "@/pages/loan-requests";
+import LoanRequestDetail from "@/pages/loan-requests-detail";
 import EmiLoansList from "@/pages/emi-loans/list";
 import EmiLoanDetail from "@/pages/emi-loans/detail";
 import NotFound from "@/pages/not-found";
