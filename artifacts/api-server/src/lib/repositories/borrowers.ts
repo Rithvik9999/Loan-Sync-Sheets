@@ -7,13 +7,14 @@ const TAB = "Borrowers";
 // `pin` is stored in plain text (intentionally — it's a staff-managed
 // 6-digit PIN, not a password) and is stripped out by toPublic() below
 // before ever reaching an API response, so the frontend never sees it.
-const HEADERS = ["id", "name", "phone", "pin", "createdAt"];
+const HEADERS = ["id", "name", "phone", "pin", "creditLimit", "createdAt"];
 
 export interface Borrower {
   id: string;
   name: string;
   phone: string;
   pin: string;
+  creditLimit: number | null;
   createdAt: string;
 }
 
@@ -21,6 +22,7 @@ export interface BorrowerInput {
   name: string;
   phone?: string | null;
   pin?: string | null;
+  creditLimit?: number | null;
 }
 
 function fromRow(row: Record<string, string>): Borrower {
@@ -29,6 +31,7 @@ function fromRow(row: Record<string, string>): Borrower {
     name: row.name,
     phone: row.phone ?? "",
     pin: row.pin ?? "",
+    creditLimit: row.creditLimit ? Number(row.creditLimit) : null,
     createdAt: row.createdAt,
   };
 }
@@ -39,6 +42,7 @@ function toRow(borrower: Borrower): Record<string, string> {
     name: borrower.name,
     phone: borrower.phone,
     pin: borrower.pin,
+    creditLimit: borrower.creditLimit != null ? String(borrower.creditLimit) : "",
     createdAt: borrower.createdAt,
   };
 }
@@ -48,6 +52,8 @@ export function toPublic(borrower: Borrower) {
   const { pin, ...rest } = borrower;
   return { ...rest, hasPin: Boolean(pin) };
 }
+// Public shape type (for TypeScript consumers)
+export type BorrowerPublic = ReturnType<typeof toPublic>;
 
 export async function listBorrowers(): Promise<Borrower[]> {
   const { rows } = await readTab(TAB, HEADERS);
@@ -78,6 +84,7 @@ export async function createBorrower(
     name: input.name,
     phone: input.phone ?? "",
     pin: input.pin ?? "",
+    creditLimit: input.creditLimit ?? null,
     createdAt: new Date().toISOString(),
   };
   await appendRow(TAB, HEADERS, toRow(borrower));
@@ -96,6 +103,7 @@ export async function updateBorrower(
     ...(patch.name !== undefined ? { name: patch.name } : {}),
     ...(patch.phone !== undefined ? { phone: patch.phone ?? "" } : {}),
     ...(patch.pin ? { pin: patch.pin } : {}),
+    ...(patch.creditLimit !== undefined ? { creditLimit: patch.creditLimit ?? null } : {}),
   };
   await updateRowAt(TAB, rowNumbers[idx], HEADERS, toRow(updated));
   return updated;

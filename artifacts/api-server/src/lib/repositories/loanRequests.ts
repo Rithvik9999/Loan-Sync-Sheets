@@ -9,6 +9,8 @@ const HEADERS = [
   "borrowerId",
   "amount",
   "tenureDays",
+  "tenureMonths",
+  "type",
   "purpose",
   "status",
   "createdAt",
@@ -23,6 +25,8 @@ export interface LoanRequest {
   borrowerId: string | null;
   amount: number;
   tenureDays: number;
+  tenureMonths: number | null;
+  type: "Loan" | "EMI";
   purpose: string | null;
   status: LoanRequestStatus;
   createdAt: string;
@@ -34,6 +38,8 @@ export interface LoanRequestInput {
   borrowerId: string | null;
   amount: number;
   tenureDays: number;
+  tenureMonths?: number | null;
+  type?: "Loan" | "EMI";
   purpose?: string | null;
 }
 
@@ -45,6 +51,8 @@ function fromRow(row: Record<string, string>): LoanRequest {
     borrowerId: row.borrowerId || null,
     amount: Number(row.amount) || 0,
     tenureDays: Number(row.tenureDays) || 0,
+    tenureMonths: row.tenureMonths ? Number(row.tenureMonths) : null,
+    type: (row.type as "Loan" | "EMI") || "Loan",
     purpose: row.purpose || null,
     status: (row.status as LoanRequestStatus) || "Pending",
     createdAt: row.createdAt,
@@ -58,6 +66,8 @@ function toRow(request: LoanRequest): Record<string, string> {
     purpose: request.purpose ?? "",
     amount: String(request.amount),
     tenureDays: String(request.tenureDays),
+    tenureMonths: request.tenureMonths != null ? String(request.tenureMonths) : "",
+    type: request.type,
   };
 }
 
@@ -76,6 +86,8 @@ export async function createLoanRequest(
     borrowerId: input.borrowerId,
     amount: input.amount,
     tenureDays: input.tenureDays,
+    tenureMonths: input.tenureMonths ?? null,
+    type: input.type ?? "Loan",
     purpose: input.purpose ?? null,
     status: "Pending",
     createdAt: new Date().toISOString(),

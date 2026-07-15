@@ -14,7 +14,7 @@ import { attachRole, requireStaff } from "../middlewares/auth";
 import * as loansRepo from "../lib/repositories/loans";
 import * as borrowersRepo from "../lib/repositories/borrowers";
 import { attachBorrowerId } from "../lib/repositories/loans";
-import { extractPhoneFromWhatsapp, normalizePhone } from "../lib/authTokens";
+import { extractPhoneFromWhatsapp, normalizePhone, normalizeName } from "../lib/authTokens";
 
 const router: IRouter = Router();
 

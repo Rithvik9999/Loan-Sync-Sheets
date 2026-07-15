@@ -57,6 +57,14 @@ export function normalizePhone(phone: string): string {
  * field. The phone is the first line/token; subsequent lines are notes.
  * Returns an empty string if no usable phone is found.
  */
+/**
+ * Normalises a borrower name for comparison: trim, lowercase, collapse all
+ * whitespace. "Mohan Rakesh" and "MohanRakesh" both become "mohanrakesh".
+ */
+export function normalizeName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, "");
+}
+
 export function extractPhoneFromWhatsapp(whatsapp: string | null | undefined): string {
   if (!whatsapp) return "";
   const firstLine = whatsapp.split(/\n/)[0].trim();

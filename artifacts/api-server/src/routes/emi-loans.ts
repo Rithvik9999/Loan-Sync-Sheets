@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { attachRole, requireStaff } from "../middlewares/auth";
 import * as emiSheet from "../lib/emiSheet";
 import * as borrowersRepo from "../lib/repositories/borrowers";
-import { extractPhoneFromWhatsapp, normalizePhone } from "../lib/authTokens";
+import { extractPhoneFromWhatsapp, normalizePhone, normalizeName } from "../lib/authTokens";
 
 const router: IRouter = Router();
 router.use(attachRole);
