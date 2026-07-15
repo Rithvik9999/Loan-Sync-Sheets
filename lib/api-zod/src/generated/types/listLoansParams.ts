@@ -8,6 +8,5 @@
 import type { LoanStatus } from './loanStatus';
 
 export type ListLoansParams = {
-borrowerId?: string;
 status?: LoanStatus;
 };

@@ -10,17 +10,54 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Phone + password authentication
   - name: me
     description: Current user identity/role
   - name: borrowers
     description: Borrower directory
   - name: loans
-    description: Loan records
-  - name: repayments
-    description: Repayment records
+    description: Loan records, backed directly by the user's Heat Map spreadsheet
+  - name: loan-requests
+    description: Borrower-submitted requests for new loans
   - name: dashboard
     description: Aggregate dashboard views
 paths:
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Log in with phone number + password
+      description: >
+        Sets a signed session cookie. The configured admin phone number
+        always logs in as staff; any other phone must match a Borrower
+        record with a password set by staff.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginBody"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeInfo"
+        "401":
+          description: Invalid phone number or password
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Log out
+      description: Clears the session cookie.
+      responses:
+        "204":
+          description: Logged out
+
   /healthz:
     get:
       operationId: healthCheck
@@ -129,13 +166,10 @@ paths:
       operationId: listLoans
       tags: [loans]
       summary: List loans
-      description: Staff see all loans; borrowers see only their own loans.
+      description: >
+        Staff see all loans; borrowers see only loans whose Name matches
+        their linked borrower record. Backed live by the Heat Map sheet.
       parameters:
-        - name: borrowerId
-          in: query
-          required: false
-          schema:
-            type: string
         - name: status
           in: query
           required: false
@@ -154,6 +188,10 @@ paths:
       operationId: createLoan
       tags: [loans]
       summary: Create a loan
+      description: >
+        Appends a new row to the Heat Map sheet with only the input fields.
+        Computed fields (fees, interest, final amount) are populated by the
+        sheet's own formulas and returned on read-back.
       requestBody:
         required: true
         content:
@@ -186,6 +224,10 @@ paths:
       operationId: updateLoan
       tags: [loans]
       summary: Update a loan
+      description: >
+        Writes only the changed input cells (e.g. status, part payment,
+        discount). Computed columns are never written; re-read the loan to
+        see the sheet's recalculated values.
       parameters:
         - $ref: "#/components/parameters/LoanId"
       requestBody:
@@ -211,67 +253,70 @@ paths:
         "204":
           description: Deleted
 
-  /loans/{id}/schedule:
+  /loan-requests:
     get:
-      operationId: getLoanSchedule
-      tags: [loans]
-      summary: Get a loan's computed repayment schedule
-      description: Computed installment schedule with paid/due/overdue status per installment.
-      parameters:
-        - $ref: "#/components/parameters/LoanId"
+      operationId: listLoanRequests
+      tags: [loan-requests]
+      summary: List loan requests
+      description: >
+        Staff see all requests; borrowers see only their own submitted
+        requests.
       responses:
         "200":
-          description: Loan schedule
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LoanSchedule"
-
-  /repayments:
-    get:
-      operationId: listRepayments
-      tags: [repayments]
-      summary: List repayments
-      parameters:
-        - name: loanId
-          in: query
-          required: false
-          schema:
-            type: string
-      responses:
-        "200":
-          description: List of repayments
+          description: List of loan requests
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/Repayment"
+                  $ref: "#/components/schemas/LoanRequest"
     post:
-      operationId: createRepayment
-      tags: [repayments]
-      summary: Record a repayment
+      operationId: createLoanRequest
+      tags: [loan-requests]
+      summary: Submit a new loan request
+      description: >
+        Borrowers submit a request for staff to review; this does not
+        create a Heat Map row directly.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/RepaymentInput"
+              $ref: "#/components/schemas/LoanRequestInput"
       responses:
         "201":
           description: Created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Repayment"
+                $ref: "#/components/schemas/LoanRequest"
 
-  /repayments/{id}:
-    delete:
-      operationId: deleteRepayment
-      tags: [repayments]
-      summary: Delete a repayment
+  /loan-requests/{id}:
+    patch:
+      operationId: updateLoanRequest
+      tags: [loan-requests]
+      summary: Update a loan request's status
       parameters:
-        - $ref: "#/components/parameters/RepaymentId"
+        - $ref: "#/components/parameters/LoanRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoanRequestUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoanRequest"
+    delete:
+      operationId: deleteLoanRequest
+      tags: [loan-requests]
+      summary: Delete a loan request
+      parameters:
+        - $ref: "#/components/parameters/LoanRequestId"
       responses:
         "204":
           description: Deleted
@@ -316,7 +361,7 @@ components:
       required: true
       schema:
         type: string
-    RepaymentId:
+    LoanRequestId:
       name: id
       in: path
       required: true
@@ -334,7 +379,18 @@ components:
 
     LoanStatus:
       type: string
-      enum: [active, paid, overdue, defaulted]
+      enum: [Pending, Clear, Temp]
+
+    LoginBody:
+      type: object
+      required: [phone, password]
+      properties:
+        phone:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
 
     MeInfo:
       type: object
@@ -349,6 +405,8 @@ components:
           type: ["string", "null"]
         email:
           type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
 
     Borrower:
       type: object
@@ -362,8 +420,9 @@ components:
           type: string
         phone:
           type: ["string", "null"]
-        clerkUserId:
-          type: ["string", "null"]
+        hasPassword:
+          type: boolean
+          description: Whether staff has set a login password for this borrower.
         createdAt:
           type: string
 
@@ -378,6 +437,10 @@ components:
           type: string
         phone:
           type: ["string", "null"]
+        password:
+          type: ["string", "null"]
+          description: Write-only. Sets the borrower's login password (min 4 chars).
+          minLength: 4
 
     BorrowerUpdate:
       type: object
@@ -389,159 +452,188 @@ components:
           type: string
         phone:
           type: ["string", "null"]
-        clerkUserId:
+        password:
           type: ["string", "null"]
+          description: Write-only. Set to update the borrower's login password.
+          minLength: 4
 
     Loan:
       type: object
       required:
         - id
+        - name
         - borrowerId
-        - borrowerName
         - principal
-        - interestRate
-        - termMonths
-        - startDate
+        - tenureDays
+        - transactionDate
         - status
-        - createdAt
+        - whatsapp
+        - discountOrCharges
+        - notes
       properties:
         id:
           type: string
-        borrowerId:
+        name:
           type: string
-        borrowerName:
+          description: Borrower name as recorded on the Heat Map sheet.
+        borrowerId:
+          type: ["string", "null"]
+          description: Linked Borrower id, resolved by matching name; null if unlinked.
+        returnDate:
+          type: ["string", "null"]
+          description: Computed by the sheet from transaction date + tenure.
+        timelyReturn:
+          type: ["number", "null"]
+          description: Legacy manually-entered figure, kept for reference.
+        transactionDate:
           type: string
         principal:
           type: number
-        interestRate:
-          type: number
-          description: Annual interest rate as a percentage, e.g. 12.5
-        termMonths:
+        tenureDays:
           type: integer
-        startDate:
+        whatsapp:
           type: string
         status:
           $ref: "#/components/schemas/LoanStatus"
-        notes:
+        flatFee:
+          type: ["number", "null"]
+          description: Computed (tiered % of principal by tenure).
+        interestPct:
+          type: ["number", "null"]
+          description: Computed tiered rate.
+        interest:
+          type: ["number", "null"]
+          description: Computed interest amount.
+        discountOrCharges:
+          type: number
+          description: Manually entered; negative is a discount, positive a charge.
+        lateDays:
+          type: ["number", "null"]
+          description: Computed.
+        lateFees:
+          type: ["number", "null"]
+          description: Computed.
+        finalAmount:
+          type: ["number", "null"]
+          description: Computed authoritative amount to collect.
+        partPayment:
+          type: ["number", "null"]
+        dateOfPartPayment:
           type: ["string", "null"]
-        createdAt:
+        paid:
+          type: ["number", "null"]
+          description: Total amount actually collected so far.
+        profit:
+          type: ["number", "null"]
+          description: Computed as paid minus principal.
+        notes:
           type: string
-        totalPaid:
-          type: number
-        outstandingBalance:
-          type: number
 
     LoanInput:
       type: object
-      required: [borrowerId, principal, interestRate, termMonths, startDate]
+      required: [name, transactionDate, principal, tenureDays]
       properties:
-        borrowerId:
+        name:
+          type: string
+          minLength: 1
+        transactionDate:
           type: string
         principal:
           type: number
           minimum: 0
-        interestRate:
-          type: number
-          minimum: 0
-        termMonths:
+        tenureDays:
           type: integer
-          minimum: 1
-        startDate:
-          type: string
+          minimum: 0
+        whatsapp:
+          type: ["string", "null"]
+        status:
+          $ref: "#/components/schemas/LoanStatus"
+        discountOrCharges:
+          type: ["number", "null"]
         notes:
           type: ["string", "null"]
 
     LoanUpdate:
       type: object
       properties:
+        name:
+          type: string
+          minLength: 1
+        transactionDate:
+          type: string
         principal:
           type: number
-        interestRate:
-          type: number
-        termMonths:
+        tenureDays:
           type: integer
-        startDate:
-          type: string
+        whatsapp:
+          type: ["string", "null"]
         status:
           $ref: "#/components/schemas/LoanStatus"
+        discountOrCharges:
+          type: ["number", "null"]
+        partPayment:
+          type: ["number", "null"]
+        dateOfPartPayment:
+          type: ["string", "null"]
+        paid:
+          type: ["number", "null"]
         notes:
           type: ["string", "null"]
 
-    Repayment:
+    LoanRequestStatus:
+      type: string
+      enum: [Pending, Approved, Rejected]
+
+    LoanRequest:
       type: object
-      required: [id, loanId, amount, paidDate, createdAt]
+      required:
+        - id
+        - name
+        - phone
+        - borrowerId
+        - amount
+        - tenureDays
+        - purpose
+        - status
+        - createdAt
       properties:
         id:
           type: string
-        loanId:
+        name:
           type: string
+        phone:
+          type: string
+        borrowerId:
+          type: ["string", "null"]
         amount:
           type: number
-        paidDate:
-          type: string
-        method:
+        tenureDays:
+          type: integer
+        purpose:
           type: ["string", "null"]
-        notes:
-          type: ["string", "null"]
+        status:
+          $ref: "#/components/schemas/LoanRequestStatus"
         createdAt:
           type: string
 
-    RepaymentInput:
+    LoanRequestInput:
       type: object
-      required: [loanId, amount, paidDate]
+      required: [amount, tenureDays]
       properties:
-        loanId:
-          type: string
         amount:
           type: number
-          minimum: 0.01
-        paidDate:
-          type: string
-        method:
-          type: ["string", "null"]
-        notes:
-          type: ["string", "null"]
-
-    ScheduleInstallment:
-      type: object
-      required: [installmentNumber, dueDate, amountDue, amountPaid, status]
-      properties:
-        installmentNumber:
+          minimum: 0
+        tenureDays:
           type: integer
-        dueDate:
-          type: string
-        amountDue:
-          type: number
-        amountPaid:
-          type: number
-        status:
-          type: string
-          enum: [paid, upcoming, due_soon, overdue]
+          minimum: 0
+        purpose:
+          type: ["string", "null"]
 
-    LoanSchedule:
+    LoanRequestUpdate:
       type: object
-      required:
-        - loanId
-        - installmentAmount
-        - installments
-        - totalDue
-        - totalPaid
-        - outstandingBalance
       properties:
-        loanId:
-          type: string
-        installmentAmount:
-          type: number
-        installments:
-          type: array
-          items:
-            $ref: "#/components/schemas/ScheduleInstallment"
-        totalDue:
-          type: number
-        totalPaid:
-          type: number
-        outstandingBalance:
-          type: number
+        status:
+          $ref: "#/components/schemas/LoanRequestStatus"
 
     DashboardSummary:
       type: object
@@ -575,7 +667,7 @@ components:
       properties:
         type:
           type: string
-          enum: [loan_created, repayment_recorded]
+          enum: [loan_created, loan_settled]
         description:
           type: string
         amount:

@@ -11,5 +11,5 @@ export type ActivityItemType = typeof ActivityItemType[keyof typeof ActivityItem
 
 export const ActivityItemType = {
   loan_created: 'loan_created',
-  repayment_recorded: 'repayment_recorded',
+  loan_settled: 'loan_settled',
 } as const;

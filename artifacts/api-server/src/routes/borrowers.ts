@@ -12,6 +12,7 @@ import {
 } from "@workspace/api-zod";
 import { attachRole, requireStaff } from "../middlewares/auth";
 import * as borrowersRepo from "../lib/repositories/borrowers";
+import { toPublic } from "../lib/repositories/borrowers";
 
 const router: IRouter = Router();
 
@@ -19,7 +20,7 @@ router.use(attachRole, requireStaff);
 
 router.get("/borrowers", async (_req, res): Promise<void> => {
   const borrowers = await borrowersRepo.listBorrowers();
-  res.json(ListBorrowersResponse.parse(borrowers));
+  res.json(ListBorrowersResponse.parse(borrowers.map(toPublic)));
 });
 
 router.post("/borrowers", async (req, res): Promise<void> => {
@@ -29,7 +30,7 @@ router.post("/borrowers", async (req, res): Promise<void> => {
     return;
   }
   const borrower = await borrowersRepo.createBorrower(parsed.data);
-  res.status(201).json(CreateBorrowerResponse.parse(borrower));
+  res.status(201).json(CreateBorrowerResponse.parse(toPublic(borrower)));
 });
 
 router.get("/borrowers/:id", async (req, res): Promise<void> => {
@@ -43,7 +44,7 @@ router.get("/borrowers/:id", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Borrower not found" });
     return;
   }
-  res.json(GetBorrowerResponse.parse(borrower));
+  res.json(GetBorrowerResponse.parse(toPublic(borrower)));
 });
 
 router.patch("/borrowers/:id", async (req, res): Promise<void> => {
@@ -65,7 +66,7 @@ router.patch("/borrowers/:id", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Borrower not found" });
     return;
   }
-  res.json(UpdateBorrowerResponse.parse(borrower));
+  res.json(UpdateBorrowerResponse.parse(toPublic(borrower)));
 });
 
 router.delete("/borrowers/:id", async (req, res): Promise<void> => {

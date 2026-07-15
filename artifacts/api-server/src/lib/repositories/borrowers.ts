@@ -1,15 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { appendRow, deleteRowAt, readTab, updateRowAt } from "../sheetsClient";
+import { hashPassword, normalizePhone } from "../authTokens";
 
 const TAB = "Borrowers";
-const HEADERS = ["id", "name", "email", "phone", "clerkUserId", "createdAt"];
+const HEADERS = ["id", "name", "email", "phone", "passwordHash", "createdAt"];
 
 export interface Borrower {
   id: string;
   name: string;
   email: string;
   phone: string;
-  clerkUserId: string;
+  passwordHash: string;
   createdAt: string;
 }
 
@@ -17,6 +18,7 @@ export interface BorrowerInput {
   name: string;
   email: string;
   phone?: string | null;
+  password?: string | null;
 }
 
 function fromRow(row: Record<string, string>): Borrower {
@@ -25,13 +27,19 @@ function fromRow(row: Record<string, string>): Borrower {
     name: row.name,
     email: row.email,
     phone: row.phone ?? "",
-    clerkUserId: row.clerkUserId ?? "",
+    passwordHash: row.passwordHash ?? "",
     createdAt: row.createdAt,
   };
 }
 
 function toRow(borrower: Borrower): Record<string, string> {
   return { ...borrower };
+}
+
+/** Shape returned to API clients — never leaks the password hash. */
+export function toPublic(borrower: Borrower) {
+  const { passwordHash, ...rest } = borrower;
+  return { ...rest, hasPassword: Boolean(passwordHash) };
 }
 
 export async function listBorrowers(): Promise<Borrower[]> {
@@ -45,21 +53,13 @@ export async function getBorrower(id: string): Promise<Borrower | null> {
   return row ? fromRow(row) : null;
 }
 
-export async function getBorrowerByClerkUserId(
-  clerkUserId: string,
+export async function getBorrowerByPhone(
+  phone: string,
 ): Promise<Borrower | null> {
+  const target = normalizePhone(phone);
+  if (!target) return null;
   const { rows } = await readTab(TAB, HEADERS);
-  const row = rows.find((r) => r.clerkUserId === clerkUserId);
-  return row ? fromRow(row) : null;
-}
-
-export async function getBorrowerByEmail(
-  email: string,
-): Promise<Borrower | null> {
-  const { rows } = await readTab(TAB, HEADERS);
-  const row = rows.find(
-    (r) => r.email.toLowerCase() === email.toLowerCase(),
-  );
+  const row = rows.find((r) => normalizePhone(r.phone ?? "") === target);
   return row ? fromRow(row) : null;
 }
 
@@ -71,7 +71,7 @@ export async function createBorrower(
     name: input.name,
     email: input.email,
     phone: input.phone ?? "",
-    clerkUserId: "",
+    passwordHash: input.password ? await hashPassword(input.password) : "",
     createdAt: new Date().toISOString(),
   };
   await appendRow(TAB, HEADERS, toRow(borrower));
@@ -80,7 +80,7 @@ export async function createBorrower(
 
 export async function updateBorrower(
   id: string,
-  patch: Partial<BorrowerInput> & { clerkUserId?: string | null },
+  patch: Partial<BorrowerInput>,
 ): Promise<Borrower | null> {
   const { rows, rowNumbers } = await readTab(TAB, HEADERS);
   const idx = rows.findIndex((r) => r.id === id);
@@ -90,8 +90,8 @@ export async function updateBorrower(
     ...(patch.name !== undefined ? { name: patch.name } : {}),
     ...(patch.email !== undefined ? { email: patch.email } : {}),
     ...(patch.phone !== undefined ? { phone: patch.phone ?? "" } : {}),
-    ...(patch.clerkUserId !== undefined
-      ? { clerkUserId: patch.clerkUserId ?? "" }
+    ...(patch.password
+      ? { passwordHash: await hashPassword(patch.password) }
       : {}),
   };
   await updateRowAt(TAB, rowNumbers[idx], HEADERS, toRow(updated));

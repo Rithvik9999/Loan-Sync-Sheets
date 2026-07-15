@@ -12,6 +12,10 @@ export interface BorrowerUpdate {
   email?: string;
   /** @nullable */
   phone?: string | null;
-  /** @nullable */
-  clerkUserId?: string | null;
+  /**
+     * Write-only. Set to update the borrower's login password.
+     * @minLength 4
+     * @nullable
+     */
+  password?: string | null;
 }

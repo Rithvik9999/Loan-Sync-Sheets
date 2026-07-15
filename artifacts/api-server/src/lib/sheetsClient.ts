@@ -144,6 +144,77 @@ export async function updateRowAt(
   });
 }
 
+/** Reads raw values for an arbitrary range without any header/tab assumptions. */
+export async function getRawValues(
+  range: string,
+  renderOption: "UNFORMATTED_VALUE" | "FORMATTED_VALUE" | "FORMULA" = "UNFORMATTED_VALUE",
+): Promise<unknown[][]> {
+  const sheets = getSheets();
+  const spreadsheetId = getSpreadsheetId();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range,
+    valueRenderOption: renderOption,
+  });
+  return res.data.values ?? [];
+}
+
+/**
+ * Writes a set of individual, possibly non-contiguous cell ranges in one call.
+ * Unlike updateRowAt, this never touches cells outside the given ranges, so it's
+ * safe to use next to array-formula/spilled columns that must not be overwritten.
+ */
+export async function batchUpdateCells(
+  updates: { range: string; values: (string | number)[][] }[],
+): Promise<void> {
+  if (updates.length === 0) return;
+  const sheets = getSheets();
+  const spreadsheetId = getSpreadsheetId();
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId,
+    requestBody: { valueInputOption: "USER_ENTERED", data: updates },
+  });
+}
+
+/**
+ * Ensures the tab's physical grid has at least `minRows` rows, growing it
+ * with blank rows appended at the bottom if needed. Required before writing
+ * to a row number beyond the sheet's current grid size — the Sheets API
+ * rejects writes to cells outside `gridProperties.rowCount`, and array
+ * formulas can only spill into rows that already exist in the grid.
+ */
+export async function ensureGridRowCount(
+  title: string,
+  minRows: number,
+): Promise<void> {
+  const sheets = getSheets();
+  const spreadsheetId = getSpreadsheetId();
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const sheet = meta.data.sheets?.find((s) => s.properties?.title === title);
+  const sheetId = sheet?.properties?.sheetId;
+  const currentRowCount = sheet?.properties?.gridProperties?.rowCount ?? 0;
+  if (sheetId === undefined || sheetId === null) return;
+  if (currentRowCount >= minRows) return;
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          appendDimension: {
+            sheetId,
+            dimension: "ROWS",
+            length: minRows - currentRowCount,
+          },
+        },
+      ],
+    },
+  });
+  logger.info(
+    { title, from: currentRowCount, to: minRows },
+    "Grew Google Sheet tab grid to fit new row",
+  );
+}
+
 export async function deleteRowAt(
   title: string,
   rowNumber: number,

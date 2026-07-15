@@ -12,4 +12,10 @@ export interface BorrowerInput {
   email: string;
   /** @nullable */
   phone?: string | null;
+  /**
+     * Write-only. Sets the borrower's login password (min 4 chars).
+     * @minLength 4
+     * @nullable
+     */
+  password?: string | null;
 }

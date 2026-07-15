@@ -1,31 +1,14 @@
-import { LoanStatus, ScheduleInstallmentStatus } from "@workspace/api-client-react/api.schemas";
+import { LoanStatus } from "@workspace/api-client-react";
 import { Badge } from "./ui/badge";
 
 export function LoanStatusBadge({ status }: { status: LoanStatus }) {
   switch (status) {
-    case 'active':
-      return <Badge variant="secondary" className="bg-blue-100 text-blue-800 hover:bg-blue-100">Active</Badge>;
-    case 'paid':
-      return <Badge variant="success">Paid</Badge>;
-    case 'overdue':
-      return <Badge variant="destructive">Overdue</Badge>;
-    case 'defaulted':
-      return <Badge variant="outline" className="border-red-200 text-red-800 bg-red-50">Defaulted</Badge>;
-    default:
-      return <Badge variant="outline">{status}</Badge>;
-  }
-}
-
-export function InstallmentStatusBadge({ status }: { status: ScheduleInstallmentStatus }) {
-  switch (status) {
-    case 'paid':
-      return <Badge variant="success">Paid</Badge>;
-    case 'upcoming':
-      return <Badge variant="secondary">Upcoming</Badge>;
-    case 'due_soon':
-      return <Badge variant="warning">Due Soon</Badge>;
-    case 'overdue':
-      return <Badge variant="destructive">Overdue</Badge>;
+    case "Pending":
+      return <Badge variant="secondary" className="bg-blue-100 text-blue-800 hover:bg-blue-100">Pending</Badge>;
+    case "Clear":
+      return <Badge variant="success">Clear</Badge>;
+    case "Temp":
+      return <Badge variant="outline" className="border-amber-200 text-amber-800 bg-amber-50">Temp</Badge>;
     default:
       return <Badge variant="outline">{status}</Badge>;
   }

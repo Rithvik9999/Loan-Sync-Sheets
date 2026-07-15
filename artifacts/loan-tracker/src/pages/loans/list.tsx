@@ -21,12 +21,12 @@ export default function LoansList() {
   const { data: loans, isLoading } = useListLoans(
     statusFilter !== "all" ? { status: statusFilter as LoanStatus } : undefined,
     {
-      query: { queryKey: getListLoansQueryKey(statusFilter !== "all" ? { status: statusFilter as LoanStatus } : undefined) }
-    }
+      query: { queryKey: getListLoansQueryKey(statusFilter !== "all" ? { status: statusFilter as LoanStatus } : undefined) },
+    },
   );
 
-  const filtered = loans?.filter(l => 
-    l.borrowerName.toLowerCase().includes(search.toLowerCase())
+  const filtered = loans?.filter((l) =>
+    l.name.toLowerCase().includes(search.toLowerCase()),
   );
 
   return (
@@ -34,10 +34,10 @@ export default function LoansList() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">Loans</h1>
-          <p className="text-muted-foreground mt-1">Manage lending agreements across all borrowers.</p>
+          <p className="text-muted-foreground mt-1">Backed live by your Heat Map sheet — fees and totals are computed there.</p>
         </div>
         <Button onClick={() => setIsCreateOpen(true)} className="w-full sm:w-auto shadow-sm">
-          <Plus className="mr-2 h-4 w-4" /> Originate Loan
+          <Plus className="mr-2 h-4 w-4" /> Record Loan
         </Button>
       </div>
 
@@ -63,10 +63,9 @@ export default function LoansList() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Statuses</SelectItem>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="paid">Paid</SelectItem>
-                  <SelectItem value="overdue">Overdue</SelectItem>
-                  <SelectItem value="defaulted">Defaulted</SelectItem>
+                  <SelectItem value="Pending">Pending</SelectItem>
+                  <SelectItem value="Clear">Clear</SelectItem>
+                  <SelectItem value="Temp">Temp</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -82,12 +81,12 @@ export default function LoansList() {
           ) : !loans || loans.length === 0 ? (
             <EmptyState
               title="No loans found"
-              description={statusFilter !== "all" ? `No loans match the status: ${statusFilter}` : "Originate your first loan to start tracking."}
+              description={statusFilter !== "all" ? `No loans match the status: ${statusFilter}` : "Record your first loan to start tracking."}
               icon={<CreditCard />}
               action={
                 statusFilter === "all" ? (
                   <Button onClick={() => setIsCreateOpen(true)}>
-                    Originate Loan
+                    Record Loan
                   </Button>
                 ) : (
                   <Button variant="outline" onClick={() => setStatusFilter("all")}>Clear Filter</Button>
@@ -100,23 +99,25 @@ export default function LoansList() {
                 <TableRow>
                   <TableHead>Borrower</TableHead>
                   <TableHead>Principal</TableHead>
-                  <TableHead>Rate & Term</TableHead>
-                  <TableHead>Start Date</TableHead>
+                  <TableHead>Tenure</TableHead>
+                  <TableHead>Transaction Date</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Final Amount</TableHead>
                   <TableHead className="w-[80px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((loan) => (
                   <TableRow key={loan.id} className="group cursor-pointer">
-                    <TableCell className="font-medium">{loan.borrowerName}</TableCell>
+                    <TableCell className="font-medium">{loan.name}</TableCell>
                     <TableCell className="font-numeric">{formatCurrency(loan.principal)}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {loan.interestRate}% APR • {loan.termMonths}mo
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{formatDate(loan.startDate)}</TableCell>
+                    <TableCell className="text-muted-foreground">{loan.tenureDays}d</TableCell>
+                    <TableCell className="text-muted-foreground">{formatDate(loan.transactionDate)}</TableCell>
                     <TableCell>
                       <LoanStatusBadge status={loan.status} />
+                    </TableCell>
+                    <TableCell className="text-right font-numeric font-medium">
+                      {loan.finalAmount != null ? formatCurrency(loan.finalAmount) : "—"}
                     </TableCell>
                     <TableCell>
                       <Button variant="ghost" size="icon" asChild className="opacity-0 group-hover:opacity-100 transition-opacity">
@@ -138,9 +139,9 @@ export default function LoansList() {
         </CardContent>
       </Card>
 
-      <LoanFormDialog 
-        open={isCreateOpen} 
-        onOpenChange={setIsCreateOpen} 
+      <LoanFormDialog
+        open={isCreateOpen}
+        onOpenChange={setIsCreateOpen}
       />
     </div>
   );

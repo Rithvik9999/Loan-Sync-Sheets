@@ -9,6 +9,35 @@ import * as zod from 'zod';
 
 
 /**
+ * Sets a signed session cookie. The configured admin phone number always logs in as staff; any other phone must match a Borrower record with a password set by staff.
+ * @summary Log in with phone number + password
+ */
+
+
+
+
+export const LoginBody = zod.object({
+  "phone": zod.string().min(1),
+  "password": zod.string().min(1)
+})
+
+export const LoginResponse = zod.object({
+  "role": zod.enum(['staff', 'borrower']),
+  "borrowerId": zod.string().nullish(),
+  "name": zod.string().nullish(),
+  "email": zod.string().nullish(),
+  "phone": zod.string().nullish()
+})
+
+
+/**
+ * Clears the session cookie.
+ * @summary Log out
+ */
+export const LogoutResponse = zod.void()
+
+
+/**
  * Returns server health status
  * @summary Health check
  */
@@ -25,7 +54,8 @@ export const GetMeResponse = zod.object({
   "role": zod.enum(['staff', 'borrower']),
   "borrowerId": zod.string().nullish(),
   "name": zod.string().nullish(),
-  "email": zod.string().nullish()
+  "email": zod.string().nullish(),
+  "phone": zod.string().nullish()
 })
 
 
@@ -37,7 +67,7 @@ export const ListBorrowersResponseItem = zod.object({
   "name": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
-  "clerkUserId": zod.string().nullish(),
+  "hasPassword": zod.boolean().optional().describe('Whether staff has set a login password for this borrower.'),
   "createdAt": zod.string()
 })
 export const ListBorrowersResponse = zod.array(ListBorrowersResponseItem)
@@ -47,12 +77,15 @@ export const ListBorrowersResponse = zod.array(ListBorrowersResponseItem)
  * @summary Create a borrower
  */
 
+export const createBorrowerBodyPasswordMin = 4;
+
 
 
 export const CreateBorrowerBody = zod.object({
   "name": zod.string().min(1),
   "email": zod.string(),
-  "phone": zod.string().nullish()
+  "phone": zod.string().nullish(),
+  "password": zod.string().min(createBorrowerBodyPasswordMin).nullish().describe('Write-only. Sets the borrower\'s login password (min 4 chars).')
 })
 
 export const CreateBorrowerResponse = zod.object({
@@ -60,7 +93,7 @@ export const CreateBorrowerResponse = zod.object({
   "name": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
-  "clerkUserId": zod.string().nullish(),
+  "hasPassword": zod.boolean().optional().describe('Whether staff has set a login password for this borrower.'),
   "createdAt": zod.string()
 })
 
@@ -77,7 +110,7 @@ export const GetBorrowerResponse = zod.object({
   "name": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
-  "clerkUserId": zod.string().nullish(),
+  "hasPassword": zod.boolean().optional().describe('Whether staff has set a login password for this borrower.'),
   "createdAt": zod.string()
 })
 
@@ -90,13 +123,15 @@ export const UpdateBorrowerParams = zod.object({
 })
 
 
+export const updateBorrowerBodyPasswordMin = 4;
+
 
 
 export const UpdateBorrowerBody = zod.object({
   "name": zod.string().min(1).optional(),
   "email": zod.string().optional(),
   "phone": zod.string().nullish(),
-  "clerkUserId": zod.string().nullish()
+  "password": zod.string().min(updateBorrowerBodyPasswordMin).nullish().describe('Write-only. Set to update the borrower\'s login password.')
 })
 
 export const UpdateBorrowerResponse = zod.object({
@@ -104,7 +139,7 @@ export const UpdateBorrowerResponse = zod.object({
   "name": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
-  "clerkUserId": zod.string().nullish(),
+  "hasPassword": zod.boolean().optional().describe('Whether staff has set a login password for this borrower.'),
   "createdAt": zod.string()
 })
 
@@ -120,63 +155,85 @@ export const DeleteBorrowerResponse = zod.void()
 
 
 /**
- * Staff see all loans; borrowers see only their own loans.
+ * Staff see all loans; borrowers see only loans whose Name matches their linked borrower record. Backed live by the Heat Map sheet.
  * @summary List loans
  */
 export const ListLoansQueryParams = zod.object({
-  "borrowerId": zod.coerce.string().optional(),
-  "status": zod.enum(['active', 'paid', 'overdue', 'defaulted']).optional()
+  "status": zod.enum(['Pending', 'Clear', 'Temp']).optional()
 })
 
 export const ListLoansResponseItem = zod.object({
   "id": zod.string(),
-  "borrowerId": zod.string(),
-  "borrowerName": zod.string(),
+  "name": zod.string().describe('Borrower name as recorded on the Heat Map sheet.'),
+  "borrowerId": zod.string().nullable().describe('Linked Borrower id, resolved by matching name; null if unlinked.'),
+  "returnDate": zod.string().nullish().describe('Computed by the sheet from transaction date + tenure.'),
+  "timelyReturn": zod.number().nullish().describe('Legacy manually-entered figure, kept for reference.'),
+  "transactionDate": zod.string(),
   "principal": zod.number(),
-  "interestRate": zod.number().describe('Annual interest rate as a percentage, e.g. 12.5'),
-  "termMonths": zod.number(),
-  "startDate": zod.string(),
-  "status": zod.enum(['active', 'paid', 'overdue', 'defaulted']),
-  "notes": zod.string().nullish(),
-  "createdAt": zod.string(),
-  "totalPaid": zod.number().optional(),
-  "outstandingBalance": zod.number().optional()
+  "tenureDays": zod.number(),
+  "whatsapp": zod.string(),
+  "status": zod.enum(['Pending', 'Clear', 'Temp']),
+  "flatFee": zod.number().nullish().describe('Computed (tiered % of principal by tenure).'),
+  "interestPct": zod.number().nullish().describe('Computed tiered rate.'),
+  "interest": zod.number().nullish().describe('Computed interest amount.'),
+  "discountOrCharges": zod.number().describe('Manually entered; negative is a discount, positive a charge.'),
+  "lateDays": zod.number().nullish().describe('Computed.'),
+  "lateFees": zod.number().nullish().describe('Computed.'),
+  "finalAmount": zod.number().nullish().describe('Computed authoritative amount to collect.'),
+  "partPayment": zod.number().nullish(),
+  "dateOfPartPayment": zod.string().nullish(),
+  "paid": zod.number().nullish().describe('Total amount actually collected so far.'),
+  "profit": zod.number().nullish().describe('Computed as paid minus principal.'),
+  "notes": zod.string()
 })
 export const ListLoansResponse = zod.array(ListLoansResponseItem)
 
 
 /**
+ * Appends a new row to the Heat Map sheet with only the input fields. Computed fields (fees, interest, final amount) are populated by the sheet's own formulas and returned on read-back.
  * @summary Create a loan
  */
+
 export const createLoanBodyPrincipalMin = 0;
 
-export const createLoanBodyInterestRateMin = 0;
-
+export const createLoanBodyTenureDaysMin = 0;
 
 
 
 export const CreateLoanBody = zod.object({
-  "borrowerId": zod.string(),
+  "name": zod.string().min(1),
+  "transactionDate": zod.string(),
   "principal": zod.number().min(createLoanBodyPrincipalMin),
-  "interestRate": zod.number().min(createLoanBodyInterestRateMin),
-  "termMonths": zod.number().min(1),
-  "startDate": zod.string(),
+  "tenureDays": zod.number().min(createLoanBodyTenureDaysMin),
+  "whatsapp": zod.string().nullish(),
+  "status": zod.enum(['Pending', 'Clear', 'Temp']).optional(),
+  "discountOrCharges": zod.number().nullish(),
   "notes": zod.string().nullish()
 })
 
 export const CreateLoanResponse = zod.object({
   "id": zod.string(),
-  "borrowerId": zod.string(),
-  "borrowerName": zod.string(),
+  "name": zod.string().describe('Borrower name as recorded on the Heat Map sheet.'),
+  "borrowerId": zod.string().nullable().describe('Linked Borrower id, resolved by matching name; null if unlinked.'),
+  "returnDate": zod.string().nullish().describe('Computed by the sheet from transaction date + tenure.'),
+  "timelyReturn": zod.number().nullish().describe('Legacy manually-entered figure, kept for reference.'),
+  "transactionDate": zod.string(),
   "principal": zod.number(),
-  "interestRate": zod.number().describe('Annual interest rate as a percentage, e.g. 12.5'),
-  "termMonths": zod.number(),
-  "startDate": zod.string(),
-  "status": zod.enum(['active', 'paid', 'overdue', 'defaulted']),
-  "notes": zod.string().nullish(),
-  "createdAt": zod.string(),
-  "totalPaid": zod.number().optional(),
-  "outstandingBalance": zod.number().optional()
+  "tenureDays": zod.number(),
+  "whatsapp": zod.string(),
+  "status": zod.enum(['Pending', 'Clear', 'Temp']),
+  "flatFee": zod.number().nullish().describe('Computed (tiered % of principal by tenure).'),
+  "interestPct": zod.number().nullish().describe('Computed tiered rate.'),
+  "interest": zod.number().nullish().describe('Computed interest amount.'),
+  "discountOrCharges": zod.number().describe('Manually entered; negative is a discount, positive a charge.'),
+  "lateDays": zod.number().nullish().describe('Computed.'),
+  "lateFees": zod.number().nullish().describe('Computed.'),
+  "finalAmount": zod.number().nullish().describe('Computed authoritative amount to collect.'),
+  "partPayment": zod.number().nullish(),
+  "dateOfPartPayment": zod.string().nullish(),
+  "paid": zod.number().nullish().describe('Total amount actually collected so far.'),
+  "profit": zod.number().nullish().describe('Computed as paid minus principal.'),
+  "notes": zod.string()
 })
 
 
@@ -189,49 +246,78 @@ export const GetLoanParams = zod.object({
 
 export const GetLoanResponse = zod.object({
   "id": zod.string(),
-  "borrowerId": zod.string(),
-  "borrowerName": zod.string(),
+  "name": zod.string().describe('Borrower name as recorded on the Heat Map sheet.'),
+  "borrowerId": zod.string().nullable().describe('Linked Borrower id, resolved by matching name; null if unlinked.'),
+  "returnDate": zod.string().nullish().describe('Computed by the sheet from transaction date + tenure.'),
+  "timelyReturn": zod.number().nullish().describe('Legacy manually-entered figure, kept for reference.'),
+  "transactionDate": zod.string(),
   "principal": zod.number(),
-  "interestRate": zod.number().describe('Annual interest rate as a percentage, e.g. 12.5'),
-  "termMonths": zod.number(),
-  "startDate": zod.string(),
-  "status": zod.enum(['active', 'paid', 'overdue', 'defaulted']),
-  "notes": zod.string().nullish(),
-  "createdAt": zod.string(),
-  "totalPaid": zod.number().optional(),
-  "outstandingBalance": zod.number().optional()
+  "tenureDays": zod.number(),
+  "whatsapp": zod.string(),
+  "status": zod.enum(['Pending', 'Clear', 'Temp']),
+  "flatFee": zod.number().nullish().describe('Computed (tiered % of principal by tenure).'),
+  "interestPct": zod.number().nullish().describe('Computed tiered rate.'),
+  "interest": zod.number().nullish().describe('Computed interest amount.'),
+  "discountOrCharges": zod.number().describe('Manually entered; negative is a discount, positive a charge.'),
+  "lateDays": zod.number().nullish().describe('Computed.'),
+  "lateFees": zod.number().nullish().describe('Computed.'),
+  "finalAmount": zod.number().nullish().describe('Computed authoritative amount to collect.'),
+  "partPayment": zod.number().nullish(),
+  "dateOfPartPayment": zod.string().nullish(),
+  "paid": zod.number().nullish().describe('Total amount actually collected so far.'),
+  "profit": zod.number().nullish().describe('Computed as paid minus principal.'),
+  "notes": zod.string()
 })
 
 
 /**
+ * Writes only the changed input cells (e.g. status, part payment, discount). Computed columns are never written; re-read the loan to see the sheet's recalculated values.
  * @summary Update a loan
  */
 export const UpdateLoanParams = zod.object({
   "id": zod.coerce.string()
 })
 
+
+
+
 export const UpdateLoanBody = zod.object({
+  "name": zod.string().min(1).optional(),
+  "transactionDate": zod.string().optional(),
   "principal": zod.number().optional(),
-  "interestRate": zod.number().optional(),
-  "termMonths": zod.number().optional(),
-  "startDate": zod.string().optional(),
-  "status": zod.enum(['active', 'paid', 'overdue', 'defaulted']).optional(),
+  "tenureDays": zod.number().optional(),
+  "whatsapp": zod.string().nullish(),
+  "status": zod.enum(['Pending', 'Clear', 'Temp']).optional(),
+  "discountOrCharges": zod.number().nullish(),
+  "partPayment": zod.number().nullish(),
+  "dateOfPartPayment": zod.string().nullish(),
+  "paid": zod.number().nullish(),
   "notes": zod.string().nullish()
 })
 
 export const UpdateLoanResponse = zod.object({
   "id": zod.string(),
-  "borrowerId": zod.string(),
-  "borrowerName": zod.string(),
+  "name": zod.string().describe('Borrower name as recorded on the Heat Map sheet.'),
+  "borrowerId": zod.string().nullable().describe('Linked Borrower id, resolved by matching name; null if unlinked.'),
+  "returnDate": zod.string().nullish().describe('Computed by the sheet from transaction date + tenure.'),
+  "timelyReturn": zod.number().nullish().describe('Legacy manually-entered figure, kept for reference.'),
+  "transactionDate": zod.string(),
   "principal": zod.number(),
-  "interestRate": zod.number().describe('Annual interest rate as a percentage, e.g. 12.5'),
-  "termMonths": zod.number(),
-  "startDate": zod.string(),
-  "status": zod.enum(['active', 'paid', 'overdue', 'defaulted']),
-  "notes": zod.string().nullish(),
-  "createdAt": zod.string(),
-  "totalPaid": zod.number().optional(),
-  "outstandingBalance": zod.number().optional()
+  "tenureDays": zod.number(),
+  "whatsapp": zod.string(),
+  "status": zod.enum(['Pending', 'Clear', 'Temp']),
+  "flatFee": zod.number().nullish().describe('Computed (tiered % of principal by tenure).'),
+  "interestPct": zod.number().nullish().describe('Computed tiered rate.'),
+  "interest": zod.number().nullish().describe('Computed interest amount.'),
+  "discountOrCharges": zod.number().describe('Manually entered; negative is a discount, positive a charge.'),
+  "lateDays": zod.number().nullish().describe('Computed.'),
+  "lateFees": zod.number().nullish().describe('Computed.'),
+  "finalAmount": zod.number().nullish().describe('Computed authoritative amount to collect.'),
+  "partPayment": zod.number().nullish(),
+  "dateOfPartPayment": zod.string().nullish(),
+  "paid": zod.number().nullish().describe('Total amount actually collected so far.'),
+  "profit": zod.number().nullish().describe('Computed as paid minus principal.'),
+  "notes": zod.string()
 })
 
 
@@ -246,82 +332,84 @@ export const DeleteLoanResponse = zod.void()
 
 
 /**
- * Computed installment schedule with paid/due/overdue status per installment.
- * @summary Get a loan's computed repayment schedule
+ * Staff see all requests; borrowers see only their own submitted requests.
+ * @summary List loan requests
  */
-export const GetLoanScheduleParams = zod.object({
-  "id": zod.coerce.string()
-})
-
-export const GetLoanScheduleResponse = zod.object({
-  "loanId": zod.string(),
-  "installmentAmount": zod.number(),
-  "installments": zod.array(zod.object({
-  "installmentNumber": zod.number(),
-  "dueDate": zod.string(),
-  "amountDue": zod.number(),
-  "amountPaid": zod.number(),
-  "status": zod.enum(['paid', 'upcoming', 'due_soon', 'overdue'])
-})),
-  "totalDue": zod.number(),
-  "totalPaid": zod.number(),
-  "outstandingBalance": zod.number()
-})
-
-
-/**
- * @summary List repayments
- */
-export const ListRepaymentsQueryParams = zod.object({
-  "loanId": zod.coerce.string().optional()
-})
-
-export const ListRepaymentsResponseItem = zod.object({
+export const ListLoanRequestsResponseItem = zod.object({
   "id": zod.string(),
-  "loanId": zod.string(),
+  "name": zod.string(),
+  "phone": zod.string(),
+  "borrowerId": zod.string().nullable(),
   "amount": zod.number(),
-  "paidDate": zod.string(),
-  "method": zod.string().nullish(),
-  "notes": zod.string().nullish(),
+  "tenureDays": zod.number(),
+  "purpose": zod.string().nullable(),
+  "status": zod.enum(['Pending', 'Approved', 'Rejected']),
   "createdAt": zod.string()
 })
-export const ListRepaymentsResponse = zod.array(ListRepaymentsResponseItem)
+export const ListLoanRequestsResponse = zod.array(ListLoanRequestsResponseItem)
 
 
 /**
- * @summary Record a repayment
+ * Borrowers submit a request for staff to review; this does not create a Heat Map row directly.
+ * @summary Submit a new loan request
  */
-export const createRepaymentBodyAmountMin = 0.01;
+export const createLoanRequestBodyAmountMin = 0;
+
+export const createLoanRequestBodyTenureDaysMin = 0;
 
 
 
-export const CreateRepaymentBody = zod.object({
-  "loanId": zod.string(),
-  "amount": zod.number().min(createRepaymentBodyAmountMin),
-  "paidDate": zod.string(),
-  "method": zod.string().nullish(),
-  "notes": zod.string().nullish()
+export const CreateLoanRequestBody = zod.object({
+  "amount": zod.number().min(createLoanRequestBodyAmountMin),
+  "tenureDays": zod.number().min(createLoanRequestBodyTenureDaysMin),
+  "purpose": zod.string().nullish()
 })
 
-export const CreateRepaymentResponse = zod.object({
+export const CreateLoanRequestResponse = zod.object({
   "id": zod.string(),
-  "loanId": zod.string(),
+  "name": zod.string(),
+  "phone": zod.string(),
+  "borrowerId": zod.string().nullable(),
   "amount": zod.number(),
-  "paidDate": zod.string(),
-  "method": zod.string().nullish(),
-  "notes": zod.string().nullish(),
+  "tenureDays": zod.number(),
+  "purpose": zod.string().nullable(),
+  "status": zod.enum(['Pending', 'Approved', 'Rejected']),
   "createdAt": zod.string()
 })
 
 
 /**
- * @summary Delete a repayment
+ * @summary Update a loan request's status
  */
-export const DeleteRepaymentParams = zod.object({
+export const UpdateLoanRequestParams = zod.object({
   "id": zod.coerce.string()
 })
 
-export const DeleteRepaymentResponse = zod.void()
+export const UpdateLoanRequestBody = zod.object({
+  "status": zod.enum(['Pending', 'Approved', 'Rejected']).optional()
+})
+
+export const UpdateLoanRequestResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "phone": zod.string(),
+  "borrowerId": zod.string().nullable(),
+  "amount": zod.number(),
+  "tenureDays": zod.number(),
+  "purpose": zod.string().nullable(),
+  "status": zod.enum(['Pending', 'Approved', 'Rejected']),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Delete a loan request
+ */
+export const DeleteLoanRequestParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const DeleteLoanRequestResponse = zod.void()
 
 
 /**
@@ -343,7 +431,7 @@ export const GetDashboardSummaryResponse = zod.object({
  */
 export const GetRecentActivityResponse = zod.object({
   "items": zod.array(zod.object({
-  "type": zod.enum(['loan_created', 'repayment_recorded']),
+  "type": zod.enum(['loan_created', 'loan_settled']),
   "description": zod.string(),
   "amount": zod.number().nullish(),
   "occurredAt": zod.string(),

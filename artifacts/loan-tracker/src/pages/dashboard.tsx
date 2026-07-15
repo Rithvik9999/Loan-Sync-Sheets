@@ -54,7 +54,7 @@ export default function Dashboard() {
     <div className="space-y-8">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">Portfolio Overview</h1>
-        <p className="text-muted-foreground mt-1">A high-level view of your active private lending ledger.</p>
+        <p className="text-muted-foreground mt-1">Live from your Heat Map sheet — the sheet's own formulas compute every figure below.</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -66,7 +66,7 @@ export default function Dashboard() {
           <CardContent>
             <div className="text-2xl font-bold font-numeric">{formatCurrency(summary?.totalOutstanding)}</div>
             <p className="text-xs text-muted-foreground mt-1 text-balance">
-              Total principal remaining across {summary?.activeLoansCount} active loans
+              Final amount due across {summary?.activeLoansCount} pending loans
             </p>
           </CardContent>
         </Card>
@@ -92,7 +92,7 @@ export default function Dashboard() {
           <CardContent>
             <div className="text-2xl font-bold text-amber-600 dark:text-amber-500 font-numeric">{summary?.dueSoonCount}</div>
             <p className="text-xs text-muted-foreground mt-1">
-              Installments due in the next 7 days
+              Loans returning in the next 7 days
             </p>
           </CardContent>
         </Card>
@@ -107,7 +107,7 @@ export default function Dashboard() {
               {formatCurrency(summary?.overdueAmount)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              Across {summary?.overdueLoansCount || 0} loans
+              Late fees across {summary?.overdueLoansCount || 0} loans
             </p>
           </CardContent>
         </Card>
@@ -117,7 +117,7 @@ export default function Dashboard() {
         <Card className="md:col-span-4 shadow-sm border-border/60">
           <CardHeader>
             <CardTitle>Recent Activity</CardTitle>
-            <CardDescription>Latest loan originations and repayments</CardDescription>
+            <CardDescription>Most recently added or settled loans</CardDescription>
           </CardHeader>
           <CardContent>
             {activityData?.items && activityData.items.length > 0 ? (
@@ -132,9 +132,9 @@ export default function Dashboard() {
                         {item.borrowerName} • {formatDate(item.occurredAt)}
                       </p>
                     </div>
-                    {item.amount && (
+                    {item.amount != null && (
                       <div className="ml-auto font-medium font-numeric">
-                        {item.type === 'repayment_recorded' ? '+' : ''}{formatCurrency(item.amount)}
+                        {item.type === 'loan_settled' ? '+' : ''}{formatCurrency(item.amount)}
                       </div>
                     )}
                   </div>
@@ -174,8 +174,8 @@ export default function Dashboard() {
                 <CreditCard className="h-5 w-5" />
               </div>
               <div className="ml-4 flex-1 space-y-1">
-                <p className="text-sm font-medium leading-none">Originate Loan</p>
-                <p className="text-xs text-muted-foreground">Create a new loan agreement</p>
+                <p className="text-sm font-medium leading-none">Record Loan</p>
+                <p className="text-xs text-muted-foreground">Add a new row to the Heat Map sheet</p>
               </div>
             </Link>
           </CardContent>

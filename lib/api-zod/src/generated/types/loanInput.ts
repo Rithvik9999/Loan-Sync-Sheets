@@ -5,16 +5,21 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { LoanStatus } from './loanStatus';
 
 export interface LoanInput {
-  borrowerId: string;
+  /** @minLength 1 */
+  name: string;
+  transactionDate: string;
   /** @minimum 0 */
   principal: number;
   /** @minimum 0 */
-  interestRate: number;
-  /** @minimum 1 */
-  termMonths: number;
-  startDate: string;
+  tenureDays: number;
+  /** @nullable */
+  whatsapp?: string | null;
+  status?: LoanStatus;
+  /** @nullable */
+  discountOrCharges?: number | null;
   /** @nullable */
   notes?: string | null;
 }

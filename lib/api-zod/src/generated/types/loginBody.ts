@@ -6,6 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type ListRepaymentsParams = {
-loanId?: string;
-};
+export interface LoginBody {
+  /** @minLength 1 */
+  phone: string;
+  /** @minLength 1 */
+  password: string;
+}

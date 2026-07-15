@@ -12,7 +12,7 @@ export interface Borrower {
   email: string;
   /** @nullable */
   phone?: string | null;
-  /** @nullable */
-  clerkUserId?: string | null;
+  /** Whether staff has set a login password for this borrower. */
+  hasPassword?: boolean;
   createdAt: string;
 }

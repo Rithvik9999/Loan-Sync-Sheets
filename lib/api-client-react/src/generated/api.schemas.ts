@@ -13,11 +13,17 @@ export type LoanStatus = typeof LoanStatus[keyof typeof LoanStatus];
 
 
 export const LoanStatus = {
-  active: 'active',
-  paid: 'paid',
-  overdue: 'overdue',
-  defaulted: 'defaulted',
+  Pending: 'Pending',
+  Clear: 'Clear',
+  Temp: 'Temp',
 } as const;
+
+export interface LoginBody {
+  /** @minLength 1 */
+  phone: string;
+  /** @minLength 1 */
+  password: string;
+}
 
 export type MeInfoRole = typeof MeInfoRole[keyof typeof MeInfoRole];
 
@@ -35,6 +41,8 @@ export interface MeInfo {
   name?: string | null;
   /** @nullable */
   email?: string | null;
+  /** @nullable */
+  phone?: string | null;
 }
 
 export interface Borrower {
@@ -43,8 +51,8 @@ export interface Borrower {
   email: string;
   /** @nullable */
   phone?: string | null;
-  /** @nullable */
-  clerkUserId?: string | null;
+  /** Whether staff has set a login password for this borrower. */
+  hasPassword?: boolean;
   createdAt: string;
 }
 
@@ -54,6 +62,12 @@ export interface BorrowerInput {
   email: string;
   /** @nullable */
   phone?: string | null;
+  /**
+     * Write-only. Sets the borrower's login password (min 4 chars).
+     * @minLength 4
+     * @nullable
+     */
+  password?: string | null;
 }
 
 export interface BorrowerUpdate {
@@ -62,98 +76,159 @@ export interface BorrowerUpdate {
   email?: string;
   /** @nullable */
   phone?: string | null;
-  /** @nullable */
-  clerkUserId?: string | null;
+  /**
+     * Write-only. Set to update the borrower's login password.
+     * @minLength 4
+     * @nullable
+     */
+  password?: string | null;
 }
 
 export interface Loan {
   id: string;
-  borrowerId: string;
-  borrowerName: string;
+  /** Borrower name as recorded on the Heat Map sheet. */
+  name: string;
+  /**
+     * Linked Borrower id, resolved by matching name; null if unlinked.
+     * @nullable
+     */
+  borrowerId: string | null;
+  /**
+     * Computed by the sheet from transaction date + tenure.
+     * @nullable
+     */
+  returnDate?: string | null;
+  /**
+     * Legacy manually-entered figure, kept for reference.
+     * @nullable
+     */
+  timelyReturn?: number | null;
+  transactionDate: string;
   principal: number;
-  /** Annual interest rate as a percentage, e.g. 12.5 */
-  interestRate: number;
-  termMonths: number;
-  startDate: string;
+  tenureDays: number;
+  whatsapp: string;
   status: LoanStatus;
+  /**
+     * Computed (tiered % of principal by tenure).
+     * @nullable
+     */
+  flatFee?: number | null;
+  /**
+     * Computed tiered rate.
+     * @nullable
+     */
+  interestPct?: number | null;
+  /**
+     * Computed interest amount.
+     * @nullable
+     */
+  interest?: number | null;
+  /** Manually entered; negative is a discount, positive a charge. */
+  discountOrCharges: number;
+  /**
+     * Computed.
+     * @nullable
+     */
+  lateDays?: number | null;
+  /**
+     * Computed.
+     * @nullable
+     */
+  lateFees?: number | null;
+  /**
+     * Computed authoritative amount to collect.
+     * @nullable
+     */
+  finalAmount?: number | null;
   /** @nullable */
-  notes?: string | null;
-  createdAt: string;
-  totalPaid?: number;
-  outstandingBalance?: number;
+  partPayment?: number | null;
+  /** @nullable */
+  dateOfPartPayment?: string | null;
+  /**
+     * Total amount actually collected so far.
+     * @nullable
+     */
+  paid?: number | null;
+  /**
+     * Computed as paid minus principal.
+     * @nullable
+     */
+  profit?: number | null;
+  notes: string;
 }
 
 export interface LoanInput {
-  borrowerId: string;
+  /** @minLength 1 */
+  name: string;
+  transactionDate: string;
   /** @minimum 0 */
   principal: number;
   /** @minimum 0 */
-  interestRate: number;
-  /** @minimum 1 */
-  termMonths: number;
-  startDate: string;
+  tenureDays: number;
+  /** @nullable */
+  whatsapp?: string | null;
+  status?: LoanStatus;
+  /** @nullable */
+  discountOrCharges?: number | null;
   /** @nullable */
   notes?: string | null;
 }
 
 export interface LoanUpdate {
+  /** @minLength 1 */
+  name?: string;
+  transactionDate?: string;
   principal?: number;
-  interestRate?: number;
-  termMonths?: number;
-  startDate?: string;
+  tenureDays?: number;
+  /** @nullable */
+  whatsapp?: string | null;
   status?: LoanStatus;
+  /** @nullable */
+  discountOrCharges?: number | null;
+  /** @nullable */
+  partPayment?: number | null;
+  /** @nullable */
+  dateOfPartPayment?: string | null;
+  /** @nullable */
+  paid?: number | null;
   /** @nullable */
   notes?: string | null;
 }
 
-export interface Repayment {
+export type LoanRequestStatus = typeof LoanRequestStatus[keyof typeof LoanRequestStatus];
+
+
+export const LoanRequestStatus = {
+  Pending: 'Pending',
+  Approved: 'Approved',
+  Rejected: 'Rejected',
+} as const;
+
+export interface LoanRequest {
   id: string;
-  loanId: string;
+  name: string;
+  phone: string;
+  /** @nullable */
+  borrowerId: string | null;
   amount: number;
-  paidDate: string;
+  tenureDays: number;
   /** @nullable */
-  method?: string | null;
-  /** @nullable */
-  notes?: string | null;
+  purpose: string | null;
+  status: LoanRequestStatus;
   createdAt: string;
 }
 
-export interface RepaymentInput {
-  loanId: string;
-  /** @minimum 0.01 */
+export interface LoanRequestInput {
+  /** @minimum 0 */
   amount: number;
-  paidDate: string;
+  /** @minimum 0 */
+  tenureDays: number;
   /** @nullable */
-  method?: string | null;
-  /** @nullable */
-  notes?: string | null;
+  purpose?: string | null;
 }
 
-export type ScheduleInstallmentStatus = typeof ScheduleInstallmentStatus[keyof typeof ScheduleInstallmentStatus];
-
-
-export const ScheduleInstallmentStatus = {
-  paid: 'paid',
-  upcoming: 'upcoming',
-  due_soon: 'due_soon',
-  overdue: 'overdue',
-} as const;
-
-export interface ScheduleInstallment {
-  installmentNumber: number;
-  dueDate: string;
-  amountDue: number;
-  amountPaid: number;
-  status: ScheduleInstallmentStatus;
-}
-
-export interface LoanSchedule {
-  loanId: string;
-  installmentAmount: number;
-  installments: ScheduleInstallment[];
-  totalDue: number;
-  totalPaid: number;
-  outstandingBalance: number;
+export interface LoanRequestUpdate {
+  status?: LoanRequestStatus;
 }
 
 export interface DashboardSummary {
@@ -171,7 +246,7 @@ export type ActivityItemType = typeof ActivityItemType[keyof typeof ActivityItem
 
 export const ActivityItemType = {
   loan_created: 'loan_created',
-  repayment_recorded: 'repayment_recorded',
+  loan_settled: 'loan_settled',
 } as const;
 
 export interface ActivityItem {
@@ -189,11 +264,6 @@ export interface RecentActivity {
 }
 
 export type ListLoansParams = {
-borrowerId?: string;
 status?: LoanStatus;
-};
-
-export type ListRepaymentsParams = {
-loanId?: string;
 };
 

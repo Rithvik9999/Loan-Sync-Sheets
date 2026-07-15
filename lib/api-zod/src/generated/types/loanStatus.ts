@@ -10,8 +10,7 @@ export type LoanStatus = typeof LoanStatus[keyof typeof LoanStatus];
 
 
 export const LoanStatus = {
-  active: 'active',
-  paid: 'paid',
-  overdue: 'overdue',
-  defaulted: 'defaulted',
+  Pending: 'Pending',
+  Clear: 'Clear',
+  Temp: 'Temp',
 } as const;

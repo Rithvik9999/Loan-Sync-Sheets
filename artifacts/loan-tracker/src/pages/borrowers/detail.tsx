@@ -1,12 +1,12 @@
 import { useParams } from "wouter";
 import { useState } from "react";
-import { 
-  useGetBorrower, 
+import {
+  useGetBorrower,
   useDeleteBorrower,
   useListLoans,
   getGetBorrowerQueryKey,
   getListBorrowersQueryKey,
-  getListLoansQueryKey
+  getListLoansQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
@@ -17,8 +17,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "@/components/ui/link";
-import { 
-  ArrowLeft, Edit, Trash2, Mail, Phone, Calendar, CreditCard, ChevronRight, AlertCircle
+import {
+  ArrowLeft, Edit, Trash2, Mail, Phone, Calendar, ChevronRight,
 } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { LoanStatusBadge } from "@/components/status-badges";
@@ -41,17 +41,22 @@ export default function BorrowerDetail() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  
+
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 
   const { data: borrower, isLoading: isBorrowerLoading } = useGetBorrower(id, {
-    query: { queryKey: getGetBorrowerQueryKey(id), enabled: !!id }
+    query: { queryKey: getGetBorrowerQueryKey(id), enabled: !!id },
   });
 
-  const { data: loans, isLoading: isLoansLoading } = useListLoans({ borrowerId: id }, {
-    query: { queryKey: getListLoansQueryKey({ borrowerId: id }), enabled: !!id }
+  // The Heat Map sheet has no borrower foreign key — loans are matched by
+  // name — so we fetch every loan and filter client-side to this borrower.
+  const { data: allLoans, isLoading: isLoansLoading } = useListLoans(undefined, {
+    query: { queryKey: getListLoansQueryKey(), enabled: !!borrower },
   });
+  const loans = allLoans?.filter(
+    (l) => l.name.trim().toLowerCase() === borrower?.name.trim().toLowerCase(),
+  );
 
   const deleteBorrower = useDeleteBorrower();
 
@@ -65,10 +70,10 @@ export default function BorrowerDetail() {
           setLocation("/borrowers");
         },
         onError: () => {
-          toast({ variant: "destructive", title: "Cannot delete", description: "Ensure this borrower has no active loans first." });
+          toast({ variant: "destructive", title: "Error", description: "Could not delete borrower." });
           setIsDeleteOpen(false);
-        }
-      }
+        },
+      },
     );
   };
 
@@ -113,7 +118,7 @@ export default function BorrowerDetail() {
                 <a href={`mailto:${borrower.email}`} className="text-sm text-primary hover:underline">{borrower.email}</a>
               </div>
             </div>
-            
+
             <div className="flex items-start gap-3">
               <Phone className="h-4 w-4 mt-0.5 text-muted-foreground" />
               <div>
@@ -147,10 +152,10 @@ export default function BorrowerDetail() {
           <CardHeader className="flex flex-row items-center justify-between pb-4">
             <div>
               <CardTitle className="text-lg">Loans</CardTitle>
-              <CardDescription>All associated loans for this borrower.</CardDescription>
+              <CardDescription>Heat Map rows whose name matches this borrower.</CardDescription>
             </div>
             <Button size="sm" asChild>
-              <Link href={`/loans/new?borrowerId=${borrower.id}`}>
+              <Link href={`/loans/new?name=${encodeURIComponent(borrower.name)}`}>
                 New Loan
               </Link>
             </Button>
@@ -162,15 +167,15 @@ export default function BorrowerDetail() {
                 <Skeleton className="h-16 w-full" />
               </div>
             ) : !loans || loans.length === 0 ? (
-              <EmptyState 
-                title="No loans" 
-                description="This borrower has no loan history." 
+              <EmptyState
+                title="No loans"
+                description="This borrower has no loan history."
               />
             ) : (
               <div className="space-y-3">
-                {loans.map(loan => (
-                  <Link 
-                    key={loan.id} 
+                {loans.map((loan) => (
+                  <Link
+                    key={loan.id}
                     href={`/loans/${loan.id}`}
                     className="flex items-center justify-between p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors group"
                   >
@@ -180,9 +185,9 @@ export default function BorrowerDetail() {
                         <LoanStatusBadge status={loan.status} />
                       </div>
                       <div className="text-sm text-muted-foreground flex items-center gap-3">
-                        <span>Started {formatDate(loan.startDate)}</span>
+                        <span>Transacted {formatDate(loan.transactionDate)}</span>
                         <span>•</span>
-                        <span>{loan.interestRate}% APR</span>
+                        <span>{loan.tenureDays} days</span>
                       </div>
                     </div>
                     <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-foreground transition-colors" />
@@ -194,9 +199,9 @@ export default function BorrowerDetail() {
         </Card>
       </div>
 
-      <BorrowerFormDialog 
-        open={isEditOpen} 
-        onOpenChange={setIsEditOpen} 
+      <BorrowerFormDialog
+        open={isEditOpen}
+        onOpenChange={setIsEditOpen}
         borrower={borrower}
       />
 
@@ -205,13 +210,13 @@ export default function BorrowerDetail() {
           <AlertDialogHeader>
             <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the borrower profile for {borrower.name}.
-              You cannot delete a borrower if they have any existing loans.
+              This will permanently delete the borrower profile for {borrower.name}. This does not delete their loan
+              rows on the Heat Map sheet.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction 
+            <AlertDialogAction
               onClick={handleDelete}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               disabled={deleteBorrower.isPending}

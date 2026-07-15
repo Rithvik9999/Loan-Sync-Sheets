@@ -9,17 +9,73 @@ import type { LoanStatus } from './loanStatus';
 
 export interface Loan {
   id: string;
-  borrowerId: string;
-  borrowerName: string;
+  /** Borrower name as recorded on the Heat Map sheet. */
+  name: string;
+  /**
+     * Linked Borrower id, resolved by matching name; null if unlinked.
+     * @nullable
+     */
+  borrowerId: string | null;
+  /**
+     * Computed by the sheet from transaction date + tenure.
+     * @nullable
+     */
+  returnDate?: string | null;
+  /**
+     * Legacy manually-entered figure, kept for reference.
+     * @nullable
+     */
+  timelyReturn?: number | null;
+  transactionDate: string;
   principal: number;
-  /** Annual interest rate as a percentage, e.g. 12.5 */
-  interestRate: number;
-  termMonths: number;
-  startDate: string;
+  tenureDays: number;
+  whatsapp: string;
   status: LoanStatus;
+  /**
+     * Computed (tiered % of principal by tenure).
+     * @nullable
+     */
+  flatFee?: number | null;
+  /**
+     * Computed tiered rate.
+     * @nullable
+     */
+  interestPct?: number | null;
+  /**
+     * Computed interest amount.
+     * @nullable
+     */
+  interest?: number | null;
+  /** Manually entered; negative is a discount, positive a charge. */
+  discountOrCharges: number;
+  /**
+     * Computed.
+     * @nullable
+     */
+  lateDays?: number | null;
+  /**
+     * Computed.
+     * @nullable
+     */
+  lateFees?: number | null;
+  /**
+     * Computed authoritative amount to collect.
+     * @nullable
+     */
+  finalAmount?: number | null;
   /** @nullable */
-  notes?: string | null;
-  createdAt: string;
-  totalPaid?: number;
-  outstandingBalance?: number;
+  partPayment?: number | null;
+  /** @nullable */
+  dateOfPartPayment?: string | null;
+  /**
+     * Total amount actually collected so far.
+     * @nullable
+     */
+  paid?: number | null;
+  /**
+     * Computed as paid minus principal.
+     * @nullable
+     */
+  profit?: number | null;
+  notes: string;
 }

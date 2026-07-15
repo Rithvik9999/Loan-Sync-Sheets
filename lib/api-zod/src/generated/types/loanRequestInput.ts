@@ -6,13 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface RepaymentInput {
-  loanId: string;
-  /** @minimum 0.01 */
+export interface LoanRequestInput {
+  /** @minimum 0 */
   amount: number;
-  paidDate: string;
+  /** @minimum 0 */
+  tenureDays: number;
   /** @nullable */
-  method?: string | null;
-  /** @nullable */
-  notes?: string | null;
+  purpose?: string | null;
 }

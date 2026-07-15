@@ -8,11 +8,22 @@
 import type { LoanStatus } from './loanStatus';
 
 export interface LoanUpdate {
+  /** @minLength 1 */
+  name?: string;
+  transactionDate?: string;
   principal?: number;
-  interestRate?: number;
-  termMonths?: number;
-  startDate?: string;
+  tenureDays?: number;
+  /** @nullable */
+  whatsapp?: string | null;
   status?: LoanStatus;
+  /** @nullable */
+  discountOrCharges?: number | null;
+  /** @nullable */
+  partPayment?: number | null;
+  /** @nullable */
+  dateOfPartPayment?: string | null;
+  /** @nullable */
+  paid?: number | null;
   /** @nullable */
   notes?: string | null;
 }

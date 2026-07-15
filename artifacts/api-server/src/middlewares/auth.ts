@@ -1,20 +1,14 @@
 import type { NextFunction, Request, Response } from "express";
-import { clerkClient, getAuth } from "@clerk/express";
-import {
-  getBorrowerByClerkUserId,
-  getBorrowerByEmail,
-  updateBorrower,
-  type Borrower,
-} from "../lib/repositories/borrowers";
-import { logger } from "../lib/logger";
+import { SESSION_COOKIE, verifySession } from "../lib/authTokens";
+import { getBorrower } from "../lib/repositories/borrowers";
 
 export type Role = "staff" | "borrower";
 
 export interface RoleInfo {
   role: Role;
-  borrower: Borrower | null;
+  borrowerId: string | null;
   name: string;
-  email: string;
+  phone: string;
 }
 
 declare global {
@@ -25,68 +19,42 @@ declare global {
   }
 }
 
-export function requireAuth(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): void {
-  const auth = getAuth(req);
-  if (!auth?.userId) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-  next();
-}
-
 /**
- * Resolves the signed-in user's role by matching their Clerk account to a
- * Borrower record. A borrower is matched by clerkUserId first; if not yet
- * linked, we look up their Clerk email and auto-link on first sign-in so
- * borrowers never have to be manually connected. Anyone who doesn't match a
- * borrower record is treated as staff.
+ * Reads and verifies the session cookie, attaching req.roleInfo. Responds
+ * 401 if there's no valid session. For borrowers, re-checks that the linked
+ * borrower record still exists (in case staff deleted it after login).
  */
 export async function attachRole(
   req: Request,
   res: Response,
   next: NextFunction,
 ): Promise<void> {
-  const auth = getAuth(req);
-  const userId = auth?.userId;
-  if (!userId) {
+  const token = req.cookies?.[SESSION_COOKIE];
+  const session = token ? verifySession(token) : null;
+  if (!session) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
-  try {
-    let borrower = await getBorrowerByClerkUserId(userId);
-    const clerkUser = await clerkClient.users.getUser(userId);
-    const email = clerkUser.primaryEmailAddress?.emailAddress ?? "";
-    const name =
-      [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ") ||
-      email;
-
-    if (!borrower && email) {
-      const byEmail = await getBorrowerByEmail(email);
-      if (byEmail) {
-        borrower = await updateBorrower(byEmail.id, { clerkUserId: userId });
-        logger.info(
-          { borrowerId: byEmail.id },
-          "Linked Clerk account to existing borrower by email",
-        );
-      }
+  if (session.role === "borrower") {
+    if (!session.borrowerId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
     }
-
-    req.roleInfo = {
-      role: borrower ? "borrower" : "staff",
-      borrower,
-      name,
-      email,
-    };
-    next();
-  } catch (err) {
-    req.log.error({ err }, "Failed to resolve role for authenticated user");
-    res.status(500).json({ error: "Failed to resolve user role" });
+    const borrower = await getBorrower(session.borrowerId);
+    if (!borrower) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
   }
+
+  req.roleInfo = {
+    role: session.role,
+    borrowerId: session.borrowerId,
+    name: session.name,
+    phone: session.phone,
+  };
+  next();
 }
 
 export function requireStaff(

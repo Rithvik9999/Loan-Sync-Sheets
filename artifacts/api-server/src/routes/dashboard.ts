@@ -6,49 +6,46 @@ import {
 import { attachRole, requireStaff } from "../middlewares/auth";
 import * as loansRepo from "../lib/repositories/loans";
 import * as borrowersRepo from "../lib/repositories/borrowers";
-import * as repaymentsRepo from "../lib/repositories/repayments";
-import {
-  computeLoanSchedule,
-  effectiveLoanStatus,
-  totalPaidForLoan,
-  outstandingBalanceForLoan,
-} from "../lib/loanCalc";
 
 const router: IRouter = Router();
 
 router.use(attachRole, requireStaff);
 
+const DUE_SOON_DAYS = 7;
+
 router.get("/dashboard/summary", async (_req, res): Promise<void> => {
-  const [loans, borrowers, repayments] = await Promise.all([
+  const [loans, borrowers] = await Promise.all([
     loansRepo.listLoans(),
     borrowersRepo.listBorrowers(),
-    repaymentsRepo.listRepayments(),
   ]);
+
+  const now = Date.now();
+  const dueSoonCutoff = now + DUE_SOON_DAYS * 24 * 60 * 60 * 1000;
 
   let activeLoansCount = 0;
   let totalOutstanding = 0;
   let overdueLoansCount = 0;
   let overdueAmount = 0;
   let dueSoonCount = 0;
+  let totalCollected = 0;
 
   for (const loan of loans) {
-    const status = effectiveLoanStatus(loan, repayments);
-    const outstanding = outstandingBalanceForLoan(loan, repayments);
-    if (status === "active" || status === "overdue") {
-      activeLoansCount += 1;
-      totalOutstanding += outstanding;
-    }
-    if (status === "overdue") {
-      overdueLoansCount += 1;
-      overdueAmount += outstanding;
-    }
-    const schedule = computeLoanSchedule(loan, repayments);
-    dueSoonCount += schedule.installments.filter(
-      (i) => i.status === "due_soon",
-    ).length;
-  }
+    totalCollected += loan.paid ?? 0;
+    if (loan.status !== "Pending") continue;
 
-  const totalCollected = repayments.reduce((sum, r) => sum + r.amount, 0);
+    activeLoansCount += 1;
+    totalOutstanding += loan.finalAmount ?? 0;
+
+    if (loan.lateDays && loan.lateDays > 0) {
+      overdueLoansCount += 1;
+      overdueAmount += loan.lateFees ?? 0;
+    } else if (loan.returnDate) {
+      const dueTime = new Date(loan.returnDate).getTime();
+      if (!Number.isNaN(dueTime) && dueTime <= dueSoonCutoff) {
+        dueSoonCount += 1;
+      }
+    }
+  }
 
   res.json(
     GetDashboardSummaryResponse.parse({
@@ -64,38 +61,27 @@ router.get("/dashboard/summary", async (_req, res): Promise<void> => {
 });
 
 router.get("/dashboard/activity", async (_req, res): Promise<void> => {
-  const [loans, borrowers, repayments] = await Promise.all([
-    loansRepo.listLoans(),
-    borrowersRepo.listBorrowers(),
-    repaymentsRepo.listRepayments(),
-  ]);
-  const borrowerNameByLoanId = new Map(
-    loans.map((l) => [
-      l.id,
-      borrowers.find((b) => b.id === l.borrowerId)?.name ?? "Unknown",
-    ]),
-  );
-  const borrowerNameById = new Map(borrowers.map((b) => [b.id, b.name]));
+  const loans = await loansRepo.listLoans();
 
-  const loanEvents = loans.map((l) => ({
-    type: "loan_created" as const,
-    description: `New loan created for ${borrowerNameById.get(l.borrowerId) ?? "Unknown"}`,
-    amount: l.principal,
-    occurredAt: l.createdAt,
-    borrowerName: borrowerNameById.get(l.borrowerId) ?? null,
-  }));
-
-  const repaymentEvents = repayments.map((r) => ({
-    type: "repayment_recorded" as const,
-    description: `Repayment recorded for ${borrowerNameByLoanId.get(r.loanId) ?? "Unknown"}`,
-    amount: r.amount,
-    occurredAt: r.createdAt,
-    borrowerName: borrowerNameByLoanId.get(r.loanId) ?? null,
-  }));
-
-  const items = [...loanEvents, ...repaymentEvents]
-    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
+  // Heat Map rows carry no timestamp column; row order (append order) is the
+  // best available proxy for recency, so the most recently added rows are
+  // the most recent activity.
+  const recent = [...loans]
+    .sort((a, b) => b.rowNumber - a.rowNumber)
     .slice(0, 20);
+
+  const items = recent.map((l) => ({
+    type: (l.status === "Clear" ? "loan_settled" : "loan_created") as
+      | "loan_created"
+      | "loan_settled",
+    description:
+      l.status === "Clear"
+        ? `Loan settled for ${l.name}`
+        : `Loan recorded for ${l.name}`,
+    amount: l.status === "Clear" ? l.paid : l.principal,
+    occurredAt: l.transactionDate ?? new Date().toISOString(),
+    borrowerName: l.name,
+  }));
 
   res.json(GetRecentActivityResponse.parse({ items }));
 });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -94,7 +94,7 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower }: Bor
   }
 
   // Reset form when dialog opens with new data
-  React.useEffect(() => {
+  useEffect(() => {
     if (open) {
       form.reset({
         name: borrower?.name || "",
