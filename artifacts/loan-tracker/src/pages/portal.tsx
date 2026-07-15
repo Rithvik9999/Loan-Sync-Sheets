@@ -2045,38 +2045,44 @@ export default function Portal() {
 
       {/* Tabs */}
       <Tabs defaultValue={defaultTab}>
-        <TabsList className="w-full overflow-x-auto flex-nowrap">
-          <TabsTrigger value="overdue" className="flex-1 gap-1.5 text-xs sm:text-sm">
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-            Overdue
-            {overdueItems.length > 0 && (
-              <span className="rounded-full bg-destructive/20 px-1.5 py-0.5 text-xs font-bold text-destructive">
-                {overdueItems.length}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="coming-up" className="flex-1 gap-1.5 text-xs sm:text-sm">
-            <CalendarClock className="h-3.5 w-3.5 shrink-0" />
-            Coming Up
-            {comingUpItems.length > 0 && (
-              <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
-                {comingUpItems.length}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="loans" className="flex-1 gap-1.5 text-xs sm:text-sm">
-            <CreditCard className="h-3.5 w-3.5 shrink-0" />
-            Loans
-          </TabsTrigger>
-          <TabsTrigger value="emi" className="flex-1 gap-1.5 text-xs sm:text-sm">
-            <CalendarClock className="h-3.5 w-3.5 shrink-0" />
-            EMI
-          </TabsTrigger>
-          <TabsTrigger value="requests" className="flex-1 gap-1.5 text-xs sm:text-sm">
-            <ListChecks className="h-3.5 w-3.5 shrink-0" />
-            Requests
-          </TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto">
+          <TabsList className="w-max min-w-full flex-nowrap">
+            <TabsTrigger value="overdue" className="shrink-0 gap-1.5 text-xs sm:text-sm px-3">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              Overdue
+              {overdueItems.length > 0 && (
+                <span className="rounded-full bg-destructive/20 px-1.5 py-0.5 text-xs font-bold text-destructive">
+                  {overdueItems.length}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="coming-up" className="shrink-0 gap-1.5 text-xs sm:text-sm px-3">
+              <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+              Coming Up
+              {comingUpItems.length > 0 && (
+                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
+                  {comingUpItems.length}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="loans" className="shrink-0 gap-1.5 text-xs sm:text-sm px-3">
+              <CreditCard className="h-3.5 w-3.5 shrink-0" />
+              Loans
+            </TabsTrigger>
+            <TabsTrigger value="emi" className="shrink-0 gap-1.5 text-xs sm:text-sm px-3">
+              <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+              EMI
+            </TabsTrigger>
+            <TabsTrigger value="requests" className="shrink-0 gap-1.5 text-xs sm:text-sm px-3">
+              <ListChecks className="h-3.5 w-3.5 shrink-0" />
+              Requests
+            </TabsTrigger>
+            <TabsTrigger value="paid" className="shrink-0 gap-1.5 text-xs sm:text-sm px-3">
+              <BadgeCheck className="h-3.5 w-3.5 shrink-0" />
+              Paid
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         {/* ── Overdue Tab ── */}
         <TabsContent value="overdue" className="mt-4">
@@ -2126,12 +2132,12 @@ export default function Portal() {
         <TabsContent value="requests" className="mt-4">
           <MyLoanRequests />
         </TabsContent>
-      </Tabs>
 
-      {/* Already Paid Section */}
-      {!isLoading && (
-        <AlreadyPaidSection loans={loans ?? []} emiLoans={emiLoans ?? []} />
-      )}
+        {/* ── Paid Tab ── */}
+        <TabsContent value="paid" className="mt-4">
+          <PaidTab loans={loans ?? []} emiLoans={emiLoans ?? []} isLoading={isLoading || isLoadingEmi} />
+        </TabsContent>
+      </Tabs>
 
       <LoanRequestDialog
         open={loanRequestOpen}

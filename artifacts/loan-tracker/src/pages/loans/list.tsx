@@ -33,7 +33,7 @@ import {
   Clock,
   MessageCircle,
 } from "lucide-react";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -254,11 +254,8 @@ function LoansTable({
               />
             </TableHead>
             <TableHead>Borrower</TableHead>
-            <TableHead>Principal</TableHead>
-            <TableHead className="hidden sm:table-cell">Tenure</TableHead>
-            <TableHead className="hidden md:table-cell whitespace-nowrap">Date</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="text-right">Final Amount</TableHead>
+            <TableHead>Amount</TableHead>
+            <TableHead>Tenure / Status</TableHead>
             <TableHead className="w-[50px]"></TableHead>
           </TableRow>
         </TableHeader>
@@ -279,30 +276,24 @@ function LoansTable({
               <TableCell className="font-medium">
                 <div className="truncate max-w-[100px] sm:max-w-none">{loan.name}</div>
                 <div className="text-xs text-muted-foreground font-mono">{loan.loanId}</div>
-                <div className="text-[10px] text-muted-foreground/70 sm:hidden">
-                  {formatDate(loan.transactionDate)}
-                  {loan.returnDate ? ` · Due ${formatDate(loan.returnDate)}` : ""}
+                <div className="text-[10px] text-muted-foreground/70 mt-0.5">
+                  <div>{formatDateTime(loan.transactionDate)}</div>
+                  {loan.returnDate && (
+                    <div className="text-amber-600 dark:text-amber-400">
+                      Due {formatDateTime(loan.returnDate)}
+                    </div>
+                  )}
                 </div>
               </TableCell>
               <TableCell className="font-numeric">
-                {formatCurrency(loan.principal)}
-              </TableCell>
-              <TableCell className="text-muted-foreground hidden sm:table-cell">
-                {loan.tenureDays}d
-              </TableCell>
-              <TableCell className="text-muted-foreground hidden md:table-cell whitespace-nowrap text-xs">
-                <div>{formatDate(loan.transactionDate)}</div>
-                {loan.returnDate && (
-                  <div className="text-[10px] text-amber-600 dark:text-amber-400">
-                    Due {formatDate(loan.returnDate)}
-                  </div>
+                <div className="font-medium">{formatCurrency(loan.principal)}</div>
+                {loan.finalAmount != null && (
+                  <div className="text-xs text-muted-foreground mt-0.5">{formatCurrency(loan.finalAmount)}</div>
                 )}
               </TableCell>
               <TableCell>
-                <LoanStatusBadge status={loan.status} />
-              </TableCell>
-              <TableCell className="text-right font-numeric font-medium">
-                {loan.finalAmount != null ? formatCurrency(loan.finalAmount) : "—"}
+                <div className="text-sm text-muted-foreground">{loan.tenureDays}d</div>
+                <div className="mt-0.5"><LoanStatusBadge status={loan.status} /></div>
               </TableCell>
               <TableCell onClick={(e) => e.stopPropagation()}>
                 <Button
@@ -661,34 +652,36 @@ export default function LoansList() {
           setSelected(new Set());
         }}
       >
-        <TabsList className="w-full overflow-x-auto flex-nowrap">
-          <TabsTrigger value="overdue" className="flex-1 gap-1.5 text-xs sm:text-sm">
-            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-            Overdue
-            {overdueLoans.length > 0 && (
-              <Badge variant="destructive" className="text-xs h-4 px-1">
-                {overdueLoans.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="coming-up" className="flex-1 gap-1.5 text-xs sm:text-sm">
-            <Clock className="h-3.5 w-3.5 shrink-0" />
-            Coming Up
-            {comingUpLoans.length > 0 && (
-              <span className="rounded-full bg-amber-100 text-amber-800 px-1.5 py-0.5 text-[10px] font-medium">
-                {comingUpLoans.length}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="loans" className="flex-1 gap-1.5 text-xs sm:text-sm">
-            <CreditCard className="h-3.5 w-3.5 shrink-0" />
-            Loans
-          </TabsTrigger>
-          <TabsTrigger value="archived" className="flex-1 gap-1.5 text-xs sm:text-sm">
-            <Archive className="h-3.5 w-3.5 shrink-0" />
-            Archived
-          </TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto">
+          <TabsList className="w-max min-w-full flex-nowrap">
+            <TabsTrigger value="overdue" className="shrink-0 gap-1.5 text-xs sm:text-sm px-3">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              Overdue
+              {overdueLoans.length > 0 && (
+                <Badge variant="destructive" className="text-xs h-4 px-1">
+                  {overdueLoans.length}
+                </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="coming-up" className="shrink-0 gap-1.5 text-xs sm:text-sm px-3">
+              <Clock className="h-3.5 w-3.5 shrink-0" />
+              Coming Up
+              {comingUpLoans.length > 0 && (
+                <span className="rounded-full bg-amber-100 text-amber-800 px-1.5 py-0.5 text-[10px] font-medium">
+                  {comingUpLoans.length}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="loans" className="shrink-0 gap-1.5 text-xs sm:text-sm px-3">
+              <CreditCard className="h-3.5 w-3.5 shrink-0" />
+              Loans
+            </TabsTrigger>
+            <TabsTrigger value="archived" className="shrink-0 gap-1.5 text-xs sm:text-sm px-3">
+              <Archive className="h-3.5 w-3.5 shrink-0" />
+              Archived
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         {/* Overdue Tab */}
         <TabsContent value="overdue" className="mt-4">
@@ -740,7 +733,9 @@ export default function LoansList() {
                 </div>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger className="bg-background w-full sm:w-44">
-                    <SelectValue placeholder="All Statuses" />
+                    <span className="truncate text-sm">
+                      {{"all": "All Statuses", "Pending": "Pending", "Clear": "Clear", "Temp": "Temp"}[statusFilter] ?? statusFilter}
+                    </span>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Statuses</SelectItem>
@@ -754,7 +749,9 @@ export default function LoansList() {
                   onValueChange={(v) => setSortField(v as SortField)}
                 >
                   <SelectTrigger className="bg-background w-full sm:w-52">
-                    <SelectValue placeholder="Sort by…" />
+                    <span className="truncate text-sm">
+                      {({"due-soonest": "Due Date (overdue first)", "date-desc": "Date (newest first)", "date-asc": "Date (oldest first)", "name-asc": "Name (A → Z)", "name-desc": "Name (Z → A)", "amount-desc": "Amount (high → low)", "amount-asc": "Amount (low → high)"} as Record<string,string>)[sortField] ?? sortField}
+                    </span>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="due-soonest">Due Date (overdue first)</SelectItem>
