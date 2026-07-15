@@ -71,6 +71,7 @@ import { z } from "zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
+import { computeEarlyPaymentDiscount } from "@/lib/early-payment-discount";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -538,18 +539,22 @@ function RepayDialog({
   onOpenChange,
   label,
   outstanding,
+  earlyDiscount = 0,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   label: string;
   outstanding: number;
+  /** Estimated early-payment discount (rupees), if this loan qualifies. */
+  earlyDiscount?: number;
 }) {
   const [mode, setMode] = useState<"full" | "custom">("full");
   const [custom, setCustom] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
+  const payableNow = Math.max(outstanding - earlyDiscount, 0);
   const amount =
-    mode === "full" ? Math.max(outstanding, 0) : Number(custom);
+    mode === "full" ? Math.max(payableNow, 0) : Number(custom);
   const isValid = amount > 0 && Number.isFinite(amount);
 
   const handlePay = () => {
@@ -570,13 +575,36 @@ function RepayDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          <div className="rounded-lg bg-muted/50 p-4 text-sm">
-            <div className="flex justify-between border-t pt-2">
+          {earlyDiscount > 0 && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 flex items-start gap-2">
+              <BadgeCheck className="h-4 w-4 mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold">
+                  Pay now and save {formatCurrency(earlyDiscount)}
+                </p>
+                <p className="text-xs text-emerald-700 mt-0.5">
+                  Early-payment discount, estimated from the standard rate
+                  card. Admin will confirm the exact amount when verifying
+                  your payment.
+                </p>
+              </div>
+            </div>
+          )}
+          <div className="rounded-lg bg-muted/50 p-4 text-sm space-y-2">
+            {earlyDiscount > 0 && (
+              <div className="flex justify-between text-muted-foreground">
+                <span>Original outstanding</span>
+                <span className="font-numeric line-through">
+                  {formatCurrency(Math.max(outstanding, 0))}
+                </span>
+              </div>
+            )}
+            <div className="flex justify-between border-t pt-2 first:border-t-0 first:pt-0">
               <span className="text-muted-foreground font-medium">
-                Outstanding
+                {earlyDiscount > 0 ? "Payable now" : "Outstanding"}
               </span>
               <span className="font-bold font-numeric text-destructive">
-                {formatCurrency(Math.max(outstanding, 0))}
+                {formatCurrency(Math.max(payableNow, 0))}
               </span>
             </div>
           </div>
@@ -593,7 +621,7 @@ function RepayDialog({
             >
               <div className="font-semibold">Full amount</div>
               <div className="text-muted-foreground font-numeric text-xs mt-0.5">
-                {formatCurrency(Math.max(outstanding, 0))}
+                {formatCurrency(Math.max(payableNow, 0))}
               </div>
             </button>
             <button
@@ -673,13 +701,17 @@ function BulkRepayDialog({
   onOpenChange,
   total,
   count,
+  discountTotal = 0,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   total: number;
   count: number;
+  /** Combined estimated early-payment discount across selected items. */
+  discountTotal?: number;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const payableNow = Math.max(total - discountTotal, 0);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -692,17 +724,34 @@ function BulkRepayDialog({
             Opens your UPI app to pay <strong>{UPI_VPA}</strong>.
           </DialogDescription>
         </DialogHeader>
+        {discountTotal > 0 && (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 flex items-start gap-2 my-2">
+            <BadgeCheck className="h-4 w-4 mt-0.5 shrink-0" />
+            <p className="font-semibold">
+              Pay now and save {formatCurrency(discountTotal)} in early-payment
+              discounts
+            </p>
+          </div>
+        )}
         <div className="rounded-lg bg-muted/50 p-4 space-y-2 text-sm my-2">
           <div className="flex justify-between">
             <span className="text-muted-foreground">Items selected</span>
             <span className="font-semibold">{count}</span>
           </div>
+          {discountTotal > 0 && (
+            <div className="flex justify-between text-muted-foreground">
+              <span>Original total</span>
+              <span className="font-numeric line-through">
+                {formatCurrency(total)}
+              </span>
+            </div>
+          )}
           <div className="flex justify-between border-t pt-2 mt-1">
             <span className="text-muted-foreground font-medium">
-              Total amount
+              {discountTotal > 0 ? "Payable now" : "Total amount"}
             </span>
             <span className="font-bold font-numeric text-lg">
-              {formatCurrency(total)}
+              {formatCurrency(payableNow)}
             </span>
           </div>
         </div>
@@ -716,21 +765,21 @@ function BulkRepayDialog({
           </Button>
           <Button
             onClick={() => {
-              openUpi(total, `Loan Repayment (${count} items)`);
+              openUpi(payableNow, `Loan Repayment (${count} items)`);
               onOpenChange(false);
               setTimeout(() => setConfirmOpen(true), 800);
             }}
             className="w-full sm:w-auto bg-emerald-700 hover:bg-emerald-800 text-white"
           >
             <Banknote className="mr-2 h-4 w-4" />
-            Pay {formatCurrency(total)} via UPI
+            Pay {formatCurrency(payableNow)} via UPI
           </Button>
         </DialogFooter>
       </DialogContent>
       <PaymentConfirmDialog
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
-        amount={total}
+        amount={payableNow}
         label={`${count} item${count !== 1 ? "s" : ""}`}
       />
     </Dialog>
@@ -748,7 +797,12 @@ type RepayItem = {
   outstanding: number;
   dueDate: Date | null;
   isOverdue: boolean;
+  /** Estimated early-payment discount (rupees), 0 if not eligible. */
+  earlyDiscount: number;
 };
+
+/** Days between now and a due date isn't within this window → eligible for the early-payment discount. */
+const EARLY_PAYMENT_WINDOW_DAYS = 5;
 
 function buildRepaymentItems(
   loans: Loan[] | undefined,
@@ -770,6 +824,26 @@ function buildRepaymentItems(
       dueDate = d;
     }
     const isOverdue = !!(dueDate && dueDate < now);
+    const daysUntilDue = dueDate
+      ? Math.ceil((dueDate.getTime() - now.getTime()) / 86400000)
+      : null;
+    let earlyDiscount = 0;
+    if (
+      !isOverdue &&
+      daysUntilDue !== null &&
+      daysUntilDue > EARLY_PAYMENT_WINDOW_DAYS
+    ) {
+      earlyDiscount = computeEarlyPaymentDiscount({
+        principal: l.principal,
+        tenureDays: l.tenureDays,
+        transactionDate: l.transactionDate,
+        partPayment: l.partPayment,
+        flatFee: l.flatFee,
+        interest: l.interest,
+        paymentDate: now,
+      }).discount;
+      earlyDiscount = Math.min(earlyDiscount, outstanding);
+    }
     items.push({
       key: `loan-${l.id}`,
       id: l.id,
@@ -783,6 +857,7 @@ function buildRepaymentItems(
       outstanding,
       dueDate,
       isOverdue,
+      earlyDiscount,
     });
   }
 
@@ -805,6 +880,7 @@ function buildRepaymentItems(
       outstanding: monthly,
       dueDate,
       isOverdue,
+      earlyDiscount: 0,
     });
   }
 
@@ -867,13 +943,27 @@ function RepayItemCard({
           <p className="text-xs text-muted-foreground mt-0.5">{item.subLabel}</p>
         </div>
         <div className="flex flex-col items-end gap-1.5 shrink-0">
-          <div
-            className={`font-bold font-numeric text-sm ${
-              item.isOverdue ? "text-destructive" : "text-foreground"
-            }`}
-          >
-            {formatCurrency(item.outstanding)}
-          </div>
+          {item.earlyDiscount > 0 ? (
+            <div className="text-right">
+              <div className="text-xs text-muted-foreground line-through font-numeric">
+                {formatCurrency(item.outstanding)}
+              </div>
+              <div className="font-bold font-numeric text-sm text-emerald-700">
+                {formatCurrency(item.outstanding - item.earlyDiscount)}
+              </div>
+              <div className="text-[10px] font-medium text-emerald-600">
+                Save {formatCurrency(item.earlyDiscount)}
+              </div>
+            </div>
+          ) : (
+            <div
+              className={`font-bold font-numeric text-sm ${
+                item.isOverdue ? "text-destructive" : "text-foreground"
+              }`}
+            >
+              {formatCurrency(item.outstanding)}
+            </div>
+          )}
           <div className="flex gap-1.5">
             <Button
               size="sm"
@@ -901,6 +991,7 @@ function RepayItemCard({
         onOpenChange={setRepayOpen}
         label={item.label}
         outstanding={item.outstanding}
+        earlyDiscount={item.earlyDiscount}
       />
     </>
   );
@@ -925,6 +1016,10 @@ function OverdueTab({
 
   const selectedItems = items.filter((i) => selected.has(i.key));
   const bulkTotal = selectedItems.reduce((s, i) => s + i.outstanding, 0);
+  const bulkDiscountTotal = selectedItems.reduce(
+    (s, i) => s + i.earlyDiscount,
+    0,
+  );
 
   if (items.length === 0) {
     return (
@@ -946,7 +1041,9 @@ function OverdueTab({
             <CheckSquare className="h-4 w-4 text-primary" />
             <span className="font-medium">{selected.size} selected</span>
             <span className="text-muted-foreground">·</span>
-            <span className="font-bold font-numeric">{formatCurrency(bulkTotal)}</span>
+            <span className="font-bold font-numeric">
+              {formatCurrency(Math.max(bulkTotal - bulkDiscountTotal, 0))}
+            </span>
           </div>
           <div className="flex gap-2">
             <Button
@@ -962,7 +1059,7 @@ function OverdueTab({
               onClick={() => setBulkOpen(true)}
             >
               <Banknote className="mr-1.5 h-3.5 w-3.5" />
-              Pay {formatCurrency(bulkTotal)}
+              Pay {formatCurrency(Math.max(bulkTotal - bulkDiscountTotal, 0))}
             </Button>
           </div>
         </div>
@@ -985,6 +1082,7 @@ function OverdueTab({
         onOpenChange={setBulkOpen}
         total={bulkTotal}
         count={selected.size}
+        discountTotal={bulkDiscountTotal}
       />
     </div>
   );
@@ -1005,6 +1103,10 @@ function ComingUpTab({ items }: { items: RepayItem[] }) {
 
   const selectedItems = items.filter((i) => selected.has(i.key));
   const bulkTotal = selectedItems.reduce((s, i) => s + i.outstanding, 0);
+  const bulkDiscountTotal = selectedItems.reduce(
+    (s, i) => s + i.earlyDiscount,
+    0,
+  );
 
   if (items.length === 0) {
     return (
@@ -1028,7 +1130,9 @@ function ComingUpTab({ items }: { items: RepayItem[] }) {
             <CheckSquare className="h-4 w-4 text-primary" />
             <span className="font-medium">{selected.size} selected</span>
             <span className="text-muted-foreground">·</span>
-            <span className="font-bold font-numeric">{formatCurrency(bulkTotal)}</span>
+            <span className="font-bold font-numeric">
+              {formatCurrency(Math.max(bulkTotal - bulkDiscountTotal, 0))}
+            </span>
           </div>
           <div className="flex gap-2">
             <Button
@@ -1044,7 +1148,7 @@ function ComingUpTab({ items }: { items: RepayItem[] }) {
               onClick={() => setBulkOpen(true)}
             >
               <Banknote className="mr-1.5 h-3.5 w-3.5" />
-              Pay {formatCurrency(bulkTotal)}
+              Pay {formatCurrency(Math.max(bulkTotal - bulkDiscountTotal, 0))}
             </Button>
           </div>
         </div>
@@ -1066,6 +1170,7 @@ function ComingUpTab({ items }: { items: RepayItem[] }) {
         open={bulkOpen}
         onOpenChange={setBulkOpen}
         total={bulkTotal}
+        discountTotal={bulkDiscountTotal}
         count={selected.size}
       />
     </div>
@@ -1077,6 +1182,39 @@ function ComingUpTab({ items }: { items: RepayItem[] }) {
 function LoanCard({ loan }: { loan: Loan }) {
   const [repayOpen, setRepayOpen] = useState(false);
   const outstanding = (loan.finalAmount ?? 0) - (loan.paid ?? 0);
+
+  const dueDate = loan.returnDate
+    ? new Date(loan.returnDate)
+    : loan.transactionDate && loan.tenureDays
+      ? (() => {
+          const d = new Date(loan.transactionDate);
+          d.setDate(d.getDate() + loan.tenureDays);
+          return d;
+        })()
+      : null;
+  const now = new Date();
+  const isOverdue = !!(dueDate && dueDate < now);
+  const daysUntilDue = dueDate
+    ? Math.ceil((dueDate.getTime() - now.getTime()) / 86400000)
+    : null;
+  const earlyDiscount =
+    loan.status !== "Clear" &&
+    !isOverdue &&
+    daysUntilDue !== null &&
+    daysUntilDue > EARLY_PAYMENT_WINDOW_DAYS
+      ? Math.min(
+          computeEarlyPaymentDiscount({
+            principal: loan.principal,
+            tenureDays: loan.tenureDays,
+            transactionDate: loan.transactionDate,
+            partPayment: loan.partPayment,
+            flatFee: loan.flatFee,
+            interest: loan.interest,
+            paymentDate: now,
+          }).discount,
+          Math.max(outstanding, 0),
+        )
+      : 0;
 
   return (
     <>
@@ -1149,6 +1287,7 @@ function LoanCard({ loan }: { loan: Loan }) {
         onOpenChange={setRepayOpen}
         label={`${formatCurrency(loan.principal)} Loan`}
         outstanding={Math.max(outstanding, 0)}
+        earlyDiscount={earlyDiscount}
       />
     </>
   );
