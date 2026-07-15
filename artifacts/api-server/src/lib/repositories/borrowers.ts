@@ -25,13 +25,22 @@ export interface BorrowerInput {
   creditLimit?: number | null;
 }
 
+/** Tolerates stray currency symbols/commas typed directly into the sheet cell. */
+function parseCreditLimit(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const cleaned = raw.replace(/[^0-9.-]/g, "");
+  if (!cleaned) return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
 function fromRow(row: Record<string, string>): Borrower {
   return {
     id: row.id,
     name: row.name,
     phone: row.phone ?? "",
     pin: row.pin ?? "",
-    creditLimit: row.creditLimit ? Number(row.creditLimit) : null,
+    creditLimit: parseCreditLimit(row.creditLimit),
     createdAt: row.createdAt,
   };
 }
