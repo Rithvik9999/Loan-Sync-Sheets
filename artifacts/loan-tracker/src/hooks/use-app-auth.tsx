@@ -93,16 +93,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const msg = typeof err?.error === "string" ? err.error : "Login failed. Please try again.";
       throw new Error(msg || "Invalid phone number or PIN");
     }
-    const data = await res.json();
-    setState({
-      isLoaded: true,
-      isSignedIn: true,
-      role: data.role ?? null,
-      borrowerId: data.borrowerId ?? null,
-      name: data.name ?? null,
-      phone: data.phone ?? null,
-      creditLimit: typeof data.creditLimit === "number" ? data.creditLimit : null,
-    });
+    // Fetch /me after login so creditLimit (and any other borrower-only fields)
+    // are populated — the login endpoint only returns basic identity.
+    const fullState = await fetchMe();
+    setState(fullState);
   }, []);
 
   const logout = useCallback(async () => {

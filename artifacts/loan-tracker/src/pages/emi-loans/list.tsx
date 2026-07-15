@@ -170,11 +170,13 @@ export default function EmiLoansList() {
 
   const now = new Date();
 
-  // Sort by latest transaction date (newest first), no sort dropdown
+  // Sort by latest transaction date (newest first), no sort dropdown.
+  // "All" excludes Clear loans; you must explicitly select "Clear" to see them.
   const filtered = loans
     ?.filter((l) => {
       const nameMatch = l.name.toLowerCase().includes(search.toLowerCase());
-      const statusMatch = statusFilter === "all" || l.status === statusFilter;
+      const statusMatch =
+        statusFilter === "all" ? l.status !== "Clear" : l.status === statusFilter;
       return nameMatch && statusMatch;
     })
     .sort((a, b) => {
@@ -258,13 +260,13 @@ export default function EmiLoansList() {
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="bg-background w-full sm:w-44">
-                <SelectValue placeholder="All Statuses" />
+                <SelectValue placeholder="All (excl. Cleared)" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="all">All (excl. Cleared)</SelectItem>
                 <SelectItem value="Pending">Pending</SelectItem>
-                <SelectItem value="Clear">Clear</SelectItem>
                 <SelectItem value="Temp">Temp</SelectItem>
+                <SelectItem value="Clear">Clear</SelectItem>
               </SelectContent>
             </Select>
           </div>

@@ -403,7 +403,7 @@ function LoanRequestDialog({
                     <p className="font-bold font-numeric text-amber-900 dark:text-amber-200">{formatCurrency(loanPreview.finalAmount)}</p>
                   </div>
                 </div>
-                <p className="text-[10px] text-amber-600">Estimate only — admin confirms the exact amount.</p>
+                <p className="text-[10px] text-amber-600">Estimate only — admin will give further discount.</p>
               </div>
             )}
             <DialogFooter className="pt-2 flex-col sm:flex-row gap-2">
@@ -1480,6 +1480,140 @@ const requestStatusIcon = {
   Rejected: <XCircle className="h-4 w-4 text-destructive" />,
 };
 
+function RequestDetailDialog({
+  request,
+  open,
+  onOpenChange,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  request: any;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+}) {
+  if (!request) return null;
+  const isEmi = request.type === "EMI";
+  const statusColor =
+    request.status === "Pending"
+      ? "bg-amber-50 text-amber-700 border border-amber-200"
+      : request.status === "Approved"
+        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+        : "bg-red-50 text-red-700 border border-red-200";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[380px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            {requestStatusIcon[request.status as keyof typeof requestStatusIcon]}
+            Loan Request Details
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 py-1">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Status</span>
+            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusColor}`}>
+              {request.status}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Amount</span>
+            <span className="text-sm font-bold font-numeric">{formatCurrency(request.amount)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Type</span>
+            <span className="text-sm font-medium">{isEmi ? "EMI Loan" : "Regular Loan"}</span>
+          </div>
+          {isEmi ? (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Tenure</span>
+              <span className="text-sm font-medium">{request.tenureMonths ?? "?"} months</span>
+            </div>
+          ) : request.tenureDays > 0 ? (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Tenure</span>
+              <span className="text-sm font-medium">{request.tenureDays} days</span>
+            </div>
+          ) : null}
+          {request.purpose && (
+            <div className="flex flex-col gap-1">
+              <span className="text-sm text-muted-foreground">Purpose</span>
+              <span className="text-sm rounded-lg bg-muted/40 px-3 py-2">{request.purpose}</span>
+            </div>
+          )}
+          {request.createdAt && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Requested on</span>
+              <span className="text-sm">{formatDate(request.createdAt)}</span>
+            </div>
+          )}
+          {request.adminNote && (
+            <div className="flex flex-col gap-1">
+              <span className="text-sm text-muted-foreground">Admin note</span>
+              <span className="text-sm rounded-lg bg-muted/40 px-3 py-2">{request.adminNote}</span>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" className="w-full" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RequestCard({ request }: { request: any }) {
+  const [open, setOpen] = useState(false);
+  const isEmi = request.type === "EMI";
+  return (
+    <>
+      <button
+        type="button"
+        className="w-full flex items-center justify-between rounded-lg border bg-card px-4 py-3 text-sm text-left hover:bg-muted/30 active:bg-muted/50 transition-colors cursor-pointer"
+        onClick={() => setOpen(true)}
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          {requestStatusIcon[request.status as keyof typeof requestStatusIcon]}
+          <div className="min-w-0">
+            <span className="font-semibold font-numeric">
+              {formatCurrency(request.amount)}
+            </span>
+            <span className="text-muted-foreground ml-2">
+              ·{" "}
+              {isEmi
+                ? `${request.tenureMonths ?? "?"} months EMI`
+                : request.tenureDays > 0
+                  ? `${request.tenureDays} days`
+                  : "EMI"}
+            </span>
+            {request.purpose && (
+              <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                {request.purpose}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+          <span
+            className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+              request.status === "Pending"
+                ? "bg-amber-50 text-amber-700 border border-amber-200"
+                : request.status === "Approved"
+                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                  : "bg-red-50 text-red-700 border border-red-200"
+            }`}
+          >
+            {request.status}
+          </span>
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+        </div>
+      </button>
+      <RequestDetailDialog request={request} open={open} onOpenChange={setOpen} />
+    </>
+  );
+}
+
 function MyLoanRequests() {
   const { data: requests, isLoading } = useListLoanRequests({
     query: { queryKey: getListLoanRequestsQueryKey() },
@@ -1496,43 +1630,7 @@ function MyLoanRequests() {
       </h2>
       <div className="space-y-2">
         {requests.map((r) => (
-          <div
-            key={r.id}
-            className="flex items-center justify-between rounded-lg border bg-card px-4 py-3 text-sm"
-          >
-            <div className="flex items-center gap-3">
-              {requestStatusIcon[r.status]}
-              <div>
-                <span className="font-semibold font-numeric">
-                  {formatCurrency(r.amount)}
-                </span>
-                <span className="text-muted-foreground ml-2">
-                  ·{" "}
-                  {(r as any).type === "EMI"
-                    ? `${(r as any).tenureMonths ?? "?"} months EMI`
-                    : r.tenureDays > 0
-                      ? `${r.tenureDays} days`
-                      : "EMI"}
-                </span>
-                {r.purpose && (
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {r.purpose}
-                  </p>
-                )}
-              </div>
-            </div>
-            <span
-              className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                r.status === "Pending"
-                  ? "bg-amber-50 text-amber-700 border border-amber-200"
-                  : r.status === "Approved"
-                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                    : "bg-red-50 text-red-700 border border-red-200"
-              }`}
-            >
-              {r.status}
-            </span>
-          </div>
+          <RequestCard key={r.id} request={r} />
         ))}
       </div>
     </div>
@@ -1630,6 +1728,8 @@ function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
 
 // ─── Already Paid Section ─────────────────────────────────────────────────────
 
+const PAID_PAGE_SIZE = 15;
+
 function AlreadyPaidSection({
   loans,
   emiLoans,
@@ -1637,69 +1737,71 @@ function AlreadyPaidSection({
   loans: Loan[];
   emiLoans: EmiLoan[];
 }) {
-  const [open, setOpen] = useState(false);
+  const [page, setPage] = useState(0);
 
   const paidLoans = loans.filter((l) => l.status === "Clear");
   const paidEmi = emiLoans.filter((e) => e.status === "Clear");
-  const total = paidLoans.length + paidEmi.length;
+  const allPaid = [
+    ...paidLoans.map((l) => ({ kind: "loan" as const, item: l })),
+    ...paidEmi.map((e) => ({ kind: "emi" as const, item: e })),
+  ];
+  const total = allPaid.length;
 
   if (total === 0) return null;
 
+  const totalPages = Math.ceil(total / PAID_PAGE_SIZE);
+  const pageItems = allPaid.slice(page * PAID_PAGE_SIZE, (page + 1) * PAID_PAGE_SIZE);
+
   return (
     <div className="border rounded-xl overflow-hidden">
-      <button
-        type="button"
-        className="w-full flex items-center justify-between px-4 py-3 bg-muted/30 hover:bg-muted/50 transition-colors text-left"
-        onClick={() => setOpen((v) => !v)}
-      >
+      <div className="flex items-center justify-between px-4 py-3 bg-muted/30">
         <div className="flex items-center gap-2">
           <BadgeCheck className="h-4 w-4 text-emerald-600" />
           <span className="font-semibold text-sm">
             Already Paid ({total})
           </span>
         </div>
-        {open ? (
-          <ChevronUp className="h-4 w-4 text-muted-foreground" />
-        ) : (
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        {totalPages > 1 && (
+          <span className="text-xs text-muted-foreground">
+            Page {page + 1}/{totalPages}
+          </span>
         )}
-      </button>
+      </div>
 
-      {open && (
-        <div className="divide-y">
-          {paidLoans.map((l) => (
+      <div className="divide-y">
+        {pageItems.map(({ kind, item }) =>
+          kind === "loan" ? (
             <div
-              key={l.id}
+              key={item.id}
               className="flex items-center justify-between px-4 py-3 bg-emerald-50/30 text-sm"
             >
               <div>
                 <span className="font-semibold font-numeric">
-                  {formatCurrency(l.principal)} Loan
+                  {formatCurrency((item as Loan).principal)} Loan
                 </span>
                 <div className="text-xs text-muted-foreground mt-0.5">
-                  Paid on {l.returnDate ? formatDate(l.returnDate) : "—"}
+                  Paid on {(item as Loan).returnDate ? formatDate((item as Loan).returnDate!) : "—"}
                 </div>
               </div>
               <div className="text-right">
                 <div className="font-bold font-numeric text-emerald-700">
-                  {l.paid != null ? formatCurrency(l.paid) : "—"}
+                  {(item as Loan).paid != null ? formatCurrency((item as Loan).paid!) : "—"}
                 </div>
                 <Button variant="ghost" size="sm" className="h-6 text-xs px-2 mt-0.5" asChild>
-                  <Link href={`/loans/${l.id}`}>
+                  <Link href={`/loans/${item.id}`}>
                     Details <ChevronRight className="ml-0.5 h-3 w-3" />
                   </Link>
                 </Button>
               </div>
             </div>
-          ))}
-          {paidEmi.map((e) => (
+          ) : (
             <div
-              key={e.id}
+              key={item.id}
               className="flex items-center justify-between px-4 py-3 bg-emerald-50/30 text-sm"
             >
               <div>
                 <span className="font-semibold font-numeric">
-                  {formatCurrency(e.principal)} EMI Loan
+                  {formatCurrency((item as EmiLoan).principal)} EMI Loan
                 </span>
                 <Badge variant="outline" className="ml-2 text-xs border-blue-200 text-blue-700">
                   EMI
@@ -1710,18 +1812,44 @@ function AlreadyPaidSection({
               </div>
               <div className="text-right">
                 <div className="font-bold font-numeric text-emerald-700">
-                  {e.monthlyPayment != null
-                    ? `${formatCurrency(e.monthlyPayment)}/mo`
+                  {(item as EmiLoan).monthlyPayment != null
+                    ? `${formatCurrency((item as EmiLoan).monthlyPayment!)}/mo`
                     : "—"}
                 </div>
                 <Button variant="ghost" size="sm" className="h-6 text-xs px-2 mt-0.5" asChild>
-                  <Link href={`/emi-loans/${e.id}`}>
+                  <Link href={`/emi-loans/${item.id}`}>
                     Details <ChevronRight className="ml-0.5 h-3 w-3" />
                   </Link>
                 </Button>
               </div>
             </div>
-          ))}
+          )
+        )}
+      </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-4 py-2 bg-muted/20 border-t gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            disabled={page === 0}
+            onClick={() => setPage((p) => p - 1)}
+          >
+            ← Prev
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            {page * PAID_PAGE_SIZE + 1}–{Math.min((page + 1) * PAID_PAGE_SIZE, total)} of {total}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            disabled={page >= totalPages - 1}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Next →
+          </Button>
         </div>
       )}
     </div>

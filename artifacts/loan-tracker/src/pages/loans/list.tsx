@@ -365,17 +365,17 @@ export default function LoansList() {
     [allLoans],
   );
 
-  // Main "Loans" tab — sorted by latest input date (transactionDate), excludes archived
+  // Main "Loans" tab — sorted by latest input date (transactionDate), excludes archived.
+  // "All" does NOT include Clear loans; you must explicitly select "Clear" to see them.
   const filtered = useMemo(
     () =>
       (allLoans ?? [])
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .filter((l) => (l.status as any) !== "Archived")
-        .filter(
-          (l) =>
-            statusFilter === "all" ||
-            (l.status as string) === statusFilter,
-        )
+        .filter((l) => {
+          if (statusFilter === "all") return (l.status as string) !== "Clear";
+          return (l.status as string) === statusFilter;
+        })
         .filter((l) => l.name.toLowerCase().includes(search.toLowerCase()))
         .sort((a, b) => {
           // Always sort by latest transaction date first
@@ -693,15 +693,13 @@ export default function LoansList() {
                 </div>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger className="bg-background w-full sm:w-44">
-                    <span className="truncate text-sm">
-                      {{"all": "All Statuses", "Pending": "Pending", "Clear": "Clear", "Temp": "Temp"}[statusFilter] ?? statusFilter}
-                    </span>
+                    <SelectValue placeholder="All Statuses" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Statuses</SelectItem>
+                    <SelectItem value="all">All (excl. Cleared)</SelectItem>
                     <SelectItem value="Pending">Pending</SelectItem>
-                    <SelectItem value="Clear">Clear</SelectItem>
                     <SelectItem value="Temp">Temp</SelectItem>
+                    <SelectItem value="Clear">Clear</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
