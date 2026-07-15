@@ -55,7 +55,7 @@ router.patch(
       return;
     }
     const request = await loanRequestsRepo.updateLoanRequestStatus(
-      req.params.id,
+      String(req.params.id),
       parsed.data.status,
     );
     if (!request) {
@@ -70,7 +70,9 @@ router.delete(
   "/loan-requests/:id",
   requireStaff,
   async (req, res): Promise<void> => {
-    const request = await loanRequestsRepo.deleteLoanRequest(req.params.id);
+    const request = await loanRequestsRepo.deleteLoanRequest(
+      String(req.params.id),
+    );
     if (!request) {
       res.status(404).json({ error: "Loan request not found" });
       return;
