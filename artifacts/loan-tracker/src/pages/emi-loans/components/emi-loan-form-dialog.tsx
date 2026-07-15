@@ -67,6 +67,8 @@ export interface EmiLoan {
   remainingMonths: number | null;
   notes: string;
   borrowerId?: string | null;
+  /** Calendar days overdue (server-computed). 0 when on time or cleared. */
+  lateDays?: number;
 }
 
 const emiLoanSchema = z.object({

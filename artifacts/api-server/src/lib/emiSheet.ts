@@ -89,9 +89,13 @@ export interface EmiLoanRow {
   principalPerMonth: number | null;
   status: EmiLoanStatus;
   whatsapp: string;
+  /** Computed by the sheet's ARRAYFORMULA in column Q: daily interest accrual on overdue EMIs. */
   lateFees: number | null;
   remainingMonths: number | null;
   notes: string;
+  /** Server-computed: calendar days overdue (nextPaymentDate is in the past and status=Pending).
+   *  0 when on time or already cleared. */
+  lateDays: number;
 }
 
 export interface EmiLoanInput {
@@ -148,8 +152,33 @@ function makeEmiId(rowNumber: number): string {
   return `E-${String(seq).padStart(4, "0")}`;
 }
 
+/**
+ * Google Sheets serial date epoch offset — sheets counts days from 1899-12-30,
+ * Unix epoch is 1970-01-01, so today-as-serial = floor(Date.now()/86400000) + 25569.
+ */
+const SHEET_EPOCH_OFFSET = 25569;
+
+function todaySerial(): number {
+  return Math.floor(Date.now() / 86400000) + SHEET_EPOCH_OFFSET;
+}
+
 function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
   const get = (idx: number) => raw[idx];
+  const status = (toText(get(COL.STATUS)) || "Pending") as EmiLoanStatus;
+  const remainingMonths = toNumberOrNull(get(COL.REMAINING_MONTHS));
+  const nextPaySerial = get(COL.NEXT_PAYMENT_DATE);
+  const today = todaySerial();
+
+  // Overdue = Pending, has a next-payment date, has remaining months, and that date is in the past.
+  const lateDays =
+    status === "Pending" &&
+    typeof nextPaySerial === "number" &&
+    remainingMonths !== null &&
+    remainingMonths > 0 &&
+    nextPaySerial < today
+      ? Math.floor(today - nextPaySerial)
+      : 0;
+
   return {
     id: toText(get(COL.ID)),
     emiId: makeEmiId(rowNumber),
@@ -167,15 +196,65 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
     totalInterest: toNumberOrNull(get(COL.TOTAL_INTEREST)),
     discountPerMonth: toNumberOrNull(get(COL.DISCOUNT_PER_MONTH)) ?? 0,
     principalPerMonth: toNumberOrNull(get(COL.PRINCIPAL_PER_MONTH)),
-    status: (toText(get(COL.STATUS)) || "Pending") as EmiLoanStatus,
+    status,
     whatsapp: toText(get(COL.WHATSAPP)),
     lateFees: toNumberOrNull(get(COL.LATE_FEES)),
-    remainingMonths: toNumberOrNull(get(COL.REMAINING_MONTHS)),
+    remainingMonths,
     notes: toText(get(COL.NOTES)),
+    lateDays,
   };
 }
 
+/**
+ * Writes the late-fees ARRAYFORMULA to column Q of the EMI Heat Map tab.
+ *
+ * Formula: lateFees = overdueDays × (interestPerMonth / 30)
+ *   — only for Pending rows with a past nextPaymentDate and remaining months.
+ *
+ * Uses the same column positions the sheet already defines:
+ *   C = nextPaymentDate (serial), D = name, K = interestPerMonth,
+ *   O = status, R = remainingMonths, Q = lateFees (target).
+ */
+let lateFeesFormulaWritten = false;
+
+async function ensureEmiLateFeesFormula(): Promise<void> {
+  if (lateFeesFormulaWritten) return;
+  try {
+    const sheetId = getEmiSpreadsheetId();
+    const targetCell = `${TAB}!${colLetter(COL.LATE_FEES)}${DATA_START_ROW}`;
+    // Read current formula in the cell (FORMULA render mode) to skip if already set
+    const existing = await getRawValuesFromSheet(sheetId, targetCell, "FORMULA");
+    const currentFormula = toText(existing?.[0]?.[0]);
+    if (currentFormula.startsWith("=ARRAYFORMULA")) {
+      lateFeesFormulaWritten = true;
+      return;
+    }
+    // Write the ARRAYFORMULA. Conditions (all must be true for a non-zero result):
+    //   D6:D <> ""             → row has a borrower name
+    //   O6:O = "Pending"       → loan is not yet cleared
+    //   ISNUMBER(C6:C)         → nextPaymentDate is a real date serial
+    //   C6:C < TODAY()         → payment was due in the past (overdue)
+    //   ISNUMBER(R6:R)         → remainingMonths is computed
+    //   R6:R > 0               → loan not fully repaid
+    // Value: FLOOR(TODAY()-C) = integer overdue days, ×K/30 = daily interest accrual
+    const formula =
+      `=ARRAYFORMULA(IF(` +
+      `(D${DATA_START_ROW}:D<>"")*(O${DATA_START_ROW}:O="Pending")` +
+      `*(ISNUMBER(C${DATA_START_ROW}:C))*(C${DATA_START_ROW}:C<TODAY())` +
+      `*(ISNUMBER(R${DATA_START_ROW}:R))*(R${DATA_START_ROW}:R>0),` +
+      `FLOOR(TODAY()-C${DATA_START_ROW}:C)*IFERROR(K${DATA_START_ROW}:K,0)/30,` +
+      `0))`;
+    await batchUpdateCellsInSheet(sheetId, [{ range: targetCell, values: [[formula]] }]);
+    lateFeesFormulaWritten = true;
+  } catch (err) {
+    // Non-fatal: server still works, late fees just won't be in the sheet
+    console.warn("[emiSheet] Failed to write late-fees formula:", err);
+  }
+}
+
 export async function listEmiLoanRows(): Promise<EmiLoanRow[]> {
+  // Ensure the late-fees ARRAYFORMULA is in place (runs once per process, non-blocking).
+  ensureEmiLateFeesFormula().catch(() => {});
   const sheetId = getEmiSpreadsheetId();
   const raw = await getRawValuesFromSheet(sheetId, `${TAB}!A${DATA_START_ROW}:${LAST_COL}`);
   const rows: EmiLoanRow[] = [];

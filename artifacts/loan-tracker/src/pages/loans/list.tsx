@@ -4,6 +4,12 @@ import {
   getListLoansQueryKey,
   Loan,
 } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  EmiLoan,
+  EMI_LOANS_QUERY_KEY,
+  fetchEmiLoans,
+} from "@/pages/emi-loans/components/emi-loan-form-dialog";
 import { useState, useMemo, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Link } from "@/components/ui/link";
@@ -310,6 +316,134 @@ function LoansTable({
   );
 }
 
+// ─── EMI Section (for Overdue / Coming Up tabs) ───────────────────────────────
+
+function EmiSection({
+  emis,
+  kind,
+}: {
+  emis: EmiLoan[];
+  kind: "overdue" | "coming-up";
+}) {
+  const [, setLocation] = useLocation();
+  if (emis.length === 0) return null;
+  return (
+    <div className="mt-4">
+      <div className="flex items-center gap-2 mb-2 px-1">
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          EMI Loans
+        </span>
+        <span className="rounded-full bg-violet-100 text-violet-700 px-1.5 py-0.5 text-[10px] font-medium">
+          {emis.length}
+        </span>
+      </div>
+      <div className="overflow-x-auto rounded-md border border-violet-100">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-violet-50/50">
+              <TableHead>Borrower</TableHead>
+              <TableHead>Monthly</TableHead>
+              <TableHead>{kind === "overdue" ? "Overdue" : "Due In"}</TableHead>
+              {kind === "overdue" && <TableHead>Late Fees</TableHead>}
+              <TableHead className="w-[50px]"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {emis.map((e) => {
+              const daysLate = e.lateDays ?? 0;
+              const diffDays =
+                kind === "coming-up" && e.nextPaymentDate
+                  ? Math.ceil(
+                      (new Date(e.nextPaymentDate).getTime() - Date.now()) /
+                        86400000,
+                    )
+                  : null;
+              return (
+                <TableRow
+                  key={e.id}
+                  className="group cursor-pointer"
+                  onClick={() => setLocation(`/emi-loans/${e.id}`)}
+                >
+                  <TableCell className="font-medium">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate max-w-[90px] sm:max-w-none">
+                        {e.name}
+                      </span>
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] px-1 py-0 border-violet-200 text-violet-700 bg-violet-50 shrink-0"
+                      >
+                        EMI
+                      </Badge>
+                    </div>
+                    <div className="text-xs font-mono text-muted-foreground">
+                      {e.emiId}
+                    </div>
+                    {e.nextPaymentDate && (
+                      <div className="text-[10px] text-muted-foreground/70">
+                        {kind === "overdue"
+                          ? `Due ${formatDate(e.nextPaymentDate)}`
+                          : `Due ${formatDate(e.nextPaymentDate)}`}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="font-numeric">
+                    <div className="font-medium">
+                      {e.monthlyPayment != null
+                        ? formatCurrency(e.monthlyPayment)
+                        : "—"}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {formatCurrency(e.principal)} principal
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {kind === "overdue" ? (
+                      <span className="text-sm font-medium text-destructive">
+                        {daysLate}d late
+                      </span>
+                    ) : diffDays !== null ? (
+                      <span className="text-sm font-medium text-amber-700">
+                        {diffDays === 0 ? "Today" : `${diffDays}d`}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
+                  {kind === "overdue" && (
+                    <TableCell className="font-numeric">
+                      {e.lateFees != null && e.lateFees > 0 ? (
+                        <span className="text-sm font-medium text-destructive">
+                          {formatCurrency(e.lateFees)}
+                        </span>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                  )}
+                  <TableCell onClick={(ev) => ev.stopPropagation()}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      asChild
+                      className="opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Link href={`/emi-loans/${e.id}`}>
+                        <ChevronRight className="h-4 w-4" />
+                        <span className="sr-only">View Details</span>
+                      </Link>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main list ────────────────────────────────────────────────────────────────
 
 export default function LoansList() {
@@ -331,7 +465,41 @@ export default function LoansList() {
     query: { queryKey: getListLoansQueryKey() },
   });
 
+  // EMI loans — shown in overdue/coming-up tabs only, not in the Loans tab
+  const { data: emiLoans } = useQuery<EmiLoan[]>({
+    queryKey: EMI_LOANS_QUERY_KEY,
+    queryFn: fetchEmiLoans,
+  });
+
   const now = useMemo(() => new Date(), []);
+
+  // EMI sub-tab data (lateDays is server-computed; nextPaymentDate drives coming-up)
+  const overdueEmis = useMemo(
+    () =>
+      (emiLoans ?? [])
+        .filter((e) => e.status === "Pending" && (e.lateDays ?? 0) > 0)
+        .sort((a, b) => (b.lateDays ?? 0) - (a.lateDays ?? 0)),
+    [emiLoans],
+  );
+
+  const comingUpEmis = useMemo(
+    () =>
+      (emiLoans ?? [])
+        .filter((e) => {
+          if (e.status !== "Pending") return false;
+          if ((e.lateDays ?? 0) > 0) return false;
+          if (!e.nextPaymentDate) return false;
+          const due = new Date(e.nextPaymentDate);
+          const diffDays = (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+          return diffDays >= 0 && diffDays <= 30;
+        })
+        .sort((a, b) => {
+          const da = a.nextPaymentDate ? new Date(a.nextPaymentDate).getTime() : 0;
+          const db = b.nextPaymentDate ? new Date(b.nextPaymentDate).getTime() : 0;
+          return da - db;
+        }),
+    [emiLoans, now],
+  );
 
   // Sub-tab data
   const overdueLoans = useMemo(
@@ -659,18 +827,18 @@ export default function LoansList() {
             <TabsTrigger value="overdue" className="shrink-0 gap-1.5 text-xs sm:text-sm px-3">
               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
               Overdue
-              {overdueLoans.length > 0 && (
+              {(overdueLoans.length + overdueEmis.length) > 0 && (
                 <Badge variant="destructive" className="text-xs h-4 px-1">
-                  {overdueLoans.length}
+                  {overdueLoans.length + overdueEmis.length}
                 </Badge>
               )}
             </TabsTrigger>
             <TabsTrigger value="coming-up" className="shrink-0 gap-1.5 text-xs sm:text-sm px-3">
               <Clock className="h-3.5 w-3.5 shrink-0" />
               Coming Up
-              {comingUpLoans.length > 0 && (
+              {(comingUpLoans.length + comingUpEmis.length) > 0 && (
                 <span className="rounded-full bg-amber-100 text-amber-800 px-1.5 py-0.5 text-[10px] font-medium">
-                  {comingUpLoans.length}
+                  {comingUpLoans.length + comingUpEmis.length}
                 </span>
               )}
             </TabsTrigger>
@@ -689,15 +857,28 @@ export default function LoansList() {
         <TabsContent value="overdue" className="mt-4">
           <Card className="shadow-sm border-border/60">
             <CardContent className="pt-4">
-              <LoansTable
-                loans={overdueLoans}
-                isLoading={isLoading}
-                selected={selected}
-                onToggle={toggleRow}
-                onToggleAll={toggleAll}
-                emptyTitle="No overdue loans"
-                emptyDescription="Great — all loans are on schedule."
-              />
+              {overdueLoans.length === 0 && overdueEmis.length === 0 ? (
+                <EmptyState
+                  title="No overdue loans"
+                  description="Great — all loans and EMIs are on schedule."
+                  icon={<AlertCircle />}
+                />
+              ) : (
+                <>
+                  {overdueLoans.length > 0 && (
+                    <LoansTable
+                      loans={overdueLoans}
+                      isLoading={isLoading}
+                      selected={selected}
+                      onToggle={toggleRow}
+                      onToggleAll={toggleAll}
+                      emptyTitle="No overdue loans"
+                      emptyDescription="Great — all loans are on schedule."
+                    />
+                  )}
+                  <EmiSection emis={overdueEmis} kind="overdue" />
+                </>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -706,15 +887,28 @@ export default function LoansList() {
         <TabsContent value="coming-up" className="mt-4">
           <Card className="shadow-sm border-border/60">
             <CardContent className="pt-4">
-              <LoansTable
-                loans={comingUpLoans}
-                isLoading={isLoading}
-                selected={selected}
-                onToggle={toggleRow}
-                onToggleAll={toggleAll}
-                emptyTitle="Nothing due soon"
-                emptyDescription="No loans due in the next 30 days."
-              />
+              {comingUpLoans.length === 0 && comingUpEmis.length === 0 ? (
+                <EmptyState
+                  title="Nothing due soon"
+                  description="No loans or EMIs due in the next 30 days."
+                  icon={<Clock />}
+                />
+              ) : (
+                <>
+                  {comingUpLoans.length > 0 && (
+                    <LoansTable
+                      loans={comingUpLoans}
+                      isLoading={isLoading}
+                      selected={selected}
+                      onToggle={toggleRow}
+                      onToggleAll={toggleAll}
+                      emptyTitle="Nothing due soon"
+                      emptyDescription="No loans due in the next 30 days."
+                    />
+                  )}
+                  <EmiSection emis={comingUpEmis} kind="coming-up" />
+                </>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
