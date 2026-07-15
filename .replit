@@ -1,4 +1,4 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-20", "web", "bash"]
 
 [deployment]
 router = "application"
@@ -30,3 +30,6 @@ CLERK_SECRET_KEY = "sk_test_joqvviiHCiNu3dkZzXogWXKpNuIfQDXGAFvO6szoHv"
 CLERK_PUBLISHABLE_KEY = "pk_test_YXBwYXJlbnQtc2hyaW1wLTUxLmNsZXJrLmFjY291bnRzLmRldiQ"
 EMI_GOOGLE_SHEET_ID = "1NttmHIQB-_hzgpfQiOgFV0sHofc1v89qg9UUHZf65IY"
 ADMIN_PIN = "235798"
+
+[nix]
+channel = "stable-25_05"
