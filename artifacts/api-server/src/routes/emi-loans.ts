@@ -121,6 +121,40 @@ router.post("/emi-loans/:id/pay", requireStaff, async (req, res): Promise<void> 
   }
 });
 
+// POST /api/emi-loans/:id/pay-partial — record a daily or weekly partial payment (staff only)
+router.post("/emi-loans/:id/pay-partial", requireStaff, async (req, res): Promise<void> => {
+  const id = String(req.params.id);
+  const { date, amount, frequency } = req.body;
+  if (!date || amount == null || !["D", "W"].includes(frequency)) {
+    res.status(400).json({ error: "date, amount, and frequency ('D' or 'W') are required" });
+    return;
+  }
+  try {
+    const updated = await emiSheet.recordPartialEmiPayment(
+      id,
+      String(date),
+      Number(amount),
+      frequency as "D" | "W",
+    );
+    if (!updated) { res.status(404).json({ error: "EMI loan not found" }); return; }
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// POST /api/emi-loans/:id/undo — undo the last payment entry (staff only)
+router.post("/emi-loans/:id/undo", requireStaff, async (req, res): Promise<void> => {
+  const id = String(req.params.id);
+  try {
+    const updated = await emiSheet.undoLastEmiPayment(id);
+    if (!updated) { res.status(404).json({ error: "EMI loan not found" }); return; }
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // POST /api/emi-loans/:id/initialize — initialise server-managed tracking for legacy EMIs (staff only)
 router.post("/emi-loans/:id/initialize", requireStaff, async (req, res): Promise<void> => {
   const id = String(req.params.id);

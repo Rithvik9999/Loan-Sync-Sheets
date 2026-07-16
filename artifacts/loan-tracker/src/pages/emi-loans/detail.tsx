@@ -11,7 +11,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "@/components/ui/link";
-import { ArrowLeft, Edit, Trash2, Calendar, FileText, Loader2, CircleDollarSign } from "lucide-react";
+import {
+  ArrowLeft, Edit, Trash2, Calendar, FileText, Loader2,
+  CircleDollarSign, CalendarDays, CalendarRange, Undo2,
+} from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 
@@ -69,6 +72,51 @@ async function deleteEmiLoan(id: string): Promise<void> {
   }
 }
 
+// ─── paidDates entry parsing ──────────────────────────────────────────────────
+// Format: "YYYY-MM-DD:amount:type"
+//   type = "M"  monthly full payment
+//   type = "D"  daily partial
+//   type = "W"  weekly partial
+//   type = "DM" daily partial that completed the month
+//   type = "WM" weekly partial that completed the month
+//   (missing)   legacy — treat as "M"
+
+interface ParsedEntry {
+  raw: string;
+  index: number; // original position in paidDates array
+  date: string;
+  amount: number | null;
+  type: string;
+  completedMonth: boolean; // true when type contains "M"
+}
+
+function parsePaidEntry(entry: string, index: number): ParsedEntry {
+  const parts = entry.split(":");
+  const date = parts[0] ?? "";
+  const rawAmt = parts[1];
+  const type = parts[2] ?? "M";
+  const amount = rawAmt !== undefined && rawAmt !== "" ? parseFloat(rawAmt) : null;
+  return {
+    raw: entry,
+    index,
+    date,
+    amount: amount === null || isNaN(amount) ? null : amount,
+    type,
+    completedMonth: type === "M" || type === "DM" || type === "WM",
+  };
+}
+
+function entryTypeLabel(type: string): { label: string; color: string } {
+  switch (type) {
+    case "M":  return { label: "Monthly",       color: "text-emerald-700" };
+    case "D":  return { label: "Daily",          color: "text-sky-700"    };
+    case "W":  return { label: "Weekly",         color: "text-violet-700" };
+    case "DM": return { label: "Daily ✓ Month",  color: "text-emerald-700" };
+    case "WM": return { label: "Weekly ✓ Month", color: "text-emerald-700" };
+    default:   return { label: "Payment",        color: "text-emerald-700" };
+  }
+}
+
 /** Dialog to record a monthly EMI payment with editable amount. */
 function RecordEmiPaymentDialog({
   open,
@@ -94,7 +142,6 @@ function RecordEmiPaymentDialog({
     setIsPending(true);
     try {
       if (markClear) {
-        // Mark as Clear directly via PATCH
         const res = await fetch(`/api/emi-loans/${loan.id}`, {
           method: "PATCH",
           credentials: "include",
@@ -103,7 +150,6 @@ function RecordEmiPaymentDialog({
         });
         if (!res.ok) throw new Error((await res.json()).error || "Failed to update status");
       } else {
-        // Record one monthly payment
         const res = await fetch(`/api/emi-loans/${loan.id}/pay`, {
           method: "POST",
           credentials: "include",
@@ -136,9 +182,9 @@ function RecordEmiPaymentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Record EMI Payment</DialogTitle>
+          <DialogTitle>Record Monthly Payment</DialogTitle>
           <DialogDescription>
-            Record a monthly payment for <strong>{loan.name}</strong>. Adjust the amount if the borrower paid a different figure.
+            Record a monthly payment for <strong>{loan.name}</strong>. Decrements remaining months by 1.
           </DialogDescription>
         </DialogHeader>
 
@@ -211,6 +257,9 @@ export default function EmiLoanDetail() {
   const [isDeleteStep1Open, setIsDeleteStep1Open] = useState(false);
   const [isDeleteStep2Open, setIsDeleteStep2Open] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [undoPending, setUndoPending] = useState(false);
+  const [dailyPending, setDailyPending] = useState(false);
+  const [weeklyPending, setWeeklyPending] = useState(false);
 
   const { data: loan, isLoading } = useQuery<EmiLoan>({
     queryKey: emiLoanQueryKey(id),
@@ -219,6 +268,93 @@ export default function EmiLoanDetail() {
   });
 
   const isStaff = role === "staff";
+
+  const refreshLoan = () => {
+    queryClient.invalidateQueries({ queryKey: emiLoanQueryKey(id) });
+    queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
+  };
+
+  /** One-click: record today's daily instalment (monthlyPayment / 30) */
+  const handleDailyPayment = async () => {
+    if (!loan || !loan.monthlyPayment) return;
+    const amount = Math.round(loan.monthlyPayment / 30);
+    const date = format(new Date(), "yyyy-MM-dd");
+    setDailyPending(true);
+    try {
+      const res = await fetch(`/api/emi-loans/${loan.id}/pay-partial`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, amount, frequency: "D" }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed");
+      const updated: EmiLoan = await res.json();
+      refreshLoan();
+      // Check if it auto-completed a month
+      const lastEntry = updated.paidDates?.at(-1) ?? "";
+      const completed = lastEntry.endsWith(":DM");
+      toast({
+        title: completed ? "Daily payment — Month completed! 🎉" : "Daily payment recorded",
+        description: completed
+          ? `₹${amount.toLocaleString("en-IN")} received. Accumulated total met the monthly target — remaining months decremented.`
+          : `₹${amount.toLocaleString("en-IN")} recorded for ${date}.`,
+      });
+    } catch (err) {
+      toast({ variant: "destructive", title: "Error", description: err instanceof Error ? err.message : "Something went wrong." });
+    } finally {
+      setDailyPending(false);
+    }
+  };
+
+  /** One-click: record today's weekly instalment (monthlyPayment × 7 / 30) */
+  const handleWeeklyPayment = async () => {
+    if (!loan || !loan.monthlyPayment) return;
+    const amount = Math.round((loan.monthlyPayment * 7) / 30);
+    const date = format(new Date(), "yyyy-MM-dd");
+    setWeeklyPending(true);
+    try {
+      const res = await fetch(`/api/emi-loans/${loan.id}/pay-partial`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, amount, frequency: "W" }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed");
+      const updated: EmiLoan = await res.json();
+      refreshLoan();
+      const lastEntry = updated.paidDates?.at(-1) ?? "";
+      const completed = lastEntry.endsWith(":WM");
+      toast({
+        title: completed ? "Weekly payment — Month completed! 🎉" : "Weekly payment recorded",
+        description: completed
+          ? `₹${amount.toLocaleString("en-IN")} received. Accumulated total met the monthly target — remaining months decremented.`
+          : `₹${amount.toLocaleString("en-IN")} recorded for ${date}.`,
+      });
+    } catch (err) {
+      toast({ variant: "destructive", title: "Error", description: err instanceof Error ? err.message : "Something went wrong." });
+    } finally {
+      setWeeklyPending(false);
+    }
+  };
+
+  /** Undo the last paidDates entry (reverses month decrement if the entry was a monthly/DM/WM type) */
+  const handleUndo = async () => {
+    if (!loan) return;
+    setUndoPending(true);
+    try {
+      const res = await fetch(`/api/emi-loans/${loan.id}/undo`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed");
+      refreshLoan();
+      toast({ title: "Last payment undone", description: "The entry has been removed and remaining months restored if applicable." });
+    } catch (err) {
+      toast({ variant: "destructive", title: "Error", description: err instanceof Error ? err.message : "Something went wrong." });
+    } finally {
+      setUndoPending(false);
+    }
+  };
 
   const handleDelete = async () => {
     if (!loan) return;
@@ -255,6 +391,10 @@ export default function EmiLoanDetail() {
       ? Math.round(loan.lateFees / (loan.lateDays ?? 1))
       : null;
 
+  // Computed quick-pay amounts
+  const dailyAmount = loan.monthlyPayment != null ? Math.round(loan.monthlyPayment / 30) : null;
+  const weeklyAmount = loan.monthlyPayment != null ? Math.round((loan.monthlyPayment * 7) / 30) : null;
+
   const stats: { label: string; value: string; highlight?: boolean }[] = [
     { label: "EMI ID", value: loan.emiId ?? "—" },
     { label: "Principal", value: formatCurrency(loan.principal) },
@@ -282,19 +422,32 @@ export default function EmiLoanDetail() {
     { label: "Remaining Months", value: loan.remainingMonths != null ? String(loan.remainingMonths) : "—" },
   ];
 
-  // Parse paidDates: entries are "YYYY-MM-DD:amount" or "YYYY-MM-DD"
-  const paymentHistory = (loan.paidDates ?? [])
-    .map((entry, i) => {
-      const colonIdx = entry.indexOf(":");
-      const date = colonIdx !== -1 ? entry.slice(0, colonIdx) : entry;
-      const amount = colonIdx !== -1 ? Number(entry.slice(colonIdx + 1)) : null;
-      return { index: i, date, amount };
-    })
+  // Parse paidDates (new 3-part format: "YYYY-MM-DD:amount:type")
+  const paymentHistory: ParsedEntry[] = (loan.paidDates ?? [])
+    .map((entry, i) => parsePaidEntry(entry, i))
     .reverse(); // newest first
+
+  // Compute cycle accumulated (D/W entries since last M/DM/WM)
+  const parsedAll = (loan.paidDates ?? []).map((e, i) => parsePaidEntry(e, i));
+  let cycleAccumulated = 0;
+  if (loan.status !== "Clear" && loan.monthlyPayment) {
+    let cycleStartIdx = -1;
+    for (let i = parsedAll.length - 1; i >= 0; i--) {
+      if (parsedAll[i].completedMonth) { cycleStartIdx = i; break; }
+    }
+    cycleAccumulated = parsedAll.slice(cycleStartIdx + 1).reduce((sum, e) => {
+      if (e.type === "D" || e.type === "W") return sum + (e.amount ?? 0);
+      return sum;
+    }, 0);
+  }
+  const monthlyTarget = loan.monthlyPayment ?? 0;
+  const cycleProgress = monthlyTarget > 0 ? Math.min((cycleAccumulated / monthlyTarget) * 100, 100) : 0;
+
+  const hasPayments = paymentHistory.length > 0;
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-2">
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" asChild className="shrink-0">
             <Link href={isStaff ? "/emi-loans" : "/portal"}>
@@ -311,27 +464,73 @@ export default function EmiLoanDetail() {
           </div>
         </div>
 
-        <div className="flex gap-2 flex-wrap">
-          {isStaff && loan.status !== "Clear" && (
-            <Button
-              variant="outline"
-              className="border-emerald-600 text-emerald-700 hover:bg-emerald-50"
-              onClick={() => setIsPayOpen(true)}
-            >
-              <CircleDollarSign className="h-4 w-4 mr-2" /> Record Payment
-            </Button>
-          )}
-          {isStaff && (
-            <>
+        {isStaff && (
+          <div className="flex flex-col gap-2">
+            {/* Quick payment buttons (daily / weekly) */}
+            {loan.status !== "Clear" && loan.monthlyPayment != null && (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-sky-500 text-sky-700 hover:bg-sky-50 gap-1.5"
+                  onClick={handleDailyPayment}
+                  disabled={dailyPending}
+                  title={`Record daily instalment (₹${dailyAmount?.toLocaleString("en-IN")} = monthly ÷ 30)`}
+                >
+                  {dailyPending
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : <CalendarDays className="h-3.5 w-3.5" />}
+                  Daily {dailyAmount != null && <span className="font-numeric font-semibold">₹{dailyAmount.toLocaleString("en-IN")}</span>}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-violet-500 text-violet-700 hover:bg-violet-50 gap-1.5"
+                  onClick={handleWeeklyPayment}
+                  disabled={weeklyPending}
+                  title={`Record weekly instalment (₹${weeklyAmount?.toLocaleString("en-IN")} = monthly × 7 ÷ 30)`}
+                >
+                  {weeklyPending
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : <CalendarRange className="h-3.5 w-3.5" />}
+                  Weekly {weeklyAmount != null && <span className="font-numeric font-semibold">₹{weeklyAmount.toLocaleString("en-IN")}</span>}
+                </Button>
+              </div>
+            )}
+
+            {/* Main action buttons */}
+            <div className="flex flex-wrap gap-2">
+              {loan.status !== "Clear" && (
+                <Button
+                  variant="outline"
+                  className="border-emerald-600 text-emerald-700 hover:bg-emerald-50"
+                  onClick={() => setIsPayOpen(true)}
+                >
+                  <CircleDollarSign className="h-4 w-4 mr-2" /> Monthly Payment
+                </Button>
+              )}
+              {hasPayments && (
+                <Button
+                  variant="outline"
+                  className="border-orange-400 text-orange-700 hover:bg-orange-50"
+                  onClick={handleUndo}
+                  disabled={undoPending}
+                >
+                  {undoPending
+                    ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    : <Undo2 className="h-4 w-4 mr-2" />}
+                  Undo Last
+                </Button>
+              )}
               <Button variant="outline" onClick={() => setIsEditOpen(true)}>
                 <Edit className="h-4 w-4 mr-2" /> Edit
               </Button>
               <Button variant="destructive" onClick={() => setIsDeleteStep1Open(true)}>
                 <Trash2 className="h-4 w-4 mr-2" /> Delete
               </Button>
-            </>
-          )}
-        </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid md:grid-cols-3 gap-6">
@@ -390,6 +589,34 @@ export default function EmiLoanDetail() {
                 {loan.monthlyPayment != null ? formatCurrency(loan.monthlyPayment) : "—"}
               </p>
             </div>
+
+            {dailyAmount != null && (
+              <div className="space-y-1 pt-4 border-t border-primary/10">
+                <p className="text-xs text-muted-foreground">Daily / Weekly equivalent</p>
+                <p className="text-sm font-semibold font-numeric text-sky-700">
+                  ₹{dailyAmount.toLocaleString("en-IN")}/day &nbsp;·&nbsp; ₹{weeklyAmount?.toLocaleString("en-IN")}/week
+                </p>
+              </div>
+            )}
+
+            {/* Current cycle progress bar */}
+            {loan.status !== "Clear" && cycleAccumulated > 0 && monthlyTarget > 0 && (
+              <div className="space-y-1.5 pt-4 border-t border-primary/10">
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>This month's collected</span>
+                  <span className="font-numeric font-semibold text-foreground">
+                    ₹{Math.round(cycleAccumulated).toLocaleString("en-IN")} / ₹{Math.round(monthlyTarget).toLocaleString("en-IN")}
+                  </span>
+                </div>
+                <div className="h-2 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-sky-500 transition-all"
+                    style={{ width: `${cycleProgress}%` }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">{Math.round(cycleProgress)}% of monthly target collected</p>
+              </div>
+            )}
 
             <div className="space-y-1 pt-4 border-t border-primary/10">
               <p className="text-sm font-medium text-muted-foreground">Discount / Month</p>
@@ -450,32 +677,60 @@ export default function EmiLoanDetail() {
       </Card>
 
       {/* Payment History */}
-      {paymentHistory.length > 0 && (
+      {hasPayments && (
         <Card className="shadow-sm border-border/60">
-          <CardHeader>
-            <CardTitle>Payment History</CardTitle>
-            <CardDescription>Monthly payments recorded on this EMI loan (newest first).</CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle>Payment History</CardTitle>
+              <CardDescription>All payments recorded on this EMI loan (newest first).</CardDescription>
+            </div>
+            {isStaff && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-orange-400 text-orange-700 hover:bg-orange-50 shrink-0"
+                onClick={handleUndo}
+                disabled={undoPending}
+              >
+                {undoPending
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                  : <Undo2 className="h-3.5 w-3.5 mr-1.5" />}
+                Undo Last
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {paymentHistory.map((entry) => (
-                <div
-                  key={entry.index}
-                  className="flex items-center justify-between rounded-lg border bg-muted/20 px-4 py-3"
-                >
-                  <div>
-                    <p className="text-sm font-medium">{entry.date ? formatDate(entry.date) : "—"}</p>
-                    <p className="text-xs text-muted-foreground">
-                      Payment #{paymentHistory.length - entry.index}
-                    </p>
+              {paymentHistory.map((entry, pos) => {
+                const { label, color } = entryTypeLabel(entry.type);
+                const isLatest = pos === 0;
+                return (
+                  <div
+                    key={entry.index}
+                    className={`flex items-center justify-between rounded-lg border px-4 py-3 ${
+                      isLatest ? "border-orange-200 bg-orange-50/40" : "bg-muted/20"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium">{entry.date ? formatDate(entry.date) : "—"}</p>
+                        <span className={`text-xs font-semibold ${color}`}>{label}</span>
+                        {isLatest && isStaff && (
+                          <span className="text-[10px] text-orange-600 border border-orange-300 rounded px-1">latest</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Entry #{(loan.paidDates ?? []).length - entry.index}
+                      </p>
+                    </div>
+                    <div className="font-bold font-numeric text-emerald-700">
+                      {entry.amount != null && entry.amount > 0
+                        ? formatCurrency(entry.amount)
+                        : <span className="text-muted-foreground text-sm">—</span>}
+                    </div>
                   </div>
-                  <div className="font-bold font-numeric text-emerald-700">
-                    {entry.amount != null && entry.amount > 0
-                      ? formatCurrency(entry.amount)
-                      : <span className="text-muted-foreground text-sm">—</span>}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>

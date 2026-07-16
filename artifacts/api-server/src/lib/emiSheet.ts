@@ -442,14 +442,76 @@ export async function updateEmiLoanRow(
   return getEmiLoanRowAtRowNumber(existing.rowNumber);
 }
 
+// ─── paidDates entry format ────────────────────────────────────────────────────
+// Each entry: "YYYY-MM-DD:amount:type"
+//   type = "M"  → monthly full payment (decrements remainingMonths)
+//   type = "D"  → daily partial (no decrement)
+//   type = "W"  → weekly partial (no decrement)
+//   type = "DM" → daily partial that completed the month (decrements)
+//   type = "WM" → weekly partial that completed the month (decrements)
+//   (no type / legacy) → treated as "M" for backward compat
+//
+// Undo rule: if type contains "M" (i.e. "M", "DM", "WM") → also restore +1 month.
+
+function parsePaidEntry(entry: string): { date: string; amount: number | null; type: string } {
+  const parts = entry.split(":");
+  const date = parts[0] ?? "";
+  const rawAmt = parts[1];
+  const type = parts[2] ?? "M"; // legacy entries default to monthly
+  const amount = rawAmt !== undefined && rawAmt !== "" ? parseFloat(rawAmt) : null;
+  return { date, amount: amount === null || isNaN(amount) ? null : amount, type };
+}
+
+function buildStatusNotes(
+  transactionDate: string | null,
+  tenureMonths: number,
+  newRemaining: number,
+  monthlyPayment: number | null,
+  fallback: string,
+): string {
+  if (newRemaining <= 0) return "Clear";
+  const nextDue = computeNextDueDate(transactionDate, tenureMonths, newRemaining);
+  if (!nextDue) return fallback;
+  const amtLabel = monthlyPayment != null
+    ? ` ₹${Math.round(monthlyPayment).toLocaleString("en-IN")}`
+    : "";
+  return `Next ${new Date(nextDue + "T00:00:00Z").toLocaleDateString("en-IN", {
+    day: "numeric", month: "short",
+  })}${amtLabel}`;
+}
+
+function appendEmiMonth(
+  rowNumber: number,
+  existing: EmiLoanRow,
+  newRemaining: number,
+  newStatus: EmiLoanStatus,
+  paidDateStr: string,
+  amountOrNull: number | null,
+  entryType: string,
+): { range: string; values: (string | number)[][] }[] {
+  const statusNotesText = buildStatusNotes(
+    existing.transactionDate, existing.tenureMonths, newRemaining,
+    existing.monthlyPayment, existing.statusNotes,
+  );
+  const entry = amountOrNull != null
+    ? `${paidDateStr}:${amountOrNull}:${entryType}`
+    : `${paidDateStr}::${entryType}`;
+  const prev = existing.paidDates.join("|");
+  return [
+    { range: `${TAB}!${colLetter(COL.REMAINING_MONTHS)}${rowNumber}`, values: [[newRemaining]] },
+    { range: `${TAB}!${colLetter(COL.STATUS)}${rowNumber}`, values: [[newStatus]] },
+    { range: `${TAB}!${colLetter(COL.STATUS_NOTES)}${rowNumber}`, values: [[statusNotesText]] },
+    { range: `${TAB}!${colLetter(COL.PAID_DATES)}${rowNumber}`, values: [[prev ? `${prev}|${entry}` : entry]] },
+  ];
+}
+
 /**
  * Marks one monthly EMI payment as paid.
  *
  * Flow:
  *  1. Decrements remainingMonths by 1 (falls back to tenureMonths if never initialised).
  *  2. If remainingMonths reaches 0 → status = "Clear" (loan fully repaid).
- *  3. Advances nextPaymentDate by one calendar month (only when months remain).
- *  4. Appends "YYYY-MM-DD:amount" (or "YYYY-MM-DD") to the paidDates history column.
+ *  3. Appends "YYYY-MM-DD:amount:M" to the paidDates history column.
  */
 export async function markEmiMonthlyPayment(
   id: string,
@@ -462,47 +524,121 @@ export async function markEmiMonthlyPayment(
 
   const sheetId = getEmiSpreadsheetId();
   const rowNumber = existing.rowNumber;
-
   const currentRemaining = existing.remainingMonths ?? existing.tenureMonths;
   const newRemaining = Math.max(currentRemaining - 1, 0);
   const newStatus: EmiLoanStatus = newRemaining <= 0 ? "Clear" : "Pending";
 
+  const updates = appendEmiMonth(rowNumber, existing, newRemaining, newStatus,
+    paidDate, paidAmount ?? null, "M");
+  await batchUpdateCellsInSheet(sheetId, updates);
+  return getEmiLoanRowAtRowNumber(rowNumber);
+}
+
+/**
+ * Records a partial daily ("D") or weekly ("W") payment.
+ *
+ * - Appends the entry to paidDates.
+ * - Sums all D/W partial entries since the last M/DM/WM marker.
+ * - If accumulated total ≥ monthlyPayment → auto-decrements remainingMonths
+ *   and tags the entry as "DM" or "WM" instead of "D"/"W".
+ */
+export async function recordPartialEmiPayment(
+  id: string,
+  date: string,
+  amount: number,
+  frequency: "D" | "W",
+): Promise<EmiLoanRow | null> {
+  const existing = await getEmiLoanRow(id);
+  if (!existing) return null;
+  if (existing.status === "Clear") return existing;
+
+  const sheetId = getEmiSpreadsheetId();
+  const rowNumber = existing.rowNumber;
+
+  // Find cycle start date: date of last M / DM / WM entry (or transactionDate)
+  let cycleStartDate = existing.transactionDate ?? "1970-01-01";
+  for (let i = existing.paidDates.length - 1; i >= 0; i--) {
+    const { date: d, type } = parsePaidEntry(existing.paidDates[i]);
+    if (type === "M" || type === "DM" || type === "WM") {
+      cycleStartDate = d;
+      break;
+    }
+  }
+
+  // Accumulate partial payments in current cycle (D/W entries after cycle start)
+  const accumulated = existing.paidDates.reduce((sum, e) => {
+    const { date: d, amount: a, type } = parsePaidEntry(e);
+    if ((type === "D" || type === "W") && d > cycleStartDate) {
+      return sum + (a ?? 0);
+    }
+    return sum;
+  }, 0);
+
+  const newAccumulated = accumulated + amount;
+  const monthlyTarget = existing.monthlyPayment ?? 0;
+  const currentRemaining = existing.remainingMonths ?? existing.tenureMonths;
+
+  let updates: { range: string; values: (string | number)[][] }[];
+
+  if (monthlyTarget > 0 && newAccumulated >= monthlyTarget) {
+    // This partial payment completes the month — auto-decrement
+    const newRemaining = Math.max(currentRemaining - 1, 0);
+    const newStatus: EmiLoanStatus = newRemaining <= 0 ? "Clear" : "Pending";
+    const entryType: string = frequency === "D" ? "DM" : "WM";
+    updates = appendEmiMonth(rowNumber, existing, newRemaining, newStatus, date, amount, entryType);
+  } else {
+    // Plain partial — just append, no month change
+    const entry = `${date}:${amount}:${frequency}`;
+    const prev = existing.paidDates.join("|");
+    updates = [
+      { range: `${TAB}!${colLetter(COL.PAID_DATES)}${rowNumber}`, values: [[prev ? `${prev}|${entry}` : entry]] },
+    ];
+  }
+
+  await batchUpdateCellsInSheet(sheetId, updates);
+  return getEmiLoanRowAtRowNumber(rowNumber);
+}
+
+/**
+ * Undoes the last paidDates entry.
+ *
+ * - If the entry type is "M", "DM", or "WM" (a month was decremented): restores +1 month and
+ *   sets status back to "Pending".
+ * - If the entry type is "D" or "W" (a plain partial): just removes it, no month change.
+ * - If the loan is currently Clear and we're undoing a month marker: sets status back to Pending.
+ */
+export async function undoLastEmiPayment(id: string): Promise<EmiLoanRow | null> {
+  const existing = await getEmiLoanRow(id);
+  if (!existing) return null;
+  if (existing.paidDates.length === 0) return existing;
+
+  const sheetId = getEmiSpreadsheetId();
+  const rowNumber = existing.rowNumber;
+
+  const lastEntry = existing.paidDates[existing.paidDates.length - 1];
+  const { type: lastType } = parsePaidEntry(lastEntry);
+
+  const remaining = existing.paidDates.slice(0, -1);
+  const newPaidDates = remaining.join("|");
+
   const updates: { range: string; values: (string | number)[][] }[] = [
-    { range: `${TAB}!${colLetter(COL.REMAINING_MONTHS)}${rowNumber}`, values: [[newRemaining]] },
-    { range: `${TAB}!${colLetter(COL.STATUS)}${rowNumber}`, values: [[newStatus]] },
+    { range: `${TAB}!${colLetter(COL.PAID_DATES)}${rowNumber}`, values: [[newPaidDates]] },
   ];
 
-  // Column C (NEXT_PAYMENT_DATE) is managed by the sheet's ARRAYFORMULA — do NOT write to it.
-  // Instead, compute the next due date server-side and write a human-readable note to column B.
-  const nextDueForNotes = computeNextDueDate(
-    existing.transactionDate,
-    existing.tenureMonths,
-    newRemaining,
-  );
-  const amountLabel = existing.monthlyPayment != null
-    ? ` ₹${Math.round(existing.monthlyPayment).toLocaleString("en-IN")}`
-    : "";
-  const statusNotesText = newRemaining <= 0
-    ? "Clear"
-    : nextDueForNotes
-      ? `Next ${new Date(nextDueForNotes + "T00:00:00Z").toLocaleDateString("en-IN", {
-          day: "numeric",
-          month: "short",
-        })}${amountLabel}`
-      : existing.statusNotes || "";
-
-  updates.push({
-    range: `${TAB}!${colLetter(COL.STATUS_NOTES)}${rowNumber}`,
-    values: [[statusNotesText]],
-  });
-
-  // Append to paidDates history (column T) for audit trail
-  const entry = paidAmount != null ? `${paidDate}:${paidAmount}` : paidDate;
-  const prev = existing.paidDates.join("|");
-  updates.push({
-    range: `${TAB}!${colLetter(COL.PAID_DATES)}${rowNumber}`,
-    values: [[prev ? `${prev}|${entry}` : entry]],
-  });
+  // Any type containing "M" means a month was consumed — restore it
+  if (lastType === "M" || lastType === "DM" || lastType === "WM") {
+    const currentRemaining = existing.remainingMonths ?? 0;
+    const newRemaining = Math.min(currentRemaining + 1, existing.tenureMonths);
+    const statusNotesText = buildStatusNotes(
+      existing.transactionDate, existing.tenureMonths, newRemaining,
+      existing.monthlyPayment, existing.statusNotes,
+    );
+    updates.push(
+      { range: `${TAB}!${colLetter(COL.REMAINING_MONTHS)}${rowNumber}`, values: [[newRemaining]] },
+      { range: `${TAB}!${colLetter(COL.STATUS)}${rowNumber}`, values: [["Pending"]] },
+      { range: `${TAB}!${colLetter(COL.STATUS_NOTES)}${rowNumber}`, values: [[statusNotesText]] },
+    );
+  }
 
   await batchUpdateCellsInSheet(sheetId, updates);
   return getEmiLoanRowAtRowNumber(rowNumber);
