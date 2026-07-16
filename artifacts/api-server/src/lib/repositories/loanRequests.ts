@@ -46,7 +46,13 @@ export interface LoanRequestInput {
   upiId?: string | null;
 }
 
+const VALID_LOAN_REQUEST_STATUSES: LoanRequestStatus[] = ["Pending", "Approved", "Rejected"];
+
 function fromRow(row: Record<string, string>): LoanRequest {
+  const rawStatus = row.status ?? "";
+  const status: LoanRequestStatus = VALID_LOAN_REQUEST_STATUSES.includes(rawStatus as LoanRequestStatus)
+    ? (rawStatus as LoanRequestStatus)
+    : "Pending";
   return {
     id: row.id,
     name: row.name,
@@ -58,7 +64,7 @@ function fromRow(row: Record<string, string>): LoanRequest {
     type: (row.type as "Loan" | "EMI") || "Loan",
     purpose: row.purpose || null,
     upiId: row.upiId || null,
-    status: (row.status as LoanRequestStatus) || "Pending",
+    status,
     createdAt: row.createdAt,
   };
 }

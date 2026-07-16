@@ -477,7 +477,9 @@ export default function LoansList() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkPaidOpen, setBulkPaidOpen] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
-  const [activeTab, setActiveTab] = useState("loans");
+  // Default to "coming-up"; switch to "overdue" once data confirms overdue items exist.
+  const [activeTab, setActiveTab] = useState("coming-up");
+  const [tabAutoSet, setTabAutoSet] = useState(false);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -554,6 +556,13 @@ export default function LoansList() {
         }),
     [allLoans, now],
   );
+
+  // Auto-select "overdue" tab on first load if there are overdue items; otherwise "coming-up".
+  useEffect(() => {
+    if (tabAutoSet || allLoans === undefined) return;
+    setActiveTab(overdueLoans.length > 0 || overdueEmis.length > 0 ? "overdue" : "coming-up");
+    setTabAutoSet(true);
+  }, [tabAutoSet, allLoans, overdueLoans.length, overdueEmis.length]);
 
   const archivedLoans = useMemo(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
