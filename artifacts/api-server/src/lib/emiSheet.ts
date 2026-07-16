@@ -27,8 +27,9 @@
  *  O(14) status              — input ("Pending" | "Clear")
  *  P(15) whatsapp            — input
  *  Q(16) lateFees            — COMPUTED
- *  R(17) remainingMonths     — COMPUTED
+ *  R(17) remainingMonths     — server-managed input (decremented each month)
  *  S(18) notes               — input
+ *  T(19) paidDates           — pipe-separated "YYYY-MM-DD:amount" payment history (server-managed)
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -41,7 +42,7 @@ import {
 
 const TAB = "Heat Map";
 const DATA_START_ROW = 6; // Row 6 is the first real data row (also has array formulas)
-const LAST_COL = "S";     // Column S = index 18
+const LAST_COL = "T";     // Column T = index 19
 
 const COL = {
   ID: 0,
@@ -63,6 +64,7 @@ const COL = {
   LATE_FEES: 16,
   REMAINING_MONTHS: 17,
   NOTES: 18,
+  PAID_DATES: 19,
 } as const;
 
 export type EmiLoanStatus = "Pending" | "Clear";
@@ -96,6 +98,8 @@ export interface EmiLoanRow {
   /** Server-computed: calendar days overdue (nextPaymentDate is in the past and status=Pending).
    *  0 when on time or already cleared. */
   lateDays: number;
+  /** Pipe-separated payment history entries: "YYYY-MM-DD:amount" or "YYYY-MM-DD". */
+  paidDates: string[];
 }
 
 export interface EmiLoanInput {
@@ -108,6 +112,8 @@ export interface EmiLoanInput {
   status?: EmiLoanStatus;
   statusNotes?: string | null;
   notes?: string | null;
+  /** Override initial nextPaymentDate (defaults to transactionDate + 1 month). */
+  nextPaymentDate?: string | null;
 }
 
 export interface EmiLoanUpdate {
@@ -120,6 +126,10 @@ export interface EmiLoanUpdate {
   status?: EmiLoanStatus;
   statusNotes?: string | null;
   notes?: string | null;
+  /** Server-managed: ISO date of next monthly payment due. Written as Sheets serial. */
+  nextPaymentDate?: string | null;
+  /** Server-managed: how many months remain in the EMI tenure. */
+  remainingMonths?: number | null;
 }
 
 function colLetter(idx: number): string {
@@ -162,6 +172,20 @@ function todaySerial(): number {
   return Math.floor(Date.now() / 86400000) + SHEET_EPOCH_OFFSET;
 }
 
+/** Converts an ISO date string "YYYY-MM-DD" to a Google Sheets serial number. */
+function isoToSerial(dateStr: string): number {
+  return Math.floor(new Date(dateStr + "T00:00:00Z").getTime() / 86400000) + SHEET_EPOCH_OFFSET;
+}
+
+/** Advances an ISO date by exactly one calendar month, clamping to month-end on overflow (e.g. Jan 31 → Feb 28/29). */
+function advanceOneMonth(isoDate: string): string {
+  const d = new Date(isoDate + "T00:00:00Z");
+  const origDay = d.getUTCDate();
+  d.setUTCMonth(d.getUTCMonth() + 1);
+  if (d.getUTCDate() < origDay) d.setUTCDate(0); // clamp to last day of intended month
+  return d.toISOString().slice(0, 10);
+}
+
 function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
   const get = (idx: number) => raw[idx];
   const status = (toText(get(COL.STATUS)) || "Pending") as EmiLoanStatus;
@@ -202,6 +226,10 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
     remainingMonths,
     notes: toText(get(COL.NOTES)),
     lateDays,
+    paidDates: toText(get(COL.PAID_DATES))
+      .split("|")
+      .map((s) => s.trim())
+      .filter(Boolean),
   };
 }
 
@@ -334,6 +362,16 @@ function emiInputCellUpdates(
   set(COL.STATUS, input.status);
   set(COL.WHATSAPP, input.whatsapp ?? undefined);
   set(COL.NOTES, input.notes ?? undefined);
+
+  // Server-managed tracking columns
+  if (input.nextPaymentDate !== undefined) {
+    const serial = input.nextPaymentDate ? isoToSerial(input.nextPaymentDate) : "";
+    updates.push({ range: `${TAB}!${colLetter(COL.NEXT_PAYMENT_DATE)}${rowNumber}`, values: [[serial]] });
+  }
+  if (input.remainingMonths !== undefined) {
+    updates.push({ range: `${TAB}!${colLetter(COL.REMAINING_MONTHS)}${rowNumber}`, values: [[input.remainingMonths ?? ""]] });
+  }
+
   return updates;
 }
 
@@ -346,6 +384,13 @@ export async function createEmiLoanRow(input: EmiLoanInput): Promise<EmiLoanRow>
     { range: `${TAB}!${colLetter(COL.ID)}${rowNumber}`, values: [[id]] },
     ...emiInputCellUpdates(rowNumber, { ...input, status: input.status ?? "Pending" }),
   ];
+  // Write initial server-managed tracking columns (nextPaymentDate = transactionDate + 1 month; remainingMonths = tenureMonths)
+  const initialNextDate = input.nextPaymentDate ?? advanceOneMonth(input.transactionDate);
+  updates.push(
+    { range: `${TAB}!${colLetter(COL.NEXT_PAYMENT_DATE)}${rowNumber}`, values: [[isoToSerial(initialNextDate)]] },
+    { range: `${TAB}!${colLetter(COL.REMAINING_MONTHS)}${rowNumber}`, values: [[Number(input.tenureMonths)]] },
+  );
+
   await batchUpdateCellsInSheet(sheetId, updates);
   // Give sheets a moment to compute array-formula spill
   await new Promise((r) => setTimeout(r, 1000));
@@ -362,6 +407,94 @@ export async function updateEmiLoanRow(
   if (!existing) return null;
   const sheetId = getEmiSpreadsheetId();
   const updates = emiInputCellUpdates(existing.rowNumber, patch);
+  if (updates.length > 0) {
+    await batchUpdateCellsInSheet(sheetId, updates);
+  }
+  return getEmiLoanRowAtRowNumber(existing.rowNumber);
+}
+
+/**
+ * Marks one monthly EMI payment as paid.
+ *
+ * Flow:
+ *  1. Decrements remainingMonths by 1 (falls back to tenureMonths if never initialised).
+ *  2. If remainingMonths reaches 0 → status = "Clear" (loan fully repaid).
+ *  3. Advances nextPaymentDate by one calendar month (only when months remain).
+ *  4. Appends "YYYY-MM-DD:amount" (or "YYYY-MM-DD") to the paidDates history column.
+ */
+export async function markEmiMonthlyPayment(
+  id: string,
+  paidDate: string,
+  paidAmount?: number,
+): Promise<EmiLoanRow | null> {
+  const existing = await getEmiLoanRow(id);
+  if (!existing) return null;
+  if (existing.status === "Clear") return existing;
+
+  const sheetId = getEmiSpreadsheetId();
+  const rowNumber = existing.rowNumber;
+
+  const currentRemaining = existing.remainingMonths ?? existing.tenureMonths;
+  const newRemaining = Math.max(currentRemaining - 1, 0);
+  const newStatus: EmiLoanStatus = newRemaining <= 0 ? "Clear" : "Pending";
+
+  const updates: { range: string; values: (string | number)[][] }[] = [
+    { range: `${TAB}!${colLetter(COL.REMAINING_MONTHS)}${rowNumber}`, values: [[newRemaining]] },
+    { range: `${TAB}!${colLetter(COL.STATUS)}${rowNumber}`, values: [[newStatus]] },
+  ];
+
+  // Advance next payment date only when months remain
+  if (newRemaining > 0) {
+    const currentNext =
+      existing.nextPaymentDate ??
+      advanceOneMonth(existing.transactionDate ?? new Date().toISOString().slice(0, 10));
+    const nextDate = advanceOneMonth(currentNext);
+    updates.push({
+      range: `${TAB}!${colLetter(COL.NEXT_PAYMENT_DATE)}${rowNumber}`,
+      values: [[isoToSerial(nextDate)]],
+    });
+  }
+
+  // Append to paidDates history
+  const entry = paidAmount != null ? `${paidDate}:${paidAmount}` : paidDate;
+  const prev = existing.paidDates.join("|");
+  updates.push({
+    range: `${TAB}!${colLetter(COL.PAID_DATES)}${rowNumber}`,
+    values: [[prev ? `${prev}|${entry}` : entry]],
+  });
+
+  await batchUpdateCellsInSheet(sheetId, updates);
+  return getEmiLoanRowAtRowNumber(rowNumber);
+}
+
+/**
+ * Initialises server-managed tracking columns for an EMI loan created before
+ * the monthly-tracking system was added (remainingMonths is null).
+ *
+ * - Sets remainingMonths = tenureMonths (assumes no payments made so far).
+ * - Sets nextPaymentDate only if currently missing.
+ * - Does NOT overwrite an already-set nextPaymentDate (admin manages legacy dates).
+ */
+export async function initializeEmiTracking(id: string): Promise<EmiLoanRow | null> {
+  const existing = await getEmiLoanRow(id);
+  if (!existing) return null;
+
+  const sheetId = getEmiSpreadsheetId();
+  const updates: { range: string; values: (string | number)[][] }[] = [];
+
+  if (existing.remainingMonths === null) {
+    updates.push({
+      range: `${TAB}!${colLetter(COL.REMAINING_MONTHS)}${existing.rowNumber}`,
+      values: [[existing.tenureMonths]],
+    });
+  }
+  if (!existing.nextPaymentDate && existing.transactionDate) {
+    updates.push({
+      range: `${TAB}!${colLetter(COL.NEXT_PAYMENT_DATE)}${existing.rowNumber}`,
+      values: [[isoToSerial(advanceOneMonth(existing.transactionDate))]],
+    });
+  }
+
   if (updates.length > 0) {
     await batchUpdateCellsInSheet(sheetId, updates);
   }

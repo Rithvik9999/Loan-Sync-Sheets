@@ -24,7 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-import EmiLoanFormDialog, { EmiLoan, EMI_LOANS_QUERY_KEY, fetchEmiLoans, updateEmiLoan } from "./components/emi-loan-form-dialog";
+import EmiLoanFormDialog, { EmiLoan, EMI_LOANS_QUERY_KEY, fetchEmiLoans, markEmiLoanMonthlyPaid } from "./components/emi-loan-form-dialog";
 
 function EmiStatusBadge({ status }: { status: string }) {
   switch (status) {
@@ -62,17 +62,11 @@ function BulkMarkPaidDialog({
   const handleConfirm = async () => {
     setIsPending(true);
     try {
-      await Promise.all(
-        loans.map((l) =>
-          updateEmiLoan(l.id, {
-            status: "Clear",
-            statusNotes: `Marked as paid in full on ${paidDate}`,
-          }),
-        ),
-      );
+      await Promise.all(loans.map((l) => markEmiLoanMonthlyPaid(l.id, paidDate)));
       queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
       toast({
-        title: `${loans.length} EMI loan${loans.length !== 1 ? "s" : ""} marked as paid`,
+        title: `${loans.length} EMI payment${loans.length !== 1 ? "s" : ""} recorded`,
+        description: "Month advanced, next due date updated.",
       });
       onDone();
       onOpenChange(false);
@@ -95,7 +89,7 @@ function BulkMarkPaidDialog({
             Mark {loans.length} EMI Loan{loans.length !== 1 ? "s" : ""} as Paid
           </DialogTitle>
           <DialogDescription>
-            This will set status to Clear for each selected EMI loan.
+            Marks one monthly payment as paid for each selected EMI. The loan advances to the next month — status is set to Clear only when all months are repaid.
           </DialogDescription>
         </DialogHeader>
 

@@ -64,8 +64,9 @@ function columnLetter(n: number): string {
 }
 
 const ensuredTabs = new Set<string>();
+const ensuredTabsInSheet = new Map<string, Set<string>>();
 
-async function ensureSheetTab(title: string, headers: string[]): Promise<void> {
+export async function ensureSheetTab(title: string, headers: string[]): Promise<void> {
   if (ensuredTabs.has(title)) return;
   const sheets = getSheets();
   const spreadsheetId = getSpreadsheetId();
@@ -87,6 +88,36 @@ async function ensureSheetTab(title: string, headers: string[]): Promise<void> {
     logger.info({ title }, "Created Google Sheet tab");
   }
   ensuredTabs.add(title);
+}
+
+/** Like ensureSheetTab but for an arbitrary spreadsheet (e.g. the EMI sheet). */
+export async function ensureSheetTabInSheet(
+  spreadsheetId: string,
+  title: string,
+  headers: string[],
+): Promise<void> {
+  if (!ensuredTabsInSheet.has(spreadsheetId)) {
+    ensuredTabsInSheet.set(spreadsheetId, new Set());
+  }
+  const cache = ensuredTabsInSheet.get(spreadsheetId)!;
+  if (cache.has(title)) return;
+  const sheets = getSheets();
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const existing = meta.data.sheets?.find((s) => s.properties?.title === title);
+  if (!existing) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: { requests: [{ addSheet: { properties: { title } } }] },
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${title}!A1`,
+      valueInputOption: "RAW",
+      requestBody: { values: [headers] },
+    });
+    logger.info({ title, spreadsheetId }, "Created tab in external spreadsheet");
+  }
+  cache.add(title);
 }
 
 /**

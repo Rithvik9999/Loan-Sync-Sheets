@@ -146,6 +146,28 @@ async function updateEmiLoan(id: string, data: Partial<EmiLoanFormValues>): Prom
   return res.json();
 }
 
+/**
+ * Marks one monthly EMI payment as paid.
+ * Decrements remainingMonths, advances nextPaymentDate, and sets status=Clear when tenure is complete.
+ */
+export async function markEmiLoanMonthlyPaid(
+  id: string,
+  paidDate: string,
+  paidAmount?: number,
+): Promise<EmiLoan> {
+  const res = await fetch(`/api/emi-loans/${id}/pay`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paidDate, paidAmount }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed to mark EMI payment" }));
+    throw new Error(err.error || "Failed to mark EMI payment");
+  }
+  return res.json();
+}
+
 export const EMI_LOANS_QUERY_KEY = ["emi-loans"];
 export const emiLoanQueryKey = (id: string) => ["emi-loans", id];
 

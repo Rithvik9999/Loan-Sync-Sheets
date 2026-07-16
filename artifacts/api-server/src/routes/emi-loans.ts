@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { attachRole, requireStaff } from "../middlewares/auth";
 import * as emiSheet from "../lib/emiSheet";
+import * as emiPaymentsRepo from "../lib/repositories/emiPayments";
 import * as borrowersRepo from "../lib/repositories/borrowers";
 import { extractPhoneFromWhatsapp, normalizePhone, normalizeName } from "../lib/authTokens";
 
@@ -94,6 +95,77 @@ router.get("/emi-loans/:id", async (req, res): Promise<void> => {
     }
   }
   res.json(row);
+});
+
+// POST /api/emi-loans/:id/pay — mark one month as paid and advance to next month (staff only)
+router.post("/emi-loans/:id/pay", requireStaff, async (req, res): Promise<void> => {
+  const id = String(req.params.id);
+  const { paidDate, paidAmount } = req.body;
+  if (!paidDate) {
+    res.status(400).json({ error: "paidDate (YYYY-MM-DD) is required" });
+    return;
+  }
+  try {
+    const updated = await emiSheet.markEmiMonthlyPayment(
+      id,
+      String(paidDate),
+      paidAmount != null ? Number(paidAmount) : undefined,
+    );
+    if (!updated) {
+      res.status(404).json({ error: "EMI loan not found" });
+      return;
+    }
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// POST /api/emi-loans/:id/initialize — initialise server-managed tracking for legacy EMIs (staff only)
+router.post("/emi-loans/:id/initialize", requireStaff, async (req, res): Promise<void> => {
+  const id = String(req.params.id);
+  try {
+    const updated = await emiSheet.initializeEmiTracking(id);
+    if (!updated) {
+      res.status(404).json({ error: "EMI loan not found" });
+      return;
+    }
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// GET /api/emi-loans/:id/payments — list partial payment records for an EMI loan
+router.get("/emi-loans/:id/payments", async (req, res): Promise<void> => {
+  const id = String(req.params.id);
+  const info = req.roleInfo!;
+  if (info.role === "borrower") {
+    const row = await emiSheet.getEmiLoanRow(id);
+    if (!row) { res.status(404).json({ error: "EMI loan not found" }); return; }
+    const myPhone = normalizePhone(info.phone ?? "");
+    const rowPhone = extractPhoneFromWhatsapp(row.whatsapp);
+    const allowed = rowPhone && myPhone ? rowPhone === myPhone : row.name.trim().toLowerCase() === info.name.trim().toLowerCase();
+    if (!allowed) { res.status(403).json({ error: "Forbidden" }); return; }
+  }
+  const payments = await emiPaymentsRepo.listEmiPayments(id);
+  res.json(payments);
+});
+
+// POST /api/emi-loans/:id/payments — add a partial payment record (staff only)
+router.post("/emi-loans/:id/payments", requireStaff, async (req, res): Promise<void> => {
+  const id = String(req.params.id);
+  const { amount, date, monthKey, note } = req.body;
+  if (!amount || !date || !monthKey) {
+    res.status(400).json({ error: "amount, date (YYYY-MM-DD), and monthKey (YYYY-MM) are required" });
+    return;
+  }
+  try {
+    const payment = await emiPaymentsRepo.createEmiPayment(id, Number(amount), String(date), String(monthKey), note ?? "");
+    res.status(201).json(payment);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
 });
 
 // PATCH /api/emi-loans/:id — update (staff only)

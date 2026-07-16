@@ -1327,11 +1327,18 @@ function OverdueTab({
           </div>
           <div className="flex gap-2">
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              onClick={() => setSelected(new Set())}
+              className="text-xs"
+              onClick={() => {
+                const allKeys = items.map((i) => i.key);
+                const allSel = allKeys.every((k) => selected.has(k));
+                setSelected(allSel ? new Set() : new Set(allKeys));
+              }}
             >
-              Clear
+              {items.every((i) => selected.has(i.key))
+                ? "Deselect All"
+                : `Select All (${items.length})`}
             </Button>
             <Button
               size="sm"
@@ -1412,11 +1419,18 @@ function ComingUpTab({ items }: { items: RepayItem[] }) {
           </div>
           <div className="flex gap-2">
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              onClick={() => setSelected(new Set())}
+              className="text-xs"
+              onClick={() => {
+                const allKeys = items.map((i) => i.key);
+                const allSel = allKeys.every((k) => selected.has(k));
+                setSelected(allSel ? new Set() : new Set(allKeys));
+              }}
             >
-              Clear
+              {items.every((i) => selected.has(i.key))
+                ? "Deselect All"
+                : `Select All (${items.length})`}
             </Button>
             <Button
               size="sm"
@@ -2257,18 +2271,25 @@ export default function Portal() {
     [activeLoans, activeEmi],
   );
 
-  // Credit limit utilisation
+  // Credit limit utilisation — for EMI loans use remaining principal (principalPerMonth × remainingMonths)
+  // when tracking has been initialised; fall back to original principal for legacy rows.
   const usedPrincipal = useMemo(
     () =>
       activeLoans.reduce((s, l) => s + (l.principal ?? 0), 0) +
-      activeEmi.reduce((s, e) => s + (e.principal ?? 0), 0),
+      activeEmi.reduce((s, e) => {
+        if (e.principalPerMonth != null && e.remainingMonths != null) {
+          return s + e.principalPerMonth * Math.max(e.remainingMonths, 0);
+        }
+        return s + (e.principal ?? 0); // legacy fallback
+      }, 0),
     [activeLoans, activeEmi],
   );
   const availableCredit =
     creditLimit != null ? Math.max(creditLimit - usedPrincipal, 0) : null;
+  // Not capped at 100 so we can show ">100%" when over limit
   const usedPct =
     creditLimit && creditLimit > 0
-      ? Math.min(Math.round((usedPrincipal / creditLimit) * 100), 100)
+      ? Math.round((usedPrincipal / creditLimit) * 100)
       : null;
   const isOverLimit = creditLimit != null && usedPrincipal > creditLimit;
 
@@ -2333,10 +2354,11 @@ export default function Portal() {
 
           {/* Credit Limit — mini donut */}
           <Card className={`shadow-sm ${isOverLimit ? "border-destructive/40 bg-destructive/5" : "border-border/60"}`}>
-            <CardContent className="px-2 py-3 flex flex-col items-center justify-center text-center gap-1">
-              {/* Donut */}
-              <div className="relative shrink-0" style={{ width: 44, height: 44 }}>
-                <PieChart width={44} height={44}>
+            <CardContent className="px-2 py-3 flex flex-col items-center justify-center text-center gap-0.5">
+              {/* Donut — margin:0 prevents Recharts default 5px clipping.
+                  cx=26,cy=26 with outerRadius=24 gives 2px buffer on all edges inside 52px SVG. */}
+              <div className="relative shrink-0" style={{ width: 52, height: 52 }}>
+                <PieChart width={52} height={52} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                   <Pie
                     data={
                       creditLimit != null && creditLimit > 0
@@ -2346,10 +2368,10 @@ export default function Portal() {
                           ]
                         : [{ name: "Empty", value: 1 }]
                     }
-                    cx={20}
-                    cy={20}
-                    innerRadius={13}
-                    outerRadius={20}
+                    cx={26}
+                    cy={26}
+                    innerRadius={15}
+                    outerRadius={24}
                     strokeWidth={0}
                     startAngle={90}
                     endAngle={-270}
@@ -2357,7 +2379,8 @@ export default function Portal() {
                   >
                     {creditLimit != null && creditLimit > 0 ? (
                       <>
-                        <Cell fill={isOverLimit ? "hsl(var(--destructive))" : "#22c55e"} />
+                        {/* Green (hue 120) → Amber (60) → Red (0) based on % used */}
+                        <Cell fill={`hsl(${Math.round(120 * (1 - Math.min(usedPct ?? 0, 100) / 100))}, 78%, 42%)`} />
                         <Cell fill="hsl(var(--muted))" />
                       </>
                     ) : (
@@ -2373,9 +2396,14 @@ export default function Portal() {
               </div>
               <p className="text-[10px] text-muted-foreground leading-tight">Credit</p>
               {creditLimit != null && (
-                <p className={`text-[9px] font-numeric leading-none ${isOverLimit ? "text-destructive font-semibold" : "text-muted-foreground"}`}>
-                  {formatCurrency(availableCredit ?? 0)} free
-                </p>
+                <div className="flex flex-col items-center">
+                  <p className={`text-[9px] font-numeric leading-tight ${isOverLimit ? "text-destructive font-semibold" : "text-muted-foreground"}`}>
+                    {formatCurrency(availableCredit ?? 0)} free
+                  </p>
+                  <p className="text-[8px] text-muted-foreground/60 font-numeric leading-tight">
+                    of {formatCurrency(creditLimit)}
+                  </p>
+                </div>
               )}
             </CardContent>
           </Card>
