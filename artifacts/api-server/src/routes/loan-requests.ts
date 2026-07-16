@@ -245,12 +245,16 @@ router.delete(
     try {
       const deleted = await loanRequestsRepo.deleteLoanRequest(id);
       if (!deleted) {
-        res.status(404).json({ error: "Loan request not found" });
+        res.status(404).json({ error: "Loan request not found — it may have already been deleted." });
         return;
       }
       res.sendStatus(204);
     } catch (err) {
-      res.status(500).json({ error: "Failed to delete loan request. Please try again." });
+      console.error("[loan-requests] DELETE failed for id=%s:", id, err);
+      res.status(500).json({
+        error: "Failed to delete loan request.",
+        detail: err instanceof Error ? err.message : String(err),
+      });
     }
   },
 );

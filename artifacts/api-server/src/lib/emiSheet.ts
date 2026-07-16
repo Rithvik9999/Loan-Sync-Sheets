@@ -226,20 +226,51 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
   const remainingMonths = toNumberOrNull(get(COL.REMAINING_MONTHS));
   const tenureMonths = toNumberOrNull(get(COL.TENURE_MONTHS)) ?? 0;
   const transactionDate = serialToISODate(get(COL.TRANSACTION_DATE));
+  const monthlyPayVal = toNumberOrNull(get(COL.MONTHLY_PAYMENT));
 
-  // Compute next payment date from server-tracked remainingMonths — this is stable
-  // and correctly identifies overdue loans even when the sheet formula has auto-advanced.
-  const nextPaymentDate = computeNextDueDate(transactionDate, tenureMonths, remainingMonths);
+  // Retroactively credit D/W partial entries that add up to one or more full months.
+  // This corrects entries recorded before the auto-close guard was removed: those
+  // entries have type "W"/"D" but their accumulated sum may already cover ≥1 month.
+  let effectiveRemaining = remainingMonths;
+  const paidDatesRaw = toText(get(COL.PAID_DATES)).split("|").map(s => s.trim()).filter(Boolean);
+  if (effectiveRemaining !== null && monthlyPayVal !== null && monthlyPayVal > 0) {
+    // Locate cycle start: date of last month-completing entry (M / DM / WM)
+    let cycleStartDate = "";
+    for (let i = paidDatesRaw.length - 1; i >= 0; i--) {
+      const parts = paidDatesRaw[i].split(":");
+      const type = parts[2] ?? "M";
+      if (type === "M" || type === "DM" || type === "WM") {
+        cycleStartDate = parts[0] ?? "";
+        break;
+      }
+    }
+    // Sum D/W amounts after cycle start
+    const cycleAccumulated = paidDatesRaw.reduce((sum, e) => {
+      const parts = e.split(":");
+      const eDate = parts[0] ?? "";
+      const amt = parseFloat(parts[1] ?? "0") || 0;
+      const type = parts[2] ?? "M";
+      if ((type === "D" || type === "W") && eDate > cycleStartDate) return sum + amt;
+      return sum;
+    }, 0);
+    const extraMonths = Math.floor(cycleAccumulated / monthlyPayVal);
+    if (extraMonths > 0) {
+      effectiveRemaining = Math.max(effectiveRemaining - extraMonths, 0);
+    }
+  }
+
+  // Compute next payment date using effective remaining (accounts for retroactive credits).
+  const nextPaymentDate = computeNextDueDate(transactionDate, tenureMonths, effectiveRemaining);
 
   const today = todaySerial();
   const nextPaySerial = nextPaymentDate ? isoToSerial(nextPaymentDate) : null;
 
-  // Overdue = Pending, has remaining months, and computed next-due date is in the past.
+  // Overdue = Pending, has remaining months, and effective next-due date is in the past.
   const lateDays =
     status === "Pending" &&
     nextPaySerial !== null &&
-    remainingMonths !== null &&
-    remainingMonths > 0 &&
+    effectiveRemaining !== null &&
+    effectiveRemaining > 0 &&
     nextPaySerial < today
       ? Math.floor(today - nextPaySerial)
       : 0;
@@ -250,7 +281,6 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
   // Priority: weeklyAmount > dailyAmount > monthlyPayment.
   const weeklyAmountVal = toNumberOrNull(get(COL.WEEKLY_AMOUNT));
   const dailyAmountVal  = toNumberOrNull(get(COL.DAILY_AMOUNT));
-  const monthlyPayVal   = toNumberOrNull(get(COL.MONTHLY_PAYMENT));
   const effectivePmt    = weeklyAmountVal ?? dailyAmountVal ?? monthlyPayVal;
   const lateFees =
     effectivePmt != null && effectivePmt > 0 && lateDays > 0
@@ -609,25 +639,18 @@ export async function recordPartialEmiPayment(
   const monthlyTarget = existing.monthlyPayment ?? 0;
   const currentRemaining = existing.remainingMonths ?? existing.tenureMonths;
 
-  // If the loan is currently overdue (next payment date is in the past), do NOT
-  // auto-close the month via accumulated partial payments — the overdue period
-  // should keep accruing until the admin explicitly records a Monthly Payment.
-  // Only auto-close when the loan is on-time (next payment is today or future).
-  const isCurrentlyOverdue =
-    existing.nextPaymentDate != null &&
-    new Date(existing.nextPaymentDate + "T00:00:00Z") < new Date();
-
   let updates: { range: string; values: (string | number)[][] }[];
 
-  if (!isCurrentlyOverdue && monthlyTarget > 0 && newAccumulated >= monthlyTarget) {
-    // This partial payment completes the current (non-overdue) month — auto-decrement
+  if (monthlyTarget > 0 && newAccumulated >= monthlyTarget) {
+    // Accumulated partial payments cover the full monthly amount — auto-decrement.
+    // This applies whether or not the loan is currently overdue: once enough has been
+    // paid to cover the monthly instalment, the month closes and nextPaymentDate advances.
     const newRemaining = Math.max(currentRemaining - 1, 0);
     const newStatus: EmiLoanStatus = newRemaining <= 0 ? "Clear" : "Pending";
     const entryType: string = frequency === "D" ? "DM" : "WM";
     updates = appendEmiMonth(rowNumber, existing, newRemaining, newStatus, date, amount, entryType);
   } else {
-    // Plain partial — just append, no month change.
-    // For overdue loans, overdue months keep accruing; admin must use Monthly Payment to close them.
+    // Plain partial — just append, no month change yet.
     const entry = `${date}:${amount}:${frequency}`;
     const prev = existing.paidDates.join("|");
     updates = [

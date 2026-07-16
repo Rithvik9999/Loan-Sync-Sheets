@@ -2062,13 +2062,40 @@ function RequestCard({ request }: { request: any }) {
   );
 }
 
-function MyLoanRequests() {
+function MyLoanRequests({
+  onRequestLoan,
+  onRequestEmi,
+}: {
+  onRequestLoan: () => void;
+  onRequestEmi: () => void;
+}) {
   const { data: requests, isLoading } = useListLoanRequests({
     query: { queryKey: getListLoanRequestsQueryKey() },
   });
 
   if (isLoading) return <Skeleton className="h-24 w-full" />;
-  if (!requests || requests.length === 0) return null;
+
+  if (!requests || requests.length === 0) {
+    return (
+      <div className="py-10 text-center space-y-4">
+        <EmptyState
+          title="No requests yet"
+          description="Submit a loan or EMI request and admin will be notified via WhatsApp."
+          icon={<ListChecks />}
+        />
+        <div className="flex gap-2 justify-center flex-wrap">
+          <Button variant="outline" size="sm" onClick={onRequestLoan}>
+            <Plus className="mr-1.5 h-4 w-4" />
+            Request Loan
+          </Button>
+          <Button size="sm" onClick={onRequestEmi}>
+            <CalendarClock className="mr-1.5 h-4 w-4" />
+            Request EMI
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3 pt-2">
@@ -3094,7 +3121,10 @@ export default function Portal() {
 
         {/* ── Requests Tab ── */}
         <TabsContent value="requests" className="mt-4">
-          <MyLoanRequests />
+          <MyLoanRequests
+            onRequestLoan={() => setLoanRequestOpen(true)}
+            onRequestEmi={() => setEmiRequestOpen(true)}
+          />
         </TabsContent>
 
         {/* ── Paid Tab ── */}

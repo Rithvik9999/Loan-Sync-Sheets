@@ -530,7 +530,7 @@ export default function LoansList() {
     () =>
       (emiLoans ?? [])
         .filter((e) => e.status === "Pending" && (e.lateDays ?? 0) > 0)
-        .sort((a, b) => (b.lateDays ?? 0) - (a.lateDays ?? 0)),
+        .sort((a, b) => (a.lateDays ?? 0) - (b.lateDays ?? 0)),
     [emiLoans],
   );
 
@@ -561,7 +561,7 @@ export default function LoansList() {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (l) => (l.lateDays ?? 0) > 0 && l.status !== "Clear" && (l.status as any) !== "Archived",
         )
-        .sort((a, b) => (b.lateDays ?? 0) - (a.lateDays ?? 0)),
+        .sort((a, b) => (a.lateDays ?? 0) - (b.lateDays ?? 0)),
     [allLoans],
   );
 

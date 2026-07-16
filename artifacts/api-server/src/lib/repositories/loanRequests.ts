@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { appendRow, deleteRowAt, readTab, updateRowAt } from "../sheetsClient";
+import { appendRow, batchUpdateCells, deleteRowAt, readTab, updateRowAt } from "../sheetsClient";
 
 const TAB = "LoanRequests";
 const HEADERS = [
@@ -83,8 +83,23 @@ function toRow(request: LoanRequest): Record<string, string> {
 }
 
 export async function listLoanRequests(): Promise<LoanRequest[]> {
-  const { rows } = await readTab(TAB, HEADERS);
-  return rows.map(fromRow);
+  const { rows, rowNumbers } = await readTab(TAB, HEADERS);
+  const idBackfills: { range: string; values: (string | number)[][] }[] = [];
+
+  const result = rows.map((row, i) => {
+    if (!row.id) {
+      const newId = randomUUID();
+      row.id = newId;
+      idBackfills.push({ range: `${TAB}!A${rowNumbers[i]}`, values: [[newId]] });
+    }
+    return fromRow(row);
+  });
+
+  if (idBackfills.length > 0) {
+    batchUpdateCells(idBackfills).catch(() => {});
+  }
+
+  return result;
 }
 
 export async function createLoanRequest(
