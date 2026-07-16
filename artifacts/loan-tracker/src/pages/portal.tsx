@@ -1127,6 +1127,89 @@ type RepayItem = {
 const EARLY_PAYMENT_WINDOW_DAYS = 5;
 
 /**
+ * Fixed payment-date schedule for "weekly" (4× per month) loans.
+ * Only the 8th, 15th, 22nd, and 30th of each month are valid due dates.
+ */
+const MONTHLY_PAYMENT_DAYS = [8, 15, 22, 30] as const;
+
+/** Count of 8/15/22/30 dates strictly after startDate and ≤ targetDate. */
+function countWeeklyPaymentDates(startDate: Date, targetDate: Date): number {
+  let count = 0;
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const target = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  let year = start.getFullYear();
+  let month = start.getMonth();
+  for (let m = 0; m < 36; m++) {
+    for (const day of MONTHLY_PAYMENT_DAYS) {
+      const d = new Date(year, month, day);
+      if (d <= start) continue;
+      if (d > target) return count;
+      count++;
+    }
+    month++;
+    if (month > 11) { month = 0; year++; }
+  }
+  return count;
+}
+
+/** Most recent 8/15/22/30 date strictly after startDate and ≤ targetDate (current period due). Returns null if none yet. */
+function getCurrentWeeklyPaymentDate(startDate: Date, targetDate: Date): Date | null {
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const target = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  let best: Date | null = null;
+  let year = start.getFullYear();
+  let month = start.getMonth();
+  for (let m = 0; m < 36; m++) {
+    for (const day of MONTHLY_PAYMENT_DAYS) {
+      const d = new Date(year, month, day);
+      if (d <= start) continue;
+      if (d > target) return best;
+      best = d;
+    }
+    month++;
+    if (month > 11) { month = 0; year++; }
+  }
+  return best;
+}
+
+/** Next 8/15/22/30 date strictly after both startDate and targetDate (upcoming payment). */
+function getNextWeeklyPaymentDate(startDate: Date, targetDate: Date): Date | null {
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const target = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  let year = target.getFullYear();
+  let month = target.getMonth();
+  for (let m = 0; m < 36; m++) {
+    for (const day of MONTHLY_PAYMENT_DAYS) {
+      const d = new Date(year, month, day);
+      if (d <= start) continue;
+      if (d > target) return d;
+    }
+    month++;
+    if (month > 11) { month = 0; year++; }
+  }
+  return null;
+}
+
+/** The N-th (1-indexed) 8/15/22/30 payment date strictly after startDate. */
+function getNthWeeklyPaymentDate(startDate: Date, n: number): Date | null {
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  let count = 0;
+  let year = start.getFullYear();
+  let month = start.getMonth();
+  for (let m = 0; m < 36; m++) {
+    for (const day of MONTHLY_PAYMENT_DAYS) {
+      const d = new Date(year, month, day);
+      if (d <= start) continue;
+      count++;
+      if (count === n) return d;
+    }
+    month++;
+    if (month > 11) { month = 0; year++; }
+  }
+  return null;
+}
+
+/**
  * Computes the accumulated overdue amount for periodic (daily/weekly) payments.
  * Each missed period accrues a 2%/day late fee for every day it has been overdue.
  * e.g. daily ₹600, 2 days overdue:
@@ -1203,36 +1286,41 @@ function buildRepaymentItems(
       continue;
     }
 
-    // ── Weekly payment loan ──
+    // ── Weekly payment loan (8th / 15th / 22nd / 30th schedule) ──
     if (freq.type === "weekly" && freq.amount && freq.amount > 0) {
       const weeklyAmt = freq.amount;
       if (!txDate) continue;
 
-      const daysElapsed = Math.max(differenceInCalendarDays(today, txDate), 0);
-      const weeksElapsed = Math.floor(daysElapsed / 7);
-      const paidWeeks = Math.floor((l.paid ?? 0) / weeklyAmt);
-      const overdueWeeks = Math.max(weeksElapsed - paidWeeks, 0);
+      const paymentsElapsed = countWeeklyPaymentDates(txDate, today);
+      const paidPayments = Math.floor((l.paid ?? 0) / weeklyAmt);
+      const overduePayments = Math.max(paymentsElapsed - paidPayments, 0);
 
-      if (overdueWeeks > 0) {
-        const overdueTotal = calcOverdueTotal(weeklyAmt, overdueWeeks, 7);
-        const firstDue = new Date(txDate.getTime() + (paidWeeks + 1) * 7 * 86400000);
+      if (overduePayments > 0) {
+        const overdueTotal = calcOverdueTotal(weeklyAmt, overduePayments, 7);
+        const firstMissedDue = getNthWeeklyPaymentDate(txDate, paidPayments + 1);
         items.push({
           key: `loan-weekly-overdue-${l.id}`,
           id: l.id, loanId: l.loanId, type: "loan",
           label: `Weekly Payment — ₹${weeklyAmt.toLocaleString("en-IN")}/week`,
-          subLabel: `${overdueWeeks} missed week${overdueWeeks > 1 ? "s" : ""} · +2%/day late fee`,
+          subLabel: `${overduePayments} missed payment${overduePayments > 1 ? "s" : ""} · +2%/day late fee`,
           outstanding: overdueTotal,
-          dueDate: firstDue,
+          dueDate: firstMissedDue,
           isOverdue: true,
           earlyDiscount: 0,
         });
       } else {
-        const nextDue = new Date(txDate.getTime() + (weeksElapsed + 1) * 7 * 86400000);
+        const currentDue = getCurrentWeeklyPaymentDate(txDate, today);
+        const isDueToday = currentDue && differenceInCalendarDays(today, currentDue) === 0;
+        const nextDue = isDueToday ? currentDue! : getNextWeeklyPaymentDate(txDate, today);
         items.push({
           key: `loan-weekly-${l.id}`,
           id: l.id, loanId: l.loanId, type: "loan",
           label: `Weekly Payment — ₹${weeklyAmt.toLocaleString("en-IN")}/week`,
-          subLabel: `Next payment ${formatDate(nextDue.toISOString())}`,
+          subLabel: isDueToday
+            ? "Due today"
+            : nextDue
+              ? `Next payment ${formatDate(nextDue.toISOString())}`
+              : "No upcoming payment",
           outstanding: weeklyAmt,
           dueDate: nextDue,
           isOverdue: false,
@@ -1291,59 +1379,56 @@ function buildRepaymentItems(
     const freq = parsePaymentFrequency(e.notes, (e as any).whatsapp);
     const txDate = e.transactionDate ? new Date(e.transactionDate + "T00:00:00Z") : null;
 
-    // ── Weekly EMI ── pure client-side weekly schedule from txDate.
-    // The server's lateDays/nextPaymentDate are computed from monthly EMI math and
-    // do not align with weekly periods. We derive the current week's due date directly.
-    // If paidDates has entries we use them for paidWeeks; otherwise we assume only
-    // the current period may be unpaid (avoids accumulating all elapsed weeks when
-    // the payment history column T is not populated).
+    // ── Weekly EMI (8th / 15th / 22nd / 30th schedule) ──
+    // Uses fixed monthly payment dates instead of 7-day rolling cycles.
     if (freq.type === "weekly" && freq.amount && freq.amount > 0) {
       const weeklyAmt = freq.amount;
       if (!txDate) continue;
 
-      const daysElapsed = Math.max(differenceInCalendarDays(today, txDate), 0);
-      const weeksElapsed = Math.floor(daysElapsed / 7);
-      // Due date for the current weekly period (always ≤ today)
-      const currentWeekDue = new Date(txDate.getTime() + weeksElapsed * 7 * 86400000);
-      const daysLate = differenceInCalendarDays(today, currentWeekDue); // ≥ 0
+      const paymentsElapsed = countWeeklyPaymentDates(txDate, today);
+      const currentWeekDue = getCurrentWeeklyPaymentDate(txDate, today);
+      const daysLate = currentWeekDue ? differenceInCalendarDays(today, currentWeekDue) : 0;
 
-      // Compute how many weeks have been paid
       const totalPaidFromDates = (e.paidDates ?? []).reduce((sum, entry) => {
         const parts = entry.split(":");
         return sum + (Number(parts[1]) || 0);
       }, 0);
       const hasPaidData = (e.paidDates ?? []).length > 0;
 
-      // overdueWeeks: with payment data, compare paid vs elapsed; without, only flag
-      // the current period when it is strictly past its due date (daysLate > 0).
-      const overdueWeeks = hasPaidData
-        ? Math.max(weeksElapsed - Math.floor(totalPaidFromDates / weeklyAmt), 0)
+      // With paid history compare paid vs elapsed periods; without, flag only the
+      // current period when its due date is strictly in the past.
+      const overdueCount = hasPaidData
+        ? Math.max(paymentsElapsed - Math.floor(totalPaidFromDates / weeklyAmt), 0)
         : daysLate > 0 ? 1 : 0;
 
-      if (overdueWeeks > 0) {
+      if (overdueCount > 0) {
         const overdueTotal = hasPaidData
-          ? calcOverdueTotal(weeklyAmt, overdueWeeks, 7)
+          ? calcOverdueTotal(weeklyAmt, overdueCount, 7)
           : Math.round(weeklyAmt * (1 + 0.02 * daysLate));
         items.push({
           key: `emi-weekly-${e.id}`,
           id: e.id, loanId: (e as any).emiId, type: "emi",
           label: `${formatCurrency(e.principal)} EMI (₹${weeklyAmt.toLocaleString("en-IN")}/week)`,
-          subLabel: `${overdueWeeks} missed week${overdueWeeks > 1 ? "s" : ""} · ${daysLate} day${daysLate !== 1 ? "s" : ""} overdue`,
+          subLabel: `${overdueCount} missed payment${overdueCount > 1 ? "s" : ""} · ${daysLate} day${daysLate !== 1 ? "s" : ""} overdue`,
           outstanding: overdueTotal,
           dueDate: currentWeekDue,
           isOverdue: true,
           earlyDiscount: 0,
         });
       } else {
-        // Not overdue — show due-today or upcoming payment
-        const upcomingDue = daysLate === 0
-          ? currentWeekDue  // due today
-          : new Date(txDate.getTime() + (weeksElapsed + 1) * 7 * 86400000);
+        const isDueToday = currentWeekDue && daysLate === 0;
+        const upcomingDue = isDueToday
+          ? currentWeekDue!
+          : getNextWeeklyPaymentDate(txDate, today);
         items.push({
           key: `emi-weekly-${e.id}`,
           id: e.id, loanId: (e as any).emiId, type: "emi",
           label: `${formatCurrency(e.principal)} EMI (₹${weeklyAmt.toLocaleString("en-IN")}/week)`,
-          subLabel: daysLate === 0 ? "Due today" : `Next payment ${formatDate(upcomingDue.toISOString())}`,
+          subLabel: isDueToday
+            ? "Due today"
+            : upcomingDue
+              ? `Next payment ${formatDate(upcomingDue.toISOString())}`
+              : "No upcoming payment",
           outstanding: weeklyAmt,
           dueDate: upcomingDue,
           isOverdue: false,
@@ -2544,14 +2629,14 @@ export default function Portal() {
           [Loans] [EMI  ] [Credit Pie ↕ row-span-2]
           [Total Due  col-span-2   ] [Credit Pie   ] */}
       {isLoading ? (
-        <div className="grid grid-cols-3 gap-1.5" style={{ gridTemplateRows: "auto auto" }}>
+        <div className="grid grid-cols-3 gap-1.5">
           <Skeleton className="h-16 w-full rounded-xl" />
           <Skeleton className="h-16 w-full rounded-xl" />
-          <Skeleton className="h-[8.5rem] w-full rounded-xl row-span-2" />
-          <Skeleton className="h-10 w-full rounded-xl col-span-2" />
+          <Skeleton className="h-16 w-full rounded-xl" />
+          <Skeleton className="h-10 w-full rounded-xl col-span-3" />
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-1.5 items-start" style={{ gridTemplateRows: "auto auto" }}>
+        <div className="grid grid-cols-3 gap-1.5 items-start">
           {/* Row 1 Col 1 — Loans count */}
           <Card className="shadow-sm border-border/60">
             <CardContent className="px-2 py-2 flex flex-col items-center justify-center text-center gap-0.5">
@@ -2570,9 +2655,9 @@ export default function Portal() {
             </CardContent>
           </Card>
 
-          {/* Col 3 Rows 1-2 — Credit Limit donut (compact) */}
+          {/* Col 3 Row 1 — Credit Limit donut (compact) */}
           <Card
-            className={`row-span-2 shadow-sm ${isOverLimit ? "border-destructive/40 bg-destructive/5" : "border-border/60"}`}
+            className={`shadow-sm ${isOverLimit ? "border-destructive/40 bg-destructive/5" : "border-border/60"}`}
           >
             <CardContent className="h-full px-1 py-2 flex flex-col items-center justify-center text-center gap-0.5">
               {/* Donut 64×64 — embed fill in data for reliable Recharts colors */}
@@ -2627,8 +2712,8 @@ export default function Portal() {
             </CardContent>
           </Card>
 
-          {/* Row 2 Cols 1-2 — Total Outstanding */}
-          <Card className="col-span-2 shadow-sm border-border/60">
+          {/* Row 2 — Total Outstanding (full width) */}
+          <Card className="col-span-3 shadow-sm border-border/60">
             <CardContent className="px-3 py-2 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Wallet className="h-4 w-4 text-muted-foreground shrink-0" />

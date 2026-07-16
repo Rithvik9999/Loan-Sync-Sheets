@@ -221,12 +221,29 @@ router.patch(
 
 router.delete(
   "/loan-requests/:id",
-  requireStaff,
   async (req, res): Promise<void> => {
-    const request = await loanRequestsRepo.deleteLoanRequest(
-      String(req.params.id),
-    );
-    if (!request) {
+    const info = req.roleInfo!;
+    const id = String(req.params.id);
+
+    if (info.role === "borrower") {
+      // Borrowers may only cancel their own Pending requests
+      const all = await loanRequestsRepo.listLoanRequests();
+      const found = all.find((r) => r.id === id);
+      if (!found || found.borrowerId !== info.borrowerId) {
+        res.status(403).json({ error: "Cannot delete this request" });
+        return;
+      }
+      if (found.status !== "Pending") {
+        res.status(400).json({ error: "Only pending requests can be cancelled" });
+        return;
+      }
+    } else if (info.role !== "staff") {
+      res.status(403).json({ error: "Not authorized" });
+      return;
+    }
+
+    const deleted = await loanRequestsRepo.deleteLoanRequest(id);
+    if (!deleted) {
       res.status(404).json({ error: "Loan request not found" });
       return;
     }
