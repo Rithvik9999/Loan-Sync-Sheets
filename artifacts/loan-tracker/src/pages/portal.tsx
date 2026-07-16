@@ -1425,12 +1425,22 @@ function buildRepaymentItems(
         // Use date-string arithmetic (no timezone shift from new Date().toISOString()).
         const txDateStr = e.transactionDate ?? "";
         const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+        // Deep fix: use the EARLIEST paidDate as the effective counting window start.
+        // If payments began after the transaction date (e.g. loan created May 21 but first
+        // payment was Jun 8), periods before the first payment are NOT counted as missed —
+        // only periods from the first actual payment onward are checked for coverage.
+        const firstPaidDateStr = weeklyPaidEntries.length > 0
+          ? [...weeklyPaidEntries].map(pe => pe.date).filter(d => d.length >= 10).sort()[0]
+          : "";
+
         let elapsed = 0;
         let yr = txDate.getFullYear(), mo = txDate.getMonth();
         done: for (let mi = 0; mi < 36; mi++) {
           for (const day of MONTHLY_PAYMENT_DAYS) {
             const dueDateStr = `${yr}-${String(mo + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-            if (dueDateStr <= txDateStr) continue;
+            if (dueDateStr <= txDateStr) continue; // before loan start
+            if (firstPaidDateStr && dueDateStr < firstPaidDateStr) continue; // before first payment
             if (dueDateStr > todayStr) break done;
             elapsed++;
           }

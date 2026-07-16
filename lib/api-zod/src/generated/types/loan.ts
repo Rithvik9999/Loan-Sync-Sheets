@@ -70,8 +70,6 @@ export interface Loan {
   partPayment?: number | null;
   /** @nullable */
   dateOfPartPayment?: string | null;
-  /** Parsed list of part-payment entries from the stacked datePartPayment cell. */
-  partPayments?: Array<{ date: string | null; amount: number }>;
   /**
      * Total amount actually collected so far.
      * @nullable
@@ -83,9 +81,4 @@ export interface Loan {
      */
   profit?: number | null;
   notes: string;
-  /**
-     * Per-day late-fee accrual rate (lateFees / lateDays). Only present when overdue.
-     * @nullable
-     */
-  perDayAddition?: number | null;
 }

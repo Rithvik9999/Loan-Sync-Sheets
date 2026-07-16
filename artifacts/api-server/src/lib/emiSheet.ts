@@ -220,6 +220,29 @@ function computeNextDueDate(
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * Counts how many monthly due dates (txDate + 1m, +2m, ...) have passed as of today.
+ * This is the maximum number of months that could legitimately have been paid.
+ * Used as a safety cap to prevent over-decrement caused by duplicate API calls or
+ * partial-payment amounts that inadvertently exceed the monthly target.
+ */
+function computeMaxPaidMonths(transactionDate: string, tenureMonths: number): number {
+  const today = todaySerial();
+  let count = 0;
+  for (let n = 1; n <= tenureMonths; n++) {
+    const d = new Date(transactionDate + "T00:00:00Z");
+    const origDay = d.getUTCDate();
+    d.setUTCMonth(d.getUTCMonth() + n);
+    if (d.getUTCDate() < origDay) d.setUTCDate(0);
+    if (isoToSerial(d.toISOString().slice(0, 10)) <= today) {
+      count++;
+    } else {
+      break;
+    }
+  }
+  return count;
+}
+
 function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
   const get = (idx: number) => raw[idx];
   const status = (toText(get(COL.STATUS)) || "Pending") as EmiLoanStatus;
@@ -256,6 +279,19 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
     const extraMonths = Math.floor(cycleAccumulated / monthlyPayVal);
     if (extraMonths > 0) {
       effectiveRemaining = Math.max(effectiveRemaining - extraMonths, 0);
+    }
+  }
+
+  // Safety cap on effectiveRemaining: the number of months "paid" can never exceed the
+  // count of monthly due dates that have actually passed (transactionDate + n months ≤ today).
+  // This prevents display bugs when remainingMonths is wrong due to over-decrement
+  // (e.g. each weekly payment ≥ monthlyPayment triggered a false WM, or partial entries
+  // accumulated retroactively past what's chronologically possible).
+  if (transactionDate && effectiveRemaining !== null) {
+    const maxPaid = computeMaxPaidMonths(transactionDate, tenureMonths);
+    const minRemaining = Math.max(tenureMonths - maxPaid, 0);
+    if (effectiveRemaining < minRemaining) {
+      effectiveRemaining = minRemaining;
     }
   }
 
@@ -646,6 +682,25 @@ export async function recordPartialEmiPayment(
     // This applies whether or not the loan is currently overdue: once enough has been
     // paid to cover the monthly instalment, the month closes and nextPaymentDate advances.
     const newRemaining = Math.max(currentRemaining - 1, 0);
+
+    // Safety cap: prevent over-decrement beyond what calendar time allows.
+    // monthsWouldBePaid = number of months that would be marked as paid after this decrement.
+    // This must not exceed maxPaidMonths (count of due dates ≤ today) + 1 (pre-paying current month).
+    const monthsWouldBePaid = existing.tenureMonths - newRemaining;
+    const maxAllowed = existing.transactionDate
+      ? computeMaxPaidMonths(existing.transactionDate, existing.tenureMonths) + 1
+      : existing.tenureMonths;
+    if (monthsWouldBePaid > maxAllowed) {
+      // Record as plain partial to avoid corrupting remaining months count.
+      const entry = `${date}:${amount}:${frequency}`;
+      const prev = existing.paidDates.join("|");
+      updates = [
+        { range: `${TAB}!${colLetter(COL.PAID_DATES)}${rowNumber}`, values: [[prev ? `${prev}|${entry}` : entry]] },
+      ];
+      await batchUpdateCellsInSheet(sheetId, updates);
+      return getEmiLoanRowAtRowNumber(rowNumber);
+    }
+
     const newStatus: EmiLoanStatus = newRemaining <= 0 ? "Clear" : "Pending";
     const entryType: string = frequency === "D" ? "DM" : "WM";
     updates = appendEmiMonth(rowNumber, existing, newRemaining, newStatus, date, amount, entryType);

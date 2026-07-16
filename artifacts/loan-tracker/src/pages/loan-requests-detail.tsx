@@ -3,6 +3,7 @@ import { useState } from "react";
 import {
   useListLoanRequests,
   useUpdateLoanRequest,
+  useDeleteLoanRequest,
   getListLoanRequestsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -32,7 +33,19 @@ import {
   CalendarDays,
   Info,
   MessageCircle,
+  Trash2,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 const ADMIN_WHATSAPP = "8917656405";
 
@@ -106,8 +119,11 @@ export default function LoanRequestDetail() {
   );
   const [isPaying, setIsPaying] = useState(false);
   const [isDeclining, setIsDeclining] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const updateReq = useUpdateLoanRequest();
+  const deleteReq = useDeleteLoanRequest();
 
   const discountNum = Number(discount) || 0;
   const principal = req?.amount ?? 0;
@@ -189,6 +205,26 @@ export default function LoanRequestDetail() {
     } finally {
       setIsPaying(false);
     }
+  };
+
+  const handleDelete = () => {
+    if (!req) return;
+    setIsDeleting(true);
+    deleteReq.mutate(
+      { id: req.id },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListLoanRequestsQueryKey() });
+          toast({ title: "Request deleted" });
+          setLocation("/loan-requests");
+        },
+        onError: () => {
+          toast({ variant: "destructive", title: "Error", description: "Could not delete request." });
+          setIsDeleting(false);
+          setDeleteConfirmOpen(false);
+        },
+      },
+    );
   };
 
   const handleDecline = () => {
@@ -444,6 +480,39 @@ export default function LoanRequestDetail() {
                 Decline
               </Button>
             </div>
+
+            {/* Delete permanently */}
+            <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="w-full text-destructive border-destructive/30 hover:bg-destructive/5"
+                  disabled={isPaying || isDeclining || isDeleting}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete Request
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete this request?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently remove the loan request from your sheet. This cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleDelete}
+                    disabled={isDeleting}
+                    className="bg-destructive hover:bg-destructive/90"
+                  >
+                    {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Yes, delete permanently
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </CardContent>
         </Card>
       )}

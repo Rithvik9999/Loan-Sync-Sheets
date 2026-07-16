@@ -41,6 +41,15 @@ import {
 } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
+
+/** Format a date as "15 Jul" — no year, used in compact table cells. */
+function fmtDateNoYear(dateStr: string | null | undefined): string {
+  if (!dateStr) return "—";
+  try {
+    return new Date(dateStr.length === 10 ? dateStr + "T00:00:00Z" : dateStr)
+      .toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" });
+  } catch { return dateStr; }
+}
 import { EmptyState } from "@/components/empty-state";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -299,12 +308,12 @@ function LoansTable({
                 <div className="truncate max-w-[100px] sm:max-w-none">{loan.name}</div>
                 <div className="text-xs text-muted-foreground font-mono">{loan.loanId}</div>
                 <div className="text-[10px] text-muted-foreground/70 mt-0.5">
-                  <div>{formatDateTime(loan.transactionDate)}</div>
                   {loan.returnDate && (
                     <div className="text-amber-600 dark:text-amber-400">
-                      Due {formatDateTime(loan.returnDate)}
+                      Due {fmtDateNoYear(loan.returnDate)}
                     </div>
                   )}
+                  <div>Loan {fmtDateNoYear(loan.transactionDate)}</div>
                 </div>
                 {/* Daily / weekly quick-pay indicators */}
                 {(() => {

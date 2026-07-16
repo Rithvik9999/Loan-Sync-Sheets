@@ -406,6 +406,12 @@ export default function EmiLoanDetail() {
   const dailyAmount = loan.dailyAmount ?? (loan.monthlyPayment != null ? Math.round(loan.monthlyPayment / 30) : null);
   const weeklyAmount = loan.weeklyAmount ?? (loan.monthlyPayment != null ? Math.round((loan.monthlyPayment * 7) / 30) : null);
   const hasCustomAmounts = !!(loan.dailyAmount || loan.weeklyAmount);
+  // Weekly-only loan: has a weeklyAmount column set OR notes/whatsapp says "pay weekly".
+  // For these loans we hide the Daily quick-pay button and daily-equivalent text.
+  const isWeeklyLoan = !!(
+    loan.weeklyAmount != null ||
+    `${loan.notes ?? ""} ${loan.whatsapp ?? ""}`.toLowerCase().includes("pay weekly")
+  );
 
   const stats: { label: string; value: string; highlight?: boolean }[] = [
     { label: "EMI ID", value: loan.emiId ?? "—" },
@@ -480,6 +486,7 @@ export default function EmiLoanDetail() {
             {loan.status !== "Clear" && loan.monthlyPayment != null && (
               <div className="flex flex-col gap-1.5">
                 <div className="flex flex-wrap items-center gap-2">
+                  {!isWeeklyLoan && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -493,6 +500,7 @@ export default function EmiLoanDetail() {
                       : <CalendarDays className="h-3.5 w-3.5" />}
                     Daily {dailyAmount != null && <span className="font-numeric font-semibold">₹{dailyAmount.toLocaleString("en-IN")}</span>}
                   </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="outline"
@@ -610,7 +618,15 @@ export default function EmiLoanDetail() {
               </p>
             </div>
 
-            {dailyAmount != null && (
+            {weeklyAmount != null && isWeeklyLoan && (
+              <div className="space-y-1 pt-4 border-t border-primary/10">
+                <p className="text-xs text-muted-foreground">Weekly instalment</p>
+                <p className="text-sm font-semibold font-numeric text-violet-700">
+                  ₹{weeklyAmount.toLocaleString("en-IN")}/week
+                </p>
+              </div>
+            )}
+            {dailyAmount != null && !isWeeklyLoan && (
               <div className="space-y-1 pt-4 border-t border-primary/10">
                 <p className="text-xs text-muted-foreground">Daily / Weekly equivalent</p>
                 <p className="text-sm font-semibold font-numeric text-sky-700">
