@@ -103,9 +103,49 @@ const LOAN_TYPE_OPTIONS = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Returns true for loans that should be hidden from cards but kept in totals. */
-function isPayDailyLoan(whatsapp: string | null | undefined): boolean {
-  return (whatsapp ?? "").toLowerCase().includes("pay daily");
+/** Returns true for loans that should be hidden from individual cards but consolidated. */
+function isPayDailyLoan(whatsapp: string | null | undefined, notes?: string | null): boolean {
+  return (
+    (whatsapp ?? "").toLowerCase().includes("pay daily") ||
+    (notes ?? "").toLowerCase().includes("pay daily")
+  );
+}
+
+/**
+ * Parses payment frequency and per-period amount from notes/whatsapp.
+ * Handles: "pay daily 600", "pay weekly 5000"
+ */
+function parsePaymentFrequency(
+  notes: string | null | undefined,
+  whatsapp: string | null | undefined,
+): { type: "daily" | "weekly" | null; amount: number | null } {
+  const text = `${notes ?? ""} ${whatsapp ?? ""}`.toLowerCase();
+  const dailyMatch = text.match(/pay\s+daily\s+(\d+)/);
+  if (dailyMatch) return { type: "daily", amount: Number(dailyMatch[1]) };
+  const weeklyMatch = text.match(/pay\s+weekly\s+(\d+)/);
+  if (weeklyMatch) return { type: "weekly", amount: Number(weeklyMatch[1]) };
+  return { type: null, amount: null };
+}
+
+/**
+ * Converts a usage percentage (0-100) to a hex color interpolated
+ * green → amber → red. Avoids CSS hsl() which can fail in SVG fill attrs.
+ */
+function pctToHex(pct: number): string {
+  const p = Math.max(0, Math.min(100, pct)) / 100;
+  let r: number, g: number, b: number;
+  if (p <= 0.5) {
+    const t = p * 2; // 0→1 from green to amber
+    r = Math.round(22 + t * (217 - 22));   // 22→217
+    g = Math.round(163 + t * (119 - 163)); // 163→119
+    b = Math.round(74 + t * (6 - 74));     // 74→6
+  } else {
+    const t = (p - 0.5) * 2; // 0→1 from amber to red
+    r = Math.round(217 + t * (220 - 217)); // 217→220
+    g = Math.round(119 + t * (38 - 119));  // 119→38
+    b = Math.round(6 + t * (38 - 6));      // 6→38
+  }
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
 }
 
 function openUpi(amount: number, note = "Loan Repayment") {
@@ -1091,11 +1131,22 @@ function buildRepaymentItems(
   emiLoans: EmiLoan[] | undefined,
 ): RepayItem[] {
   const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const items: RepayItem[] = [];
+
+  // ── Collect daily-payment loans for consolidation ──
+  const dailyLoans: Loan[] = [];
 
   for (const l of loans ?? []) {
     if (l.status === "Clear") continue;
-    if (isPayDailyLoan(l.whatsapp)) continue; // hidden from cards, kept in totals
+    if (isPayDailyLoan(l.whatsapp, (l as any).notes)) {
+      // Only include if still within tenure (returnDate >= today)
+      const returnDate = l.returnDate ? new Date(l.returnDate) : null;
+      if (returnDate && returnDate >= today) {
+        dailyLoans.push(l);
+      }
+      continue;
+    }
     const outstanding = Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0);
     if (outstanding <= 0) continue;
     let dueDate: Date | null = null;
@@ -1145,9 +1196,82 @@ function buildRepaymentItems(
     });
   }
 
+  // ── Consolidate daily loans: sum amounts of all still-active orders ──
+  if (dailyLoans.length > 0) {
+    const totalDaily = dailyLoans.reduce((sum, l) => {
+      const freq = parsePaymentFrequency((l as any).notes, l.whatsapp);
+      return sum + (freq.amount ?? 0);
+    }, 0);
+    // Earliest end date helps the user know when the daily total drops
+    const endDates = dailyLoans
+      .map((l) => (l.returnDate ? new Date(l.returnDate) : null))
+      .filter((d): d is Date => d !== null)
+      .sort((a, b) => a.getTime() - b.getTime());
+    const nextEnd = endDates[0] ?? null;
+
+    if (totalDaily > 0) {
+      items.push({
+        key: "daily-consolidated",
+        id: dailyLoans[0].id,
+        loanId: "Daily Pay",
+        type: "loan",
+        label: `Daily Payment — ₹${totalDaily.toLocaleString("en-IN")}/day`,
+        subLabel: nextEnd
+          ? `${dailyLoans.length} order${dailyLoans.length > 1 ? "s" : ""} · Nearest end: ${formatDate(nextEnd.toISOString())}`
+          : `${dailyLoans.length} order${dailyLoans.length > 1 ? "s" : ""} · Due today`,
+        outstanding: totalDaily,
+        dueDate: today,
+        isOverdue: false,
+        earlyDiscount: 0,
+      });
+    }
+  }
+
+  // ── EMI loans ──
   for (const e of emiLoans ?? []) {
     if (e.status === "Clear") continue;
-    if (isPayDailyLoan((e as any).whatsapp)) continue; // hidden from cards, kept in totals
+    if (isPayDailyLoan((e as any).whatsapp, e.notes)) continue;
+
+    const freq = parsePaymentFrequency(e.notes, (e as any).whatsapp);
+
+    // Weekly payment — compute next weekly due from transaction date
+    if (freq.type === "weekly" && freq.amount && freq.amount > 0) {
+      const txDate = e.transactionDate
+        ? new Date(e.transactionDate + "T00:00:00Z")
+        : null;
+      let dueDate: Date | null = null;
+      if (txDate) {
+        const msPerWeek = 7 * 86400000;
+        const elapsed = now.getTime() - txDate.getTime();
+        const weekNumber = Math.max(Math.floor(elapsed / msPerWeek), 0);
+        // Next upcoming weekly date
+        const candidate = new Date(txDate.getTime() + (weekNumber + 1) * msPerWeek);
+        // If that candidate is already past, step back one (overdue case)
+        dueDate = candidate < now
+          ? new Date(txDate.getTime() + weekNumber * msPerWeek)
+          : candidate;
+      }
+      const isOverdue = !!(dueDate && dueDate < now);
+      items.push({
+        key: `emi-${e.id}`,
+        id: e.id,
+        loanId: (e as any).emiId,
+        type: "emi",
+        label: `${formatCurrency(e.principal)} EMI (₹${freq.amount.toLocaleString("en-IN")}/week)`,
+        subLabel: dueDate
+          ? isOverdue
+            ? `Weekly — overdue since ${formatDate(dueDate.toISOString())}`
+            : `Weekly — next payment ${formatDate(dueDate.toISOString())}`
+          : "Weekly payment",
+        outstanding: freq.amount,
+        dueDate,
+        isOverdue,
+        earlyDiscount: 0,
+      });
+      continue;
+    }
+
+    // Standard monthly EMI
     const monthly = e.monthlyPayment ?? 0;
     if (monthly <= 0) continue;
     const dueDate = e.nextPaymentDate ? new Date(e.nextPaymentDate) : null;
@@ -2002,7 +2126,7 @@ function LoansTab({
     });
 
   // Filter out pay-daily loans from display
-  const displayLoans = loans.filter((l) => !isPayDailyLoan(l.whatsapp));
+  const displayLoans = loans.filter((l) => !isPayDailyLoan(l.whatsapp, (l as any).notes));
 
   // Compute due/repayment timestamp for a loan (used for date range slider)
   const getLoanDueTs = (l: Loan): number | null => {
@@ -2265,7 +2389,9 @@ export default function Portal() {
       ) +
       activeEmi.reduce(
         (sum, e) =>
-          sum + (e.monthlyPayment ?? 0) * Math.max(e.remainingMonths ?? 0, 0),
+          sum +
+          (e.monthlyPayment ?? 0) *
+            Math.max(e.remainingMonths ?? e.tenureMonths ?? 0, 0),
         0,
       ),
     [activeLoans, activeEmi],
@@ -2325,17 +2451,19 @@ export default function Portal() {
         </div>
       </div>
 
-      {/* Summary Cards — 2×2 grid on mobile, 4-column on sm+ */}
+      {/* Summary Cards — drawing layout:
+          [Loans] [EMI  ] [Credit Pie ↕ row-span-2]
+          [Total Due  col-span-2   ] [Credit Pie   ] */}
       {isLoading ? (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <Skeleton className="h-24 w-full rounded-xl" />
-          <Skeleton className="h-24 w-full rounded-xl" />
-          <Skeleton className="h-24 w-full rounded-xl" />
-          <Skeleton className="h-24 w-full rounded-xl" />
+        <div className="grid grid-cols-3 gap-2" style={{ gridTemplateRows: "auto auto" }}>
+          <Skeleton className="h-20 w-full rounded-xl" />
+          <Skeleton className="h-20 w-full rounded-xl" />
+          <Skeleton className="h-[10.5rem] w-full rounded-xl row-span-2" />
+          <Skeleton className="h-20 w-full rounded-xl col-span-2" />
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {/* Loans count */}
+        <div className="grid grid-cols-3 gap-2" style={{ gridTemplateRows: "auto auto" }}>
+          {/* Row 1 Col 1 — Loans count */}
           <Card className="shadow-sm border-border/60">
             <CardContent className="px-2 py-3 flex flex-col items-center justify-center text-center gap-1">
               <CreditCard className="h-4 w-4 text-muted-foreground" />
@@ -2344,7 +2472,7 @@ export default function Portal() {
             </CardContent>
           </Card>
 
-          {/* EMI count */}
+          {/* Row 1 Col 2 — EMI count */}
           <Card className="shadow-sm border-border/60">
             <CardContent className="px-2 py-3 flex flex-col items-center justify-center text-center gap-1">
               <CalendarClock className="h-4 w-4 text-muted-foreground" />
@@ -2353,15 +2481,15 @@ export default function Portal() {
             </CardContent>
           </Card>
 
-          {/* Credit Limit — mini donut */}
-          <Card className={`shadow-sm ${isOverLimit ? "border-destructive/40 bg-destructive/5" : "border-border/60"}`}>
-            <CardContent className="px-2 py-3 flex flex-col items-center justify-center text-center gap-0.5">
-              {/* Donut — margin:0 prevents Recharts default 5px clipping.
-                  cx=26,cy=26 with outerRadius=24 gives 2px buffer on all edges inside 52px SVG.
-                  NOTE: Use concrete hex colours — CSS custom properties (hsl(var(--x)))
-                  are not reliably resolved in SVG fill attributes by Recharts. */}
-              <div className="relative shrink-0" style={{ width: 52, height: 52 }}>
-                <PieChart width={52} height={52} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+          {/* Col 3 Rows 1-2 — Credit Limit donut (tall) */}
+          <Card
+            className={`row-span-2 shadow-sm ${isOverLimit ? "border-destructive/40 bg-destructive/5" : "border-border/60"}`}
+          >
+            <CardContent className="h-full px-2 py-4 flex flex-col items-center justify-center text-center gap-1.5">
+              {/* Donut — outerRadius 36 for cx=40,cy=40 inside 80px SVG.
+                  Use concrete hex fills; CSS hsl() is unreliable in SVG fill attrs. */}
+              <div className="relative shrink-0" style={{ width: 80, height: 80 }}>
+                <PieChart width={80} height={80} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                   <Pie
                     data={
                       creditLimit != null && creditLimit > 0
@@ -2371,10 +2499,10 @@ export default function Portal() {
                           ]
                         : [{ name: "Empty", value: 1 }]
                     }
-                    cx={26}
-                    cy={26}
-                    innerRadius={15}
-                    outerRadius={24}
+                    cx={40}
+                    cy={40}
+                    innerRadius={24}
+                    outerRadius={36}
                     strokeWidth={0}
                     startAngle={90}
                     endAngle={-270}
@@ -2382,9 +2510,8 @@ export default function Portal() {
                   >
                     {creditLimit != null && creditLimit > 0 ? (
                       <>
-                        {/* Green (hue 120) → Amber (60) → Red (0) gradient based on % used */}
-                        <Cell fill={`hsl(${Math.round(120 * (1 - Math.min(usedPct ?? 0, 100) / 100))}, 75%, 40%)`} />
-                        {/* Available slice — use concrete colour so SVG resolves correctly */}
+                        {/* Hex colour interpolated green→amber→red by % used */}
+                        <Cell fill={pctToHex(usedPct ?? 0)} />
                         <Cell fill="#e2e8f0" />
                       </>
                     ) : (
@@ -2393,18 +2520,22 @@ export default function Portal() {
                   </Pie>
                 </PieChart>
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <span className={`text-[9px] font-bold font-numeric leading-none ${isOverLimit ? "text-destructive" : "text-foreground"}`}>
+                  <span
+                    className={`text-xs font-bold font-numeric leading-none ${isOverLimit ? "text-destructive" : "text-foreground"}`}
+                  >
                     {usedPct != null ? `${usedPct}%` : "—"}
                   </span>
                 </div>
               </div>
               <p className="text-[10px] text-muted-foreground leading-tight">Credit</p>
               {creditLimit != null && (
-                <div className="flex flex-col items-center">
-                  <p className={`text-[9px] font-numeric leading-tight ${isOverLimit ? "text-destructive font-semibold" : "text-muted-foreground"}`}>
+                <div className="flex flex-col items-center gap-0.5">
+                  <p
+                    className={`text-[10px] font-numeric leading-tight ${isOverLimit ? "text-destructive font-semibold" : "text-muted-foreground"}`}
+                  >
                     {formatCurrency(availableCredit ?? 0)} free
                   </p>
-                  <p className="text-[8px] text-muted-foreground/60 font-numeric leading-tight">
+                  <p className="text-[9px] text-muted-foreground/60 font-numeric leading-tight">
                     of {formatCurrency(creditLimit)}
                   </p>
                 </div>
@@ -2412,14 +2543,16 @@ export default function Portal() {
             </CardContent>
           </Card>
 
-          {/* Total Outstanding */}
-          <Card className="shadow-sm border-border/60">
-            <CardContent className="px-2 py-3 flex flex-col items-center justify-center text-center gap-1">
-              <Wallet className="h-4 w-4 text-muted-foreground" />
-              <div className="text-sm font-bold font-numeric leading-none text-destructive">
+          {/* Row 2 Cols 1-2 — Total Outstanding */}
+          <Card className="col-span-2 shadow-sm border-border/60">
+            <CardContent className="px-4 py-3 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Wallet className="h-4 w-4 text-muted-foreground shrink-0" />
+                <p className="text-xs text-muted-foreground leading-tight">Total Due</p>
+              </div>
+              <div className="text-base font-bold font-numeric leading-none text-destructive">
                 {formatCurrency(totalOutstanding)}
               </div>
-              <p className="text-[10px] text-muted-foreground leading-tight">Total Due</p>
             </CardContent>
           </Card>
         </div>

@@ -69,6 +69,8 @@ export interface EmiLoan {
   borrowerId?: string | null;
   /** Calendar days overdue (server-computed). 0 when on time or cleared. */
   lateDays?: number;
+  /** Payment history: pipe-separated "YYYY-MM-DD:amount" entries from column T. */
+  paidDates?: string[];
 }
 
 const emiLoanSchema = z.object({
