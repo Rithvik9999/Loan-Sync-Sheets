@@ -1126,6 +1126,28 @@ type RepayItem = {
 /** Days between now and a due date isn't within this window → eligible for the early-payment discount. */
 const EARLY_PAYMENT_WINDOW_DAYS = 5;
 
+/**
+ * Computes the accumulated overdue amount for periodic (daily/weekly) payments.
+ * Each missed period accrues a 2%/day late fee for every day it has been overdue.
+ * e.g. daily ₹600, 2 days overdue:
+ *   day 1 (2 days late) → 600 × (1 + 0.02×2) = 624
+ *   day 2 (1 day late)  → 600 × (1 + 0.02×1) = 612
+ *   total = 1 236
+ */
+function calcOverdueTotal(
+  periodAmount: number,
+  overdueCount: number,
+  daysPerPeriod: number,
+): number {
+  let total = 0;
+  for (let i = 1; i <= overdueCount; i++) {
+    const periodsLate = overdueCount - i + 1; // period 1 has been overdue longest
+    const daysLate = periodsLate * daysPerPeriod;
+    total += periodAmount * (1 + 0.02 * daysLate);
+  }
+  return Math.round(total);
+}
+
 function buildRepaymentItems(
   loans: Loan[] | undefined,
   emiLoans: EmiLoan[] | undefined,
@@ -1134,53 +1156,94 @@ function buildRepaymentItems(
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const items: RepayItem[] = [];
 
-  // ── Collect daily-payment loans for consolidation ──
-  const dailyLoans: Loan[] = [];
-
+  // ── Regular loans ──
   for (const l of loans ?? []) {
     if (l.status === "Clear") continue;
-    if (isPayDailyLoan(l.whatsapp, (l as any).notes)) {
-      // Include if no returnDate (ongoing) OR returnDate hasn't passed yet
-      const returnDate = l.returnDate ? new Date(l.returnDate) : null;
-      if (!returnDate || returnDate >= today) {
-        dailyLoans.push(l);
+    const lnotes = (l as any).notes as string | null;
+    const freq = parsePaymentFrequency(lnotes, l.whatsapp);
+    const txDate = l.transactionDate ? new Date(l.transactionDate + "T00:00:00Z") : null;
+
+    // ── Daily payment loan ──
+    if (isPayDailyLoan(l.whatsapp, lnotes)) {
+      const dailyAmt = freq.amount ?? 0;
+      if (!txDate || dailyAmt <= 0) continue;
+
+      const daysElapsed = Math.max(differenceInCalendarDays(today, txDate), 0);
+      const paidDays = Math.floor((l.paid ?? 0) / dailyAmt);
+      const overdueDays = Math.max(daysElapsed - paidDays, 0);
+      const returnDate = l.returnDate ? new Date(l.returnDate + "T00:00:00Z") : null;
+      const withinTenure = !returnDate || today <= returnDate;
+
+      if (overdueDays > 0) {
+        // Each missed day piles up with 2%/day late fee
+        const overdueTotal = calcOverdueTotal(dailyAmt, overdueDays, 1);
+        const firstDue = new Date(txDate.getTime() + (paidDays + 1) * 86400000);
+        items.push({
+          key: `daily-overdue-${l.id}`,
+          id: l.id, loanId: l.loanId, type: "loan",
+          label: `Daily Payment — ₹${dailyAmt.toLocaleString("en-IN")}/day`,
+          subLabel: `${overdueDays} missed payment${overdueDays > 1 ? "s" : ""} · +2%/day late fee`,
+          outstanding: overdueTotal,
+          dueDate: firstDue,
+          isOverdue: true,
+          earlyDiscount: 0,
+        });
+      } else if (withinTenure) {
+        // All caught up — today's payment is coming up
+        items.push({
+          key: `daily-today-${l.id}`,
+          id: l.id, loanId: l.loanId, type: "loan",
+          label: `Daily Payment — ₹${dailyAmt.toLocaleString("en-IN")}/day`,
+          subLabel: "Due today",
+          outstanding: dailyAmt,
+          dueDate: today,
+          isOverdue: false,
+          earlyDiscount: 0,
+        });
       }
       continue;
     }
 
-    // Weekly-pay regular loan (not daily, not EMI)
-    const freqLoan = parsePaymentFrequency((l as any).notes, l.whatsapp);
-    if (freqLoan.type === "weekly" && freqLoan.amount && freqLoan.amount > 0) {
-      const txDate = l.transactionDate ? new Date(l.transactionDate + "T00:00:00Z") : null;
-      let weeklyDueDate: Date | null = null;
-      if (txDate) {
-        const msPerWeek = 7 * 86400000;
-        const elapsed = now.getTime() - txDate.getTime();
-        const weekNumber = Math.max(Math.floor(elapsed / msPerWeek), 0);
-        const candidate = new Date(txDate.getTime() + (weekNumber + 1) * msPerWeek);
-        weeklyDueDate = candidate < now
-          ? new Date(txDate.getTime() + weekNumber * msPerWeek)
-          : candidate;
+    // ── Weekly payment loan ──
+    if (freq.type === "weekly" && freq.amount && freq.amount > 0) {
+      const weeklyAmt = freq.amount;
+      if (!txDate) continue;
+
+      const daysElapsed = Math.max(differenceInCalendarDays(today, txDate), 0);
+      const weeksElapsed = Math.floor(daysElapsed / 7);
+      const paidWeeks = Math.floor((l.paid ?? 0) / weeklyAmt);
+      const overdueWeeks = Math.max(weeksElapsed - paidWeeks, 0);
+
+      if (overdueWeeks > 0) {
+        const overdueTotal = calcOverdueTotal(weeklyAmt, overdueWeeks, 7);
+        const firstDue = new Date(txDate.getTime() + (paidWeeks + 1) * 7 * 86400000);
+        items.push({
+          key: `loan-weekly-overdue-${l.id}`,
+          id: l.id, loanId: l.loanId, type: "loan",
+          label: `Weekly Payment — ₹${weeklyAmt.toLocaleString("en-IN")}/week`,
+          subLabel: `${overdueWeeks} missed week${overdueWeeks > 1 ? "s" : ""} · +2%/day late fee`,
+          outstanding: overdueTotal,
+          dueDate: firstDue,
+          isOverdue: true,
+          earlyDiscount: 0,
+        });
+      } else {
+        const nextDue = new Date(txDate.getTime() + (weeksElapsed + 1) * 7 * 86400000);
+        items.push({
+          key: `loan-weekly-${l.id}`,
+          id: l.id, loanId: l.loanId, type: "loan",
+          label: `Weekly Payment — ₹${weeklyAmt.toLocaleString("en-IN")}/week`,
+          subLabel: `Next payment ${formatDate(nextDue.toISOString())}`,
+          outstanding: weeklyAmt,
+          dueDate: nextDue,
+          isOverdue: false,
+          earlyDiscount: 0,
+        });
       }
-      const isWeeklyOverdue = !!(weeklyDueDate && weeklyDueDate < now);
-      items.push({
-        key: `loan-weekly-${l.id}`,
-        id: l.id,
-        loanId: l.loanId,
-        type: "loan",
-        label: `${formatCurrency(l.principal)} Loan (₹${freqLoan.amount.toLocaleString("en-IN")}/week)`,
-        subLabel: weeklyDueDate
-          ? isWeeklyOverdue
-            ? `Weekly — overdue since ${formatDate(weeklyDueDate.toISOString())}`
-            : `Weekly — next payment ${formatDate(weeklyDueDate.toISOString())}`
-          : "Weekly payment",
-        outstanding: freqLoan.amount,
-        dueDate: weeklyDueDate,
-        isOverdue: isWeeklyOverdue,
-        earlyDiscount: 0,
-      });
       continue;
     }
+
+    // ── Standard (lump-sum) loan ──
     const outstanding = Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0);
     if (outstanding <= 0) continue;
     let dueDate: Date | null = null;
@@ -1196,11 +1259,7 @@ function buildRepaymentItems(
       ? Math.ceil((dueDate.getTime() - now.getTime()) / 86400000)
       : null;
     let earlyDiscount = 0;
-    if (
-      !isOverdue &&
-      daysUntilDue !== null &&
-      daysUntilDue > EARLY_PAYMENT_WINDOW_DAYS
-    ) {
+    if (!isOverdue && daysUntilDue !== null && daysUntilDue > EARLY_PAYMENT_WINDOW_DAYS) {
       earlyDiscount = computeEarlyPaymentDiscount({
         principal: l.principal,
         tenureDays: l.tenureDays,
@@ -1214,51 +1273,15 @@ function buildRepaymentItems(
     }
     items.push({
       key: `loan-${l.id}`,
-      id: l.id,
-      loanId: l.loanId,
-      type: "loan",
+      id: l.id, loanId: l.loanId, type: "loan",
       label: `${formatCurrency(l.principal)} Loan`,
       subLabel: dueDate
         ? isOverdue
           ? `Overdue since ${formatDate(dueDate.toISOString())}`
           : `Due ${formatDate(dueDate.toISOString())}`
         : "No due date set",
-      outstanding,
-      dueDate,
-      isOverdue,
-      earlyDiscount,
+      outstanding, dueDate, isOverdue, earlyDiscount,
     });
-  }
-
-  // ── Consolidate daily loans: sum amounts of all still-active orders ──
-  if (dailyLoans.length > 0) {
-    const totalDaily = dailyLoans.reduce((sum, l) => {
-      const freq = parsePaymentFrequency((l as any).notes, l.whatsapp);
-      return sum + (freq.amount ?? 0);
-    }, 0);
-    // Earliest end date helps the user know when the daily total drops
-    const endDates = dailyLoans
-      .map((l) => (l.returnDate ? new Date(l.returnDate) : null))
-      .filter((d): d is Date => d !== null)
-      .sort((a, b) => a.getTime() - b.getTime());
-    const nextEnd = endDates[0] ?? null;
-
-    if (totalDaily > 0) {
-      items.push({
-        key: "daily-consolidated",
-        id: dailyLoans[0].id,
-        loanId: "Daily Pay",
-        type: "loan",
-        label: `Daily Payment — ₹${totalDaily.toLocaleString("en-IN")}/day`,
-        subLabel: nextEnd
-          ? `${dailyLoans.length} order${dailyLoans.length > 1 ? "s" : ""} · Nearest end: ${formatDate(nextEnd.toISOString())}`
-          : `${dailyLoans.length} order${dailyLoans.length > 1 ? "s" : ""} · Due today`,
-        outstanding: totalDaily,
-        dueDate: today,
-        isOverdue: false,
-        earlyDiscount: 0,
-      });
-    }
   }
 
   // ── EMI loans ──
@@ -1267,63 +1290,65 @@ function buildRepaymentItems(
     if (isPayDailyLoan((e as any).whatsapp, e.notes)) continue;
 
     const freq = parsePaymentFrequency(e.notes, (e as any).whatsapp);
+    const txDate = e.transactionDate ? new Date(e.transactionDate + "T00:00:00Z") : null;
 
-    // Weekly payment — compute next weekly due from transaction date
+    // ── Weekly EMI — pile up overdue weeks ──
     if (freq.type === "weekly" && freq.amount && freq.amount > 0) {
-      const txDate = e.transactionDate
-        ? new Date(e.transactionDate + "T00:00:00Z")
-        : null;
-      let dueDate: Date | null = null;
-      if (txDate) {
-        const msPerWeek = 7 * 86400000;
-        const elapsed = now.getTime() - txDate.getTime();
-        const weekNumber = Math.max(Math.floor(elapsed / msPerWeek), 0);
-        // Next upcoming weekly date
-        const candidate = new Date(txDate.getTime() + (weekNumber + 1) * msPerWeek);
-        // If that candidate is already past, step back one (overdue case)
-        dueDate = candidate < now
-          ? new Date(txDate.getTime() + weekNumber * msPerWeek)
-          : candidate;
+      const weeklyAmt = freq.amount;
+      // paidWeeks from paidDates array (each entry = one paid week)
+      const paidWeeks = e.paidDates?.length ?? 0;
+      const daysElapsed = txDate ? Math.max(differenceInCalendarDays(today, txDate), 0) : 0;
+      const weeksElapsed = Math.floor(daysElapsed / 7);
+      const overdueWeeks = Math.max(weeksElapsed - paidWeeks, 0);
+
+      if (overdueWeeks > 0) {
+        const overdueTotal = calcOverdueTotal(weeklyAmt, overdueWeeks, 7);
+        const firstDue = txDate
+          ? new Date(txDate.getTime() + (paidWeeks + 1) * 7 * 86400000)
+          : null;
+        items.push({
+          key: `emi-weekly-overdue-${e.id}`,
+          id: e.id, loanId: (e as any).emiId, type: "emi",
+          label: `${formatCurrency(e.principal)} EMI (₹${weeklyAmt.toLocaleString("en-IN")}/week)`,
+          subLabel: `${overdueWeeks} missed week${overdueWeeks > 1 ? "s" : ""} · +2%/day late fee`,
+          outstanding: overdueTotal,
+          dueDate: firstDue,
+          isOverdue: true,
+          earlyDiscount: 0,
+        });
+      } else {
+        const nextDue = txDate
+          ? new Date(txDate.getTime() + (weeksElapsed + 1) * 7 * 86400000)
+          : null;
+        items.push({
+          key: `emi-weekly-${e.id}`,
+          id: e.id, loanId: (e as any).emiId, type: "emi",
+          label: `${formatCurrency(e.principal)} EMI (₹${weeklyAmt.toLocaleString("en-IN")}/week)`,
+          subLabel: nextDue ? `Next payment ${formatDate(nextDue.toISOString())}` : "Weekly payment",
+          outstanding: weeklyAmt,
+          dueDate: nextDue,
+          isOverdue: false,
+          earlyDiscount: 0,
+        });
       }
-      const isOverdue = !!(dueDate && dueDate < now);
-      items.push({
-        key: `emi-${e.id}`,
-        id: e.id,
-        loanId: (e as any).emiId,
-        type: "emi",
-        label: `${formatCurrency(e.principal)} EMI (₹${freq.amount.toLocaleString("en-IN")}/week)`,
-        subLabel: dueDate
-          ? isOverdue
-            ? `Weekly — overdue since ${formatDate(dueDate.toISOString())}`
-            : `Weekly — next payment ${formatDate(dueDate.toISOString())}`
-          : "Weekly payment",
-        outstanding: freq.amount,
-        dueDate,
-        isOverdue,
-        earlyDiscount: 0,
-      });
       continue;
     }
 
-    // Standard monthly EMI
+    // ── Standard monthly EMI ──
     const monthly = e.monthlyPayment ?? 0;
     if (monthly <= 0) continue;
     const dueDate = e.nextPaymentDate ? new Date(e.nextPaymentDate) : null;
     const isOverdue = !!(dueDate && dueDate < now);
     items.push({
       key: `emi-${e.id}`,
-      id: e.id,
-      loanId: (e as any).emiId,
-      type: "emi",
+      id: e.id, loanId: (e as any).emiId, type: "emi",
       label: `${formatCurrency(e.principal)} EMI`,
       subLabel: dueDate
         ? isOverdue
           ? `Overdue since ${formatDate(e.nextPaymentDate!)}`
           : `Next payment ${formatDate(e.nextPaymentDate!)}`
         : "No due date",
-      outstanding: monthly,
-      dueDate,
-      isOverdue,
+      outstanding: monthly, dueDate, isOverdue,
       earlyDiscount: 0,
     });
   }
@@ -2423,11 +2448,15 @@ export default function Portal() {
       ) +
       activeEmi.reduce(
         (sum, e) => {
-          // Use remainingMonths if tracked; otherwise fall back to
-          // tenureMonths minus already-paid months (from paidDates column T).
+          // Mirror the credit limit logic: when remainingMonths is tracked, use it
+          // directly (most accurate). Fall back to tenureMonths minus paidDates count
+          // when tracking hasn't been initialised for older rows.
+          if (e.monthlyPayment != null && e.remainingMonths != null) {
+            return sum + e.monthlyPayment * Math.max(e.remainingMonths, 0);
+          }
           const paidMonths = e.paidDates?.length ?? 0;
-          const effectiveRemaining = e.remainingMonths ?? Math.max((e.tenureMonths ?? 0) - paidMonths, 0);
-          return sum + (e.monthlyPayment ?? 0) * Math.max(effectiveRemaining, 0);
+          const remaining = Math.max((e.tenureMonths ?? 0) - paidMonths, 0);
+          return sum + (e.monthlyPayment ?? 0) * remaining;
         },
         0,
       ),
@@ -2518,34 +2547,29 @@ export default function Portal() {
             </CardContent>
           </Card>
 
-          {/* Col 3 Rows 1-2 — Credit Limit donut (tall) */}
+          {/* Col 3 Rows 1-2 — Credit Limit donut (compact) */}
           <Card
             className={`row-span-2 shadow-sm ${isOverLimit ? "border-destructive/40 bg-destructive/5" : "border-border/60"}`}
           >
-            <CardContent className="h-full px-2 py-3 flex flex-col items-center justify-center text-center gap-1">
-              {/* Donut — embed fill in data items for reliable Recharts rendering.
-                  Cell children reinforce the fill; isAnimationActive avoids
-                  the common "grey flash then wrong colour" glitch. */}
-              <div className="relative shrink-0" style={{ width: 80, height: 80 }}>
+            <CardContent className="h-full px-1 py-2 flex flex-col items-center justify-center text-center gap-0.5">
+              {/* Donut 64×64 — embed fill in data for reliable Recharts colors */}
+              <div className="relative shrink-0" style={{ width: 64, height: 64 }}>
                 {(() => {
                   const pieData =
                     creditLimit != null && creditLimit > 0
                       ? [
-                          { name: "Used",      value: Math.min(usedPrincipal, creditLimit),         fill: pctToHex(usedPct ?? 0) },
+                          { name: "Used",      value: Math.min(usedPrincipal, creditLimit), fill: pctToHex(usedPct ?? 0) },
                           { name: "Available", value: Math.max(creditLimit - usedPrincipal, 0), fill: "#e2e8f0" },
                         ]
                       : [{ name: "Empty", value: 1, fill: "#e2e8f0" }];
                   return (
-                    <PieChart width={80} height={80} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                    <PieChart width={64} height={64} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                       <Pie
                         data={pieData}
-                        cx={40}
-                        cy={40}
-                        innerRadius={24}
-                        outerRadius={36}
+                        cx={32} cy={32}
+                        innerRadius={18} outerRadius={28}
                         strokeWidth={0}
-                        startAngle={90}
-                        endAngle={-270}
+                        startAngle={90} endAngle={-270}
                         dataKey="value"
                         isAnimationActive={false}
                       >
@@ -2558,21 +2582,21 @@ export default function Portal() {
                 })()}
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <span
-                    className={`text-xs font-bold font-numeric leading-none ${isOverLimit ? "text-destructive" : "text-foreground"}`}
+                    className={`text-[9px] font-bold font-numeric leading-none ${isOverLimit ? "text-destructive" : "text-foreground"}`}
                   >
                     {usedPct != null ? `${usedPct}%` : "—"}
                   </span>
                 </div>
               </div>
-              <p className="text-[10px] text-muted-foreground leading-tight">Credit Limit</p>
+              <p className="text-[9px] text-muted-foreground leading-tight">Credit Limit</p>
               {creditLimit != null && (
-                <div className="flex flex-col items-center gap-0.5">
+                <div className="flex flex-col items-center gap-0">
                   <p
-                    className={`text-[10px] font-numeric leading-tight ${isOverLimit ? "text-destructive font-semibold" : "text-muted-foreground"}`}
+                    className={`text-[9px] font-numeric leading-tight ${isOverLimit ? "text-destructive font-semibold" : "text-muted-foreground"}`}
                   >
                     {formatCurrency(availableCredit ?? 0)} free
                   </p>
-                  <p className="text-[9px] text-muted-foreground/60 font-numeric leading-tight">
+                  <p className="text-[8px] text-muted-foreground/60 font-numeric leading-tight">
                     of {formatCurrency(creditLimit)}
                   </p>
                 </div>

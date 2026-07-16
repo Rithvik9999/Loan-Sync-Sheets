@@ -11,12 +11,13 @@ import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useAppAuth } from "@/hooks/use-app-auth";
 import { AlertTriangle } from "lucide-react";
+import { differenceInCalendarDays } from "date-fns";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "@/components/ui/link";
-import { ArrowLeft, Edit, Trash2, Calendar, FileText, Plus } from "lucide-react";
+import { ArrowLeft, Edit, Trash2, Calendar, FileText, Plus, TrendingUp } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { LoanStatusBadge } from "@/components/status-badges";
 
@@ -233,6 +234,99 @@ export default function LoanDetail() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ── Daily / Weekly Payment Tracker ── */}
+      {(() => {
+        const lnotes = (loan as any).notes as string | null;
+        const lwhatsapp = loan.whatsapp as string | null;
+        const text = `${lnotes ?? ""} ${lwhatsapp ?? ""}`.toLowerCase();
+        const dailyMatch = text.match(/pay\s+daily\s+(\d+)/);
+        const weeklyMatch = text.match(/pay\s+weekly\s+(\d+)/);
+        if (!dailyMatch && !weeklyMatch) return null;
+
+        const isDaily = !!dailyMatch;
+        const periodAmount = isDaily ? Number(dailyMatch![1]) : Number(weeklyMatch![1]);
+        const periodLabel = isDaily ? "day" : "week";
+        const daysPerPeriod = isDaily ? 1 : 7;
+
+        if (!loan.transactionDate || periodAmount <= 0) return null;
+
+        const txDate = new Date(loan.transactionDate + "T00:00:00Z");
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const daysElapsed = Math.max(differenceInCalendarDays(today, txDate), 0);
+        const periodsElapsed = Math.floor(daysElapsed / daysPerPeriod);
+        const totalPaid = loan.paid ?? 0;
+        const paidPeriods = Math.floor(totalPaid / periodAmount);
+        const overduePeriods = Math.max(periodsElapsed - paidPeriods, 0);
+
+        // Contract total = periods in tenure × per-period amount
+        const totalPeriods = Math.floor((loan.tenureDays ?? 0) / daysPerPeriod);
+        const contractTotal = totalPeriods * periodAmount;
+        const remainingContract = Math.max(contractTotal - totalPaid, 0);
+
+        // Accumulated overdue with 2%/day late fee per missed period
+        let overdueAccumulated = 0;
+        for (let i = 1; i <= overduePeriods; i++) {
+          const periodsLate = overduePeriods - i + 1;
+          const daysLate = periodsLate * daysPerPeriod;
+          overdueAccumulated += periodAmount * (1 + 0.02 * daysLate);
+        }
+        overdueAccumulated = Math.round(overdueAccumulated);
+
+        return (
+          <Card className={`shadow-sm ${overduePeriods > 0 ? "border-destructive/30" : "border-border/60"}`}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                {isDaily ? "Daily" : "Weekly"} Payment Tracker
+              </CardTitle>
+              <CardDescription>
+                ₹{periodAmount.toLocaleString("en-IN")} per {periodLabel} · started {formatDate(loan.transactionDate)}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">{isDaily ? "Days" : "Weeks"} Elapsed</p>
+                  <p className="text-xl font-bold font-numeric">{periodsElapsed}</p>
+                  <p className="text-[10px] text-muted-foreground">of {totalPeriods} {periodLabel}s</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Paid to Date</p>
+                  <p className="text-xl font-bold font-numeric text-emerald-700 dark:text-emerald-400">
+                    {formatCurrency(totalPaid)}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">{paidPeriods} {periodLabel}s paid</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Remaining (full contract)</p>
+                  <p className="text-xl font-bold font-numeric">{formatCurrency(remainingContract)}</p>
+                  <p className="text-[10px] text-muted-foreground">Total: {formatCurrency(contractTotal)}</p>
+                </div>
+                {overduePeriods > 0 ? (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-destructive">
+                      {overduePeriods} overdue {periodLabel}{overduePeriods > 1 ? "s" : ""}
+                    </p>
+                    <p className="text-xl font-bold font-numeric text-destructive">
+                      {formatCurrency(overdueAccumulated)}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">incl. +2%/day late fee</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">Status</p>
+                    <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">✓ Caught up</p>
+                    <p className="text-[10px] text-muted-foreground">No overdue payments</p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* Part Payments */}
       {(() => {
