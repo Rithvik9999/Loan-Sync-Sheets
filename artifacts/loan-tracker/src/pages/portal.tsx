@@ -2430,15 +2430,19 @@ export default function Portal() {
       ) +
       activeEmi.reduce(
         (sum, e) => {
-          // Mirror the credit limit logic: when remainingMonths is tracked, use it
-          // directly (most accurate). Fall back to tenureMonths minus paidDates count
-          // when tracking hasn't been initialised for older rows.
-          if (e.monthlyPayment != null && e.remainingMonths != null) {
-            return sum + e.monthlyPayment * Math.max(e.remainingMonths, 0);
+          // Use remaining PRINCIPAL (not total future payments which include interest).
+          // principalPerMonth × remainingMonths is the most accurate when both are set.
+          // Proportional fallback: principal × remainingMonths / tenureMonths.
+          const rem = e.remainingMonths;
+          if (rem == null) return sum; // uninitialized — skip rather than overstate
+          const remClamped = Math.max(rem, 0);
+          if (e.principalPerMonth != null) {
+            return sum + e.principalPerMonth * remClamped;
           }
-          const paidMonths = e.paidDates?.length ?? 0;
-          const remaining = Math.max((e.tenureMonths ?? 0) - paidMonths, 0);
-          return sum + (e.monthlyPayment ?? 0) * remaining;
+          if (e.tenureMonths > 0) {
+            return sum + Math.round((e.principal ?? 0) * remClamped / e.tenureMonths);
+          }
+          return sum + (e.principal ?? 0);
         },
         0,
       ),
