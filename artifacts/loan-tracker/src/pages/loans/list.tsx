@@ -497,9 +497,16 @@ export default function LoansList() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkPaidOpen, setBulkPaidOpen] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
-  // Default to "coming-up"; switch to "overdue" once data confirms overdue items exist.
-  const [activeTab, setActiveTab] = useState("coming-up");
-  const [tabAutoSet, setTabAutoSet] = useState(false);
+  // Active tab is persisted in sessionStorage so back-navigation restores the tab
+  // the user was on, instead of jumping back to "overdue" on every remount.
+  const LOANS_TAB_SS = "borrowapp_loans_list_tab";
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    try { return sessionStorage.getItem(LOANS_TAB_SS) ?? "coming-up"; } catch { return "coming-up"; }
+  });
+  // tabAutoSet is true when a session preference already exists (user chose a tab or auto-set already ran)
+  const [tabAutoSet, setTabAutoSet] = useState<boolean>(() => {
+    try { return !!sessionStorage.getItem(LOANS_TAB_SS); } catch { return false; }
+  });
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -577,10 +584,13 @@ export default function LoansList() {
     [allLoans, now],
   );
 
-  // Auto-select "overdue" tab on first load if there are overdue items; otherwise "coming-up".
+  // Auto-select "overdue" tab on first load ONLY when no session preference exists.
+  // This prevents back-navigation from jumping to "overdue" when the user was on a different tab.
   useEffect(() => {
     if (tabAutoSet || allLoans === undefined) return;
-    setActiveTab(overdueLoans.length > 0 || overdueEmis.length > 0 ? "overdue" : "coming-up");
+    const tab = overdueLoans.length > 0 || overdueEmis.length > 0 ? "overdue" : "coming-up";
+    setActiveTab(tab);
+    try { sessionStorage.setItem(LOANS_TAB_SS, tab); } catch {}
     setTabAutoSet(true);
   }, [tabAutoSet, allLoans, overdueLoans.length, overdueEmis.length]);
 
@@ -872,6 +882,7 @@ export default function LoansList() {
         onValueChange={(v) => {
           setActiveTab(v);
           setSelected(new Set());
+          try { sessionStorage.setItem(LOANS_TAB_SS, v); } catch {}
         }}
       >
         <div className="overflow-x-auto">

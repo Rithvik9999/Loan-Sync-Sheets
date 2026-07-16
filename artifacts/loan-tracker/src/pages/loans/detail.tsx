@@ -321,7 +321,17 @@ export default function LoanDetail() {
         const daysElapsed = Math.max(differenceInCalendarDays(today, txDate), 0);
         const periodsElapsed = Math.floor(daysElapsed / daysPerPeriod);
         const totalPaid = loan.paid ?? 0;
-        const paidPeriods = Math.floor(totalPaid / periodAmount);
+        // When there are overdue periods, a "normal" daily/weekly button click should only
+        // count toward today's payment and NOT clear overdue periods — only the +2% button
+        // should clear overdue. To enforce this, we use the extra (+2%) amount as the
+        // clearing threshold for overdue: a single normal payment (e.g. ₹600) is less than
+        // one extra-rate unit (e.g. ₹612), so floor(600/612)=0 → overdue stays unchanged.
+        const paidPeriodsNormal = Math.floor(totalPaid / periodAmount);
+        const isOnTime = paidPeriodsNormal >= periodsElapsed;
+        const clearingAmt = isOnTime
+          ? periodAmount
+          : (isDaily ? (dailyAmtExtra ?? periodAmount) : (weeklyAmtExtra ?? periodAmount));
+        const paidPeriods = Math.floor(totalPaid / clearingAmt);
         const overduePeriods = Math.max(periodsElapsed - paidPeriods, 0);
 
         // Contract total = periods in tenure × per-period amount

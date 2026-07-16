@@ -2477,6 +2477,190 @@ function LoansTab({
   );
 }
 
+// ─── Action Required Popup (shown once per login session) ────────────────────
+
+const ACTION_POPUP_SS = "borrowapp_action_popup_dismissed";
+
+type UrgentItem = RepayItem & { _urgentType: "overdue" | "coming-up" };
+
+function ActionRequiredPopup({ items }: { items: UrgentItem[] }) {
+  const [dismissed, setDismissed] = useState(() => {
+    try { return sessionStorage.getItem(ACTION_POPUP_SS) === "1"; } catch { return false; }
+  });
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [repayItem, setRepayItem] = useState<RepayItem | null>(null);
+
+  if (dismissed || items.length === 0) return null;
+
+  const dismiss = () => {
+    try { sessionStorage.setItem(ACTION_POPUP_SS, "1"); } catch {}
+    setDismissed(true);
+  };
+
+  const toggle = (key: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+
+  const selectedItems = items.filter((i) => selected.has(i.key));
+  const bulkTotal = selectedItems.reduce((s, i) => s + i.outstanding, 0);
+  const bulkDiscountTotal = selectedItems.reduce((s, i) => s + i.earlyDiscount, 0);
+  const allSelected = items.length > 0 && items.every((i) => selected.has(i.key));
+  const hasOverdue = items.some((i) => i._urgentType === "overdue");
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+        onClick={dismiss}
+      />
+      {/* Popup card */}
+      <div className="fixed inset-x-3 top-3 z-50 mx-auto max-w-sm rounded-2xl border border-border bg-background shadow-2xl overflow-hidden flex flex-col"
+        style={{ maxHeight: "85dvh" }}>
+        {/* Header */}
+        <div
+          className={`flex items-center justify-between px-4 py-3 border-b shrink-0 ${
+            hasOverdue ? "bg-destructive/5" : "bg-amber-50"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle
+              className={`h-4 w-4 shrink-0 ${hasOverdue ? "text-destructive" : "text-amber-600"}`}
+            />
+            <span className="font-semibold text-sm">Action Required</span>
+            <span
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                hasOverdue
+                  ? "bg-destructive text-white"
+                  : "bg-amber-200 text-amber-800"
+              }`}
+            >
+              {items.length}
+            </span>
+          </div>
+          <button
+            onClick={dismiss}
+            className="rounded-full p-1.5 hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Dismiss"
+          >
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Items list */}
+        <div className="overflow-y-auto flex-1 divide-y divide-border/40">
+          {items.map((item) => {
+            const isOverdue = item._urgentType === "overdue";
+            return (
+              <div
+                key={item.key}
+                className={`flex items-center gap-3 px-3 py-2.5 ${
+                  isOverdue ? "bg-destructive/[0.03]" : "bg-amber-50/30"
+                }`}
+              >
+                <Checkbox
+                  checked={selected.has(item.key)}
+                  onCheckedChange={() => toggle(item.key)}
+                  className="shrink-0"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1">
+                    {isOverdue ? (
+                      <AlertTriangle className="h-3 w-3 text-destructive shrink-0" />
+                    ) : (
+                      <Clock className="h-3 w-3 text-amber-600 shrink-0" />
+                    )}
+                    <p className="text-xs font-semibold truncate">{item.label}</p>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground truncate mt-0.5 pl-4">
+                    {item.subLabel}
+                  </p>
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span
+                    className={`font-bold text-sm font-numeric ${
+                      isOverdue ? "text-destructive" : "text-amber-700"
+                    }`}
+                  >
+                    {formatCurrency(item.outstanding)}
+                  </span>
+                  <Button
+                    size="sm"
+                    className="h-6 text-[11px] px-2 bg-emerald-700 hover:bg-emerald-800 text-white"
+                    onClick={() => setRepayItem(item)}
+                  >
+                    <Banknote className="h-3 w-3 mr-1" />
+                    Pay
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center gap-2 px-3 py-2.5 border-t bg-muted/10 shrink-0">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs h-7 px-2"
+            onClick={() =>
+              setSelected(
+                allSelected ? new Set() : new Set(items.map((i) => i.key)),
+              )
+            }
+          >
+            {allSelected ? "Deselect All" : "Select All"}
+          </Button>
+          <div className="flex-1" />
+          {selected.size > 1 && (
+            <Button
+              size="sm"
+              className="h-7 text-xs bg-emerald-700 hover:bg-emerald-800 text-white"
+              onClick={() => setBulkOpen(true)}
+            >
+              <Banknote className="h-3 w-3 mr-1" />
+              Pay {selected.size} items
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={dismiss}
+          >
+            Dismiss
+          </Button>
+        </div>
+      </div>
+
+      {repayItem && (
+        <RepayDialog
+          open={!!repayItem}
+          onOpenChange={(open) => {
+            if (!open) setRepayItem(null);
+          }}
+          label={repayItem.label}
+          outstanding={repayItem.outstanding}
+          earlyDiscount={repayItem.earlyDiscount}
+          loanId={repayItem.loanId}
+        />
+      )}
+      <BulkRepayDialog
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        total={bulkTotal}
+        count={selected.size}
+        discountTotal={bulkDiscountTotal}
+      />
+    </>
+  );
+}
+
 // ─── Portal Page ──────────────────────────────────────────────────────────────
 
 export default function Portal() {
@@ -2539,6 +2723,20 @@ export default function Portal() {
         });
     },
     [allItems],
+  );
+
+  // Build urgent items for the Action Required popup (overdue + coming-up, sorted by date)
+  const urgentItems = useMemo<UrgentItem[]>(
+    () => [
+      ...overdueItems.map((i) => ({ ...i, _urgentType: "overdue" as const })),
+      ...comingUpItems.map((i) => ({ ...i, _urgentType: "coming-up" as const })),
+    ].sort((a, b) => {
+      if (!a.dueDate && !b.dueDate) return 0;
+      if (!a.dueDate) return 1;
+      if (!b.dueDate) return -1;
+      return a.dueDate.getTime() - b.dueDate.getTime();
+    }),
+    [overdueItems, comingUpItems],
   );
 
   const hasOverdue = overdueItems.length > 0;
@@ -2654,63 +2852,10 @@ export default function Portal() {
         </div>
       </div>
 
-      {/* ── Urgent Payments Panel: overdue + coming up (≤5 days), sorted by date ── */}
-      {!isLoading && (overdueItems.length > 0 || comingUpItems.length > 0) && (() => {
-        const urgentItems = [
-          ...overdueItems.map((i) => ({ ...i, _urgentType: "overdue" as const })),
-          ...comingUpItems.map((i) => ({ ...i, _urgentType: "coming-up" as const })),
-        ].sort((a, b) => {
-          if (!a.dueDate && !b.dueDate) return 0;
-          if (!a.dueDate) return 1;
-          if (!b.dueDate) return -1;
-          return a.dueDate.getTime() - b.dueDate.getTime();
-        });
-        return (
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between px-0.5">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Action Required
-              </p>
-              <span className="text-xs text-muted-foreground">
-                {urgentItems.length} item{urgentItems.length !== 1 ? "s" : ""}
-              </span>
-            </div>
-            <div className="divide-y divide-border/40 rounded-xl border border-border/60 overflow-hidden shadow-sm">
-              {urgentItems.map((item) => (
-                <div
-                  key={item.id}
-                  className={`flex items-center justify-between px-3 py-2.5 text-sm ${
-                    item._urgentType === "overdue"
-                      ? "bg-destructive/5 hover:bg-destructive/10"
-                      : "bg-amber-50/70 hover:bg-amber-50"
-                  } transition-colors`}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      {item._urgentType === "overdue" ? (
-                        <AlertTriangle className="h-3 w-3 text-destructive shrink-0" />
-                      ) : (
-                        <Clock className="h-3 w-3 text-amber-600 shrink-0" />
-                      )}
-                      <p className="text-xs font-medium truncate">{item.label}</p>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground pl-[18px] truncate mt-0.5">
-                      {item.subLabel}
-                    </p>
-                  </div>
-                  <div
-                    className={`font-bold text-sm font-numeric ml-3 shrink-0 ${
-                      item._urgentType === "overdue" ? "text-destructive" : "text-amber-700"
-                    }`}
-                  >
-                    {formatCurrency(item.outstanding)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
+      {/* Action Required popup (shown once per session on login) */}
+      {!isLoading && (
+        <ActionRequiredPopup items={urgentItems} />
+      )}
 
       {/* Summary Cards — drawing layout:
           [Loans] [EMI  ] [Credit Pie ↕ row-span-2]
@@ -2723,7 +2868,7 @@ export default function Portal() {
           <Skeleton className="h-10 w-full rounded-xl col-span-3" />
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-1.5 items-start">
+        <div className="grid grid-cols-3 gap-1.5">
           {/* Row 1 Col 1 — Loans count */}
           <Card className="shadow-sm border-border/60">
             <CardContent className="px-2 py-2 flex flex-col items-center justify-center text-center gap-0.5">
@@ -2742,9 +2887,9 @@ export default function Portal() {
             </CardContent>
           </Card>
 
-          {/* Col 3 Row 1 — Credit Limit donut (compact) */}
+          {/* Col 3 Rows 1-2 — Credit Limit donut (spans 2 rows, freeing left col for Total Due) */}
           <Card
-            className={`shadow-sm ${isOverLimit ? "border-destructive/40 bg-destructive/5" : "border-border/60"}`}
+            className={`row-span-2 shadow-sm ${isOverLimit ? "border-destructive/40 bg-destructive/5" : "border-border/60"}`}
           >
             <CardContent className="h-full px-1 py-2 flex flex-col items-center justify-center text-center gap-0.5">
               {/* Donut 64×64 — embed fill in data for reliable Recharts colors */}
@@ -2799,8 +2944,8 @@ export default function Portal() {
             </CardContent>
           </Card>
 
-          {/* Row 2 — Total Outstanding (full width) */}
-          <Card className="col-span-3 shadow-sm border-border/60">
+          {/* Row 2 Cols 1-2 — Total Outstanding (sits left of pie which spans both rows) */}
+          <Card className="col-span-2 shadow-sm border-border/60">
             <CardContent className="px-3 py-2 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Wallet className="h-4 w-4 text-muted-foreground shrink-0" />
