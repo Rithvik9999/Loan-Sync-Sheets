@@ -271,6 +271,8 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
       .split("|")
       .map((s) => s.trim())
       .filter(Boolean),
+    dailyAmount: toNumberOrNull(get(COL.DAILY_AMOUNT)),
+    weeklyAmount: toNumberOrNull(get(COL.WEEKLY_AMOUNT)),
   };
 }
 
@@ -403,6 +405,9 @@ function emiInputCellUpdates(
   set(COL.STATUS, input.status);
   set(COL.WHATSAPP, input.whatsapp ?? undefined);
   set(COL.NOTES, input.notes ?? undefined);
+  // Custom quick-pay override amounts (null = clear back to computed default)
+  if (input.dailyAmount !== undefined) set(COL.DAILY_AMOUNT, input.dailyAmount ?? "");
+  if (input.weeklyAmount !== undefined) set(COL.WEEKLY_AMOUNT, input.weeklyAmount ?? "");
 
   // Server-managed tracking columns
   if (input.nextPaymentDate !== undefined) {

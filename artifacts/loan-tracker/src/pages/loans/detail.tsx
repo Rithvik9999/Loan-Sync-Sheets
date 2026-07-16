@@ -3,6 +3,7 @@ import { useState } from "react";
 import {
   useGetLoan,
   useDeleteLoan,
+  useUpdateLoan,
   getGetLoanQueryKey,
   getListLoansQueryKey,
 } from "@workspace/api-client-react";
@@ -11,13 +12,13 @@ import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useAppAuth } from "@/hooks/use-app-auth";
 import { AlertTriangle } from "lucide-react";
-import { differenceInCalendarDays } from "date-fns";
+import { differenceInCalendarDays, format } from "date-fns";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "@/components/ui/link";
-import { ArrowLeft, Edit, Trash2, Calendar, FileText, Plus, TrendingUp } from "lucide-react";
+import { ArrowLeft, Edit, Trash2, Calendar, FileText, Plus, TrendingUp, CalendarDays, CalendarRange, Loader2 } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { LoanStatusBadge } from "@/components/status-badges";
 
@@ -46,12 +47,16 @@ export default function LoanDetail() {
   const [isDeleteStep1Open, setIsDeleteStep1Open] = useState(false);
   const [isDeleteStep2Open, setIsDeleteStep2Open] = useState(false);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
+  const [quickPayDate, setQuickPayDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [dailyPending, setDailyPending] = useState(false);
+  const [weeklyPending, setWeeklyPending] = useState(false);
 
   const { data: loan, isLoading: isLoanLoading } = useGetLoan(id, {
     query: { queryKey: getGetLoanQueryKey(id), enabled: !!id },
   });
 
   const deleteLoan = useDeleteLoan();
+  const updateLoan = useUpdateLoan();
   const isStaff = role === "staff";
 
   const handleDelete = () => {
@@ -245,9 +250,41 @@ export default function LoanDetail() {
         if (!dailyMatch && !weeklyMatch) return null;
 
         const isDaily = !!dailyMatch;
+        // Both buttons available when both patterns exist
+        const dailyAmt = dailyMatch ? Number(dailyMatch[1]) : null;
+        const weeklyAmt = weeklyMatch ? Number(weeklyMatch[1]) : null;
         const periodAmount = isDaily ? Number(dailyMatch![1]) : Number(weeklyMatch![1]);
         const periodLabel = isDaily ? "day" : "week";
         const daysPerPeriod = isDaily ? 1 : 7;
+
+        const handleQuickPay = (amount: number, freq: "daily" | "weekly") => {
+          if (!amount || dailyPending || weeklyPending) return;
+          const setter = freq === "daily" ? setDailyPending : setWeeklyPending;
+          setter(true);
+          updateLoan.mutate(
+            {
+              id: loan.id,
+              data: {
+                paid: (loan.paid ?? 0) + amount,
+                dateOfPartPayment: quickPayDate,
+              },
+            },
+            {
+              onSuccess: (updated) => {
+                queryClient.setQueryData(getGetLoanQueryKey(loan.id), updated);
+                queryClient.invalidateQueries({ queryKey: getListLoansQueryKey() });
+                toast({
+                  title: `${freq === "daily" ? "Daily" : "Weekly"} payment recorded`,
+                  description: `₹${amount.toLocaleString("en-IN")} added on ${quickPayDate}.`,
+                });
+              },
+              onError: () => {
+                toast({ variant: "destructive", title: "Error", description: "Could not record payment." });
+              },
+              onSettled: () => setter(false),
+            },
+          );
+        };
 
         if (!loan.transactionDate || periodAmount <= 0) return null;
 
@@ -278,13 +315,62 @@ export default function LoanDetail() {
         return (
           <Card className={`shadow-sm ${overduePeriods > 0 ? "border-destructive/30" : "border-border/60"}`}>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                {isDaily ? "Daily" : "Weekly"} Payment Tracker
-              </CardTitle>
-              <CardDescription>
-                ₹{periodAmount.toLocaleString("en-IN")} per {periodLabel} · started {formatDate(loan.transactionDate)}
-              </CardDescription>
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                    {dailyAmt && weeklyAmt ? "Daily / Weekly" : isDaily ? "Daily" : "Weekly"} Payment Tracker
+                  </CardTitle>
+                  <CardDescription>
+                    {dailyAmt && <span>₹{dailyAmt.toLocaleString("en-IN")}/day</span>}
+                    {dailyAmt && weeklyAmt && <span> · </span>}
+                    {weeklyAmt && <span>₹{weeklyAmt.toLocaleString("en-IN")}/week</span>}
+                    <span> · started {formatDate(loan.transactionDate)}</span>
+                  </CardDescription>
+                </div>
+                {/* Quick-pay buttons + date picker */}
+                {isStaff && loan.status !== "Clear" && (
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {dailyAmt != null && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-sky-500 text-sky-700 hover:bg-sky-50 gap-1.5"
+                          onClick={() => handleQuickPay(dailyAmt, "daily")}
+                          disabled={dailyPending || weeklyPending}
+                        >
+                          {dailyPending
+                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            : <CalendarDays className="h-3.5 w-3.5" />}
+                          Daily <span className="font-numeric font-semibold">₹{dailyAmt.toLocaleString("en-IN")}</span>
+                        </Button>
+                      )}
+                      {weeklyAmt != null && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-violet-500 text-violet-700 hover:bg-violet-50 gap-1.5"
+                          onClick={() => handleQuickPay(weeklyAmt, "weekly")}
+                          disabled={dailyPending || weeklyPending}
+                        >
+                          {weeklyPending
+                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            : <CalendarRange className="h-3.5 w-3.5" />}
+                          Weekly <span className="font-numeric font-semibold">₹{weeklyAmt.toLocaleString("en-IN")}</span>
+                        </Button>
+                      )}
+                      <input
+                        type="date"
+                        value={quickPayDate}
+                        onChange={(e) => setQuickPayDate(e.target.value)}
+                        className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                        title="Date to record this payment on"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

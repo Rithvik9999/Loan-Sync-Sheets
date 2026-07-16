@@ -71,6 +71,10 @@ export interface EmiLoan {
   lateDays?: number;
   /** Payment history: pipe-separated "YYYY-MM-DD:amount" entries from column T. */
   paidDates?: string[];
+  /** Custom daily instalment override stored in sheet column U. null = use monthlyPayment ÷ 30. */
+  dailyAmount?: number | null;
+  /** Custom weekly instalment override stored in sheet column V. null = use monthlyPayment × 7 ÷ 30. */
+  weeklyAmount?: number | null;
 }
 
 const emiLoanSchema = z.object({
@@ -83,7 +87,23 @@ const emiLoanSchema = z.object({
   statusNotes: z.string().optional(),
   notes: z.string().optional(),
   status: z.enum(["Pending", "Clear", "Temp"]).optional(),
+  customDailyAmount: z.coerce.number().min(0).optional(),
+  customWeeklyAmount: z.coerce.number().min(0).optional(),
 });
+
+/** Extract custom pay-daily / pay-weekly amounts from a notes string (used by regular Loans, not EMI). */
+export function parsePayAmountsFromNotes(notes: string | undefined): {
+  daily: number | undefined;
+  weekly: number | undefined;
+} {
+  const text = notes ?? "";
+  const dailyMatch = text.match(/pay\s+daily\s+(\d+)/i);
+  const weeklyMatch = text.match(/pay\s+weekly\s+(\d+)/i);
+  return {
+    daily: dailyMatch ? Number(dailyMatch[1]) : undefined,
+    weekly: weeklyMatch ? Number(weeklyMatch[1]) : undefined,
+  };
+}
 
 type EmiLoanFormValues = z.infer<typeof emiLoanSchema>;
 
@@ -100,7 +120,7 @@ async function fetchEmiLoans(): Promise<EmiLoan[]> {
   return res.json();
 }
 
-async function createEmiLoan(data: EmiLoanFormValues): Promise<EmiLoan> {
+async function createEmiLoan(data: EmiLoanFormValues & { dailyAmount?: number | null; weeklyAmount?: number | null }): Promise<EmiLoan> {
   const res = await fetch("/api/emi-loans", {
     method: "POST",
     credentials: "include",
@@ -115,6 +135,8 @@ async function createEmiLoan(data: EmiLoanFormValues): Promise<EmiLoan> {
       status: data.status || "Pending",
       statusNotes: data.statusNotes || null,
       notes: data.notes || null,
+      dailyAmount: data.dailyAmount ?? null,
+      weeklyAmount: data.weeklyAmount ?? null,
     }),
   });
   if (!res.ok) {
@@ -124,7 +146,7 @@ async function createEmiLoan(data: EmiLoanFormValues): Promise<EmiLoan> {
   return res.json();
 }
 
-async function updateEmiLoan(id: string, data: Partial<EmiLoanFormValues>): Promise<EmiLoan> {
+async function updateEmiLoan(id: string, data: Partial<EmiLoanFormValues> & { dailyAmount?: number | null; weeklyAmount?: number | null }): Promise<EmiLoan> {
   const res = await fetch(`/api/emi-loans/${id}`, {
     method: "PATCH",
     credentials: "include",
@@ -139,6 +161,8 @@ async function updateEmiLoan(id: string, data: Partial<EmiLoanFormValues>): Prom
       status: data.status,
       statusNotes: data.statusNotes || null,
       notes: data.notes || null,
+      dailyAmount: data.dailyAmount ?? null,
+      weeklyAmount: data.weeklyAmount ?? null,
     }),
   });
   if (!res.ok) {
@@ -215,6 +239,9 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
     statusNotes: loan?.statusNotes || "",
     notes: loan?.notes || "",
     status: loan?.status || "Pending",
+    // Use dedicated sheet columns U/V when editing; undefined = let sheet/UI compute default
+    customDailyAmount: loan?.dailyAmount ?? undefined,
+    customWeeklyAmount: loan?.weeklyAmount ?? undefined,
   });
 
   const form = useForm<EmiLoanFormValues>({
@@ -224,15 +251,21 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
 
   async function onSubmit(data: EmiLoanFormValues) {
     setIsPending(true);
+    // Pass custom daily/weekly amounts directly to API (stored in sheet cols U/V)
+    const payload = {
+      ...data,
+      dailyAmount: data.customDailyAmount && data.customDailyAmount > 0 ? Math.round(data.customDailyAmount) : null,
+      weeklyAmount: data.customWeeklyAmount && data.customWeeklyAmount > 0 ? Math.round(data.customWeeklyAmount) : null,
+    };
     try {
       if (isEditing) {
-        const updated = await updateEmiLoan(loan.id, data);
+        const updated = await updateEmiLoan(loan.id, payload);
         queryClient.setQueryData(emiLoanQueryKey(loan.id), updated);
         queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
         toast({ title: "EMI Loan updated", description: "The sheet has recalculated the computed fields." });
         onOpenChange(false);
       } else {
-        const newLoan = await createEmiLoan(data);
+        const newLoan = await createEmiLoan(payload);
         queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
         toast({ title: "EMI Loan recorded", description: "Added to the EMI sheet." });
         form.reset();
@@ -445,6 +478,68 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
                 </FormItem>
               )}
             />
+
+            {/* Custom daily / weekly payment amounts */}
+            <div className="rounded-lg border border-sky-200 bg-sky-50/60 dark:bg-sky-950/20 dark:border-sky-800 p-4 space-y-3">
+              <p className="text-xs font-semibold text-sky-800 dark:text-sky-300 uppercase tracking-wide">
+                Daily / Weekly Quick-Pay Amounts
+              </p>
+              <p className="text-xs text-sky-700 dark:text-sky-400">
+                Override the auto-computed amounts (monthly ÷ 30 / × 7 ÷ 30) for the one-click daily and weekly payment buttons on the detail page.
+              </p>
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="customDailyAmount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Daily Amount (₹)</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          step="1"
+                          min="0"
+                          placeholder={
+                            form.watch("principal") && form.watch("tenureMonths")
+                              ? String(Math.round((Number(form.watch("principal")) * 0.02 + Number(form.watch("principal")) / Number(form.watch("tenureMonths"))) / 30))
+                              : "e.g. 250"
+                          }
+                          {...field}
+                          value={field.value ?? ""}
+                          onChange={(e) => field.onChange(e.target.value === "" ? undefined : e.target.value)}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="customWeeklyAmount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Weekly Amount (₹)</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          step="1"
+                          min="0"
+                          placeholder={
+                            form.watch("principal") && form.watch("tenureMonths")
+                              ? String(Math.round(((Number(form.watch("principal")) * 0.02 + Number(form.watch("principal")) / Number(form.watch("tenureMonths"))) / 30) * 7))
+                              : "e.g. 1750"
+                          }
+                          {...field}
+                          value={field.value ?? ""}
+                          onChange={(e) => field.onChange(e.target.value === "" ? undefined : e.target.value)}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </div>
 
             <FormField
               control={form.control}

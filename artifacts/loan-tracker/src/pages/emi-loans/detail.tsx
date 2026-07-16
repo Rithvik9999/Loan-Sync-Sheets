@@ -270,6 +270,7 @@ export default function EmiLoanDetail() {
   const [undoPending, setUndoPending] = useState(false);
   const [dailyPending, setDailyPending] = useState(false);
   const [weeklyPending, setWeeklyPending] = useState(false);
+  const [quickPayDate, setQuickPayDate] = useState(format(new Date(), "yyyy-MM-dd"));
 
   const { data: loan, isLoading } = useQuery<EmiLoan>({
     queryKey: emiLoanQueryKey(id),
@@ -284,11 +285,11 @@ export default function EmiLoanDetail() {
     queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
   };
 
-  /** One-click: record today's daily instalment (monthlyPayment / 30) */
+  /** One-click: record daily instalment — uses dedicated sheet column U if set, else monthlyPayment ÷ 30 */
   const handleDailyPayment = async () => {
     if (!loan || !loan.monthlyPayment) return;
-    const amount = Math.round(loan.monthlyPayment / 30);
-    const date = format(new Date(), "yyyy-MM-dd");
+    const amount = loan.dailyAmount ?? Math.round(loan.monthlyPayment / 30);
+    const date = quickPayDate;
     setDailyPending(true);
     try {
       const res = await fetch(`/api/emi-loans/${loan.id}/pay-partial`, {
@@ -316,11 +317,11 @@ export default function EmiLoanDetail() {
     }
   };
 
-  /** One-click: record today's weekly instalment (monthlyPayment × 7 / 30) */
+  /** One-click: record weekly instalment — uses dedicated sheet column V if set, else monthlyPayment × 7 ÷ 30 */
   const handleWeeklyPayment = async () => {
     if (!loan || !loan.monthlyPayment) return;
-    const amount = Math.round((loan.monthlyPayment * 7) / 30);
-    const date = format(new Date(), "yyyy-MM-dd");
+    const amount = loan.weeklyAmount ?? Math.round((loan.monthlyPayment * 7) / 30);
+    const date = quickPayDate;
     setWeeklyPending(true);
     try {
       const res = await fetch(`/api/emi-loans/${loan.id}/pay-partial`, {
@@ -401,9 +402,10 @@ export default function EmiLoanDetail() {
       ? Math.round(loan.lateFees / (loan.lateDays ?? 1))
       : null;
 
-  // Computed quick-pay amounts
-  const dailyAmount = loan.monthlyPayment != null ? Math.round(loan.monthlyPayment / 30) : null;
-  const weeklyAmount = loan.monthlyPayment != null ? Math.round((loan.monthlyPayment * 7) / 30) : null;
+  // Computed quick-pay amounts — prefer dedicated sheet columns U/V, fall back to formula
+  const dailyAmount = loan.dailyAmount ?? (loan.monthlyPayment != null ? Math.round(loan.monthlyPayment / 30) : null);
+  const weeklyAmount = loan.weeklyAmount ?? (loan.monthlyPayment != null ? Math.round((loan.monthlyPayment * 7) / 30) : null);
+  const hasCustomAmounts = !!(loan.dailyAmount || loan.weeklyAmount);
 
   const stats: { label: string; value: string; highlight?: boolean }[] = [
     { label: "EMI ID", value: loan.emiId ?? "—" },
@@ -476,35 +478,45 @@ export default function EmiLoanDetail() {
 
         {isStaff && (
           <div className="flex flex-col gap-2">
-            {/* Quick payment buttons (daily / weekly) */}
+            {/* Quick payment buttons (daily / weekly) + date picker */}
             {loan.status !== "Clear" && loan.monthlyPayment != null && (
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="border-sky-500 text-sky-700 hover:bg-sky-50 gap-1.5"
-                  onClick={handleDailyPayment}
-                  disabled={dailyPending}
-                  title={`Record daily instalment (₹${dailyAmount?.toLocaleString("en-IN")} = monthly ÷ 30)`}
-                >
-                  {dailyPending
-                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    : <CalendarDays className="h-3.5 w-3.5" />}
-                  Daily {dailyAmount != null && <span className="font-numeric font-semibold">₹{dailyAmount.toLocaleString("en-IN")}</span>}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="border-violet-500 text-violet-700 hover:bg-violet-50 gap-1.5"
-                  onClick={handleWeeklyPayment}
-                  disabled={weeklyPending}
-                  title={`Record weekly instalment (₹${weeklyAmount?.toLocaleString("en-IN")} = monthly × 7 ÷ 30)`}
-                >
-                  {weeklyPending
-                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    : <CalendarRange className="h-3.5 w-3.5" />}
-                  Weekly {weeklyAmount != null && <span className="font-numeric font-semibold">₹{weeklyAmount.toLocaleString("en-IN")}</span>}
-                </Button>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-sky-500 text-sky-700 hover:bg-sky-50 gap-1.5"
+                    onClick={handleDailyPayment}
+                    disabled={dailyPending}
+                    title={`Record daily instalment (₹${dailyAmount?.toLocaleString("en-IN")}${hasCustomAmounts ? " — custom amount" : " = monthly ÷ 30"})`}
+                  >
+                    {dailyPending
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : <CalendarDays className="h-3.5 w-3.5" />}
+                    Daily {dailyAmount != null && <span className="font-numeric font-semibold">₹{dailyAmount.toLocaleString("en-IN")}</span>}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-violet-500 text-violet-700 hover:bg-violet-50 gap-1.5"
+                    onClick={handleWeeklyPayment}
+                    disabled={weeklyPending}
+                    title={`Record weekly instalment (₹${weeklyAmount?.toLocaleString("en-IN")}${hasCustomAmounts ? " — custom amount" : " = monthly × 7 ÷ 30"})`}
+                  >
+                    {weeklyPending
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : <CalendarRange className="h-3.5 w-3.5" />}
+                    Weekly {weeklyAmount != null && <span className="font-numeric font-semibold">₹{weeklyAmount.toLocaleString("en-IN")}</span>}
+                  </Button>
+                  {/* Date picker for quick-pay */}
+                  <input
+                    type="date"
+                    value={quickPayDate}
+                    onChange={(e) => setQuickPayDate(e.target.value)}
+                    className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    title="Date to record this payment on"
+                  />
+                </div>
               </div>
             )}
 
