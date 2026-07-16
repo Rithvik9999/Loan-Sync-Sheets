@@ -88,14 +88,21 @@ export default function LoanDetail() {
 
   const isOverdue = (loan.lateDays ?? 0) > 0 && loan.status !== "Clear";
 
+  // Compute perDayAddition locally as a fallback in case the API field is absent
+  const perDayAddition: number | null =
+    (loan as any).perDayAddition ??
+    (isOverdue && (loan.lateDays ?? 0) > 0 && (loan.lateFees ?? 0) > 0
+      ? Math.round((loan.lateFees ?? 0) / (loan.lateDays ?? 1))
+      : null);
+
   const computed: { label: string; value: string; highlight?: "red" | "amber" }[] = [
     { label: "Flat Fee", value: loan.flatFee != null ? formatCurrency(loan.flatFee) : "—" },
     { label: "Interest %", value: loan.interestPct != null ? `${Number((loan.interestPct * 100).toFixed(2))}%` : "—" },
     { label: "Interest", value: loan.interest != null ? formatCurrency(loan.interest) : "—" },
     { label: "Late Days", value: loan.lateDays != null ? String(loan.lateDays) : "—", highlight: isOverdue ? "red" : undefined },
     { label: "Late Fees", value: loan.lateFees != null ? formatCurrency(loan.lateFees) : "—", highlight: isOverdue ? "red" : undefined },
-    ...(isOverdue && (loan as any).perDayAddition != null
-      ? [{ label: "Per Day Addition", value: formatCurrency((loan as any).perDayAddition), highlight: "amber" as const }]
+    ...(isOverdue && perDayAddition != null
+      ? [{ label: "Per Day Addition", value: formatCurrency(perDayAddition), highlight: "amber" as const }]
       : []),
     ...(isStaff
       ? [

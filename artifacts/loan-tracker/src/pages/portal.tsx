@@ -1140,11 +1140,45 @@ function buildRepaymentItems(
   for (const l of loans ?? []) {
     if (l.status === "Clear") continue;
     if (isPayDailyLoan(l.whatsapp, (l as any).notes)) {
-      // Only include if still within tenure (returnDate >= today)
+      // Include if no returnDate (ongoing) OR returnDate hasn't passed yet
       const returnDate = l.returnDate ? new Date(l.returnDate) : null;
-      if (returnDate && returnDate >= today) {
+      if (!returnDate || returnDate >= today) {
         dailyLoans.push(l);
       }
+      continue;
+    }
+
+    // Weekly-pay regular loan (not daily, not EMI)
+    const freqLoan = parsePaymentFrequency((l as any).notes, l.whatsapp);
+    if (freqLoan.type === "weekly" && freqLoan.amount && freqLoan.amount > 0) {
+      const txDate = l.transactionDate ? new Date(l.transactionDate + "T00:00:00Z") : null;
+      let weeklyDueDate: Date | null = null;
+      if (txDate) {
+        const msPerWeek = 7 * 86400000;
+        const elapsed = now.getTime() - txDate.getTime();
+        const weekNumber = Math.max(Math.floor(elapsed / msPerWeek), 0);
+        const candidate = new Date(txDate.getTime() + (weekNumber + 1) * msPerWeek);
+        weeklyDueDate = candidate < now
+          ? new Date(txDate.getTime() + weekNumber * msPerWeek)
+          : candidate;
+      }
+      const isWeeklyOverdue = !!(weeklyDueDate && weeklyDueDate < now);
+      items.push({
+        key: `loan-weekly-${l.id}`,
+        id: l.id,
+        loanId: l.loanId,
+        type: "loan",
+        label: `${formatCurrency(l.principal)} Loan (₹${freqLoan.amount.toLocaleString("en-IN")}/week)`,
+        subLabel: weeklyDueDate
+          ? isWeeklyOverdue
+            ? `Weekly — overdue since ${formatDate(weeklyDueDate.toISOString())}`
+            : `Weekly — next payment ${formatDate(weeklyDueDate.toISOString())}`
+          : "Weekly payment",
+        outstanding: freqLoan.amount,
+        dueDate: weeklyDueDate,
+        isOverdue: isWeeklyOverdue,
+        earlyDiscount: 0,
+      });
       continue;
     }
     const outstanding = Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0);
@@ -2356,8 +2390,8 @@ export default function Portal() {
         .filter((i) => {
           if (i.isOverdue) return false;
           if (!i.dueDate) return false;
-          const daysUntil = (i.dueDate.getTime() - now.getTime()) / 86400000;
-          return daysUntil >= 0 && daysUntil <= 5;
+          const daysUntil = differenceInCalendarDays(i.dueDate, now);
+          return daysUntil >= 0 && daysUntil <= 7;
         })
         .sort((a, b) => {
           if (!a.dueDate && !b.dueDate) return 0;
@@ -2388,10 +2422,13 @@ export default function Portal() {
         0,
       ) +
       activeEmi.reduce(
-        (sum, e) =>
-          sum +
-          (e.monthlyPayment ?? 0) *
-            Math.max(e.remainingMonths ?? e.tenureMonths ?? 0, 0),
+        (sum, e) => {
+          // Use remainingMonths if tracked; otherwise fall back to
+          // tenureMonths minus already-paid months (from paidDates column T).
+          const paidMonths = e.paidDates?.length ?? 0;
+          const effectiveRemaining = e.remainingMonths ?? Math.max((e.tenureMonths ?? 0) - paidMonths, 0);
+          return sum + (e.monthlyPayment ?? 0) * Math.max(effectiveRemaining, 0);
+        },
         0,
       ),
     [activeLoans, activeEmi],
@@ -2455,28 +2492,28 @@ export default function Portal() {
           [Loans] [EMI  ] [Credit Pie ↕ row-span-2]
           [Total Due  col-span-2   ] [Credit Pie   ] */}
       {isLoading ? (
-        <div className="grid grid-cols-3 gap-2" style={{ gridTemplateRows: "auto auto" }}>
-          <Skeleton className="h-20 w-full rounded-xl" />
-          <Skeleton className="h-20 w-full rounded-xl" />
-          <Skeleton className="h-[10.5rem] w-full rounded-xl row-span-2" />
-          <Skeleton className="h-20 w-full rounded-xl col-span-2" />
+        <div className="grid grid-cols-3 gap-1.5" style={{ gridTemplateRows: "auto auto" }}>
+          <Skeleton className="h-16 w-full rounded-xl" />
+          <Skeleton className="h-16 w-full rounded-xl" />
+          <Skeleton className="h-[8.5rem] w-full rounded-xl row-span-2" />
+          <Skeleton className="h-10 w-full rounded-xl col-span-2" />
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-2" style={{ gridTemplateRows: "auto auto" }}>
+        <div className="grid grid-cols-3 gap-1.5 items-start" style={{ gridTemplateRows: "auto auto" }}>
           {/* Row 1 Col 1 — Loans count */}
           <Card className="shadow-sm border-border/60">
-            <CardContent className="px-2 py-3 flex flex-col items-center justify-center text-center gap-1">
-              <CreditCard className="h-4 w-4 text-muted-foreground" />
-              <div className="text-2xl font-bold font-numeric leading-none">{activeLoans.length}</div>
+            <CardContent className="px-2 py-2 flex flex-col items-center justify-center text-center gap-0.5">
+              <CreditCard className="h-3.5 w-3.5 text-muted-foreground" />
+              <div className="text-xl font-bold font-numeric leading-none">{activeLoans.length}</div>
               <p className="text-[10px] text-muted-foreground leading-tight">Loans</p>
             </CardContent>
           </Card>
 
           {/* Row 1 Col 2 — EMI count */}
           <Card className="shadow-sm border-border/60">
-            <CardContent className="px-2 py-3 flex flex-col items-center justify-center text-center gap-1">
-              <CalendarClock className="h-4 w-4 text-muted-foreground" />
-              <div className="text-2xl font-bold font-numeric leading-none">{activeEmi.length}</div>
+            <CardContent className="px-2 py-2 flex flex-col items-center justify-center text-center gap-0.5">
+              <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />
+              <div className="text-xl font-bold font-numeric leading-none">{activeEmi.length}</div>
               <p className="text-[10px] text-muted-foreground leading-tight">EMI</p>
             </CardContent>
           </Card>
@@ -2485,40 +2522,40 @@ export default function Portal() {
           <Card
             className={`row-span-2 shadow-sm ${isOverLimit ? "border-destructive/40 bg-destructive/5" : "border-border/60"}`}
           >
-            <CardContent className="h-full px-2 py-4 flex flex-col items-center justify-center text-center gap-1.5">
-              {/* Donut — outerRadius 36 for cx=40,cy=40 inside 80px SVG.
-                  Use concrete hex fills; CSS hsl() is unreliable in SVG fill attrs. */}
+            <CardContent className="h-full px-2 py-3 flex flex-col items-center justify-center text-center gap-1">
+              {/* Donut — embed fill in data items for reliable Recharts rendering.
+                  Cell children reinforce the fill; isAnimationActive avoids
+                  the common "grey flash then wrong colour" glitch. */}
               <div className="relative shrink-0" style={{ width: 80, height: 80 }}>
-                <PieChart width={80} height={80} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
-                  <Pie
-                    data={
-                      creditLimit != null && creditLimit > 0
-                        ? [
-                            { name: "Used", value: Math.min(usedPrincipal, creditLimit) },
-                            { name: "Available", value: Math.max(creditLimit - usedPrincipal, 0) },
-                          ]
-                        : [{ name: "Empty", value: 1 }]
-                    }
-                    cx={40}
-                    cy={40}
-                    innerRadius={24}
-                    outerRadius={36}
-                    strokeWidth={0}
-                    startAngle={90}
-                    endAngle={-270}
-                    dataKey="value"
-                  >
-                    {creditLimit != null && creditLimit > 0 ? (
-                      <>
-                        {/* Hex colour interpolated green→amber→red by % used */}
-                        <Cell fill={pctToHex(usedPct ?? 0)} />
-                        <Cell fill="#e2e8f0" />
-                      </>
-                    ) : (
-                      <Cell fill="#e2e8f0" />
-                    )}
-                  </Pie>
-                </PieChart>
+                {(() => {
+                  const pieData =
+                    creditLimit != null && creditLimit > 0
+                      ? [
+                          { name: "Used",      value: Math.min(usedPrincipal, creditLimit),         fill: pctToHex(usedPct ?? 0) },
+                          { name: "Available", value: Math.max(creditLimit - usedPrincipal, 0), fill: "#e2e8f0" },
+                        ]
+                      : [{ name: "Empty", value: 1, fill: "#e2e8f0" }];
+                  return (
+                    <PieChart width={80} height={80} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                      <Pie
+                        data={pieData}
+                        cx={40}
+                        cy={40}
+                        innerRadius={24}
+                        outerRadius={36}
+                        strokeWidth={0}
+                        startAngle={90}
+                        endAngle={-270}
+                        dataKey="value"
+                        isAnimationActive={false}
+                      >
+                        {pieData.map((entry) => (
+                          <Cell key={entry.name} fill={entry.fill} />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  );
+                })()}
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <span
                     className={`text-xs font-bold font-numeric leading-none ${isOverLimit ? "text-destructive" : "text-foreground"}`}
@@ -2527,7 +2564,7 @@ export default function Portal() {
                   </span>
                 </div>
               </div>
-              <p className="text-[10px] text-muted-foreground leading-tight">Credit</p>
+              <p className="text-[10px] text-muted-foreground leading-tight">Credit Limit</p>
               {creditLimit != null && (
                 <div className="flex flex-col items-center gap-0.5">
                   <p
@@ -2545,7 +2582,7 @@ export default function Portal() {
 
           {/* Row 2 Cols 1-2 — Total Outstanding */}
           <Card className="col-span-2 shadow-sm border-border/60">
-            <CardContent className="px-4 py-3 flex items-center justify-between gap-2">
+            <CardContent className="px-3 py-2 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Wallet className="h-4 w-4 text-muted-foreground shrink-0" />
                 <p className="text-xs text-muted-foreground leading-tight">Total Due</p>

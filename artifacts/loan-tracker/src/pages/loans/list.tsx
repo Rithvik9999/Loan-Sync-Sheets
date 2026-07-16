@@ -84,23 +84,36 @@ function BulkMarkPaidDialog({
   const updateLoan = useUpdateLoan();
   const [isPending, setIsPending] = useState(false);
   const [paidDate, setPaidDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  // Per-row editable paid amounts — keyed by loan id, defaults to finalAmount
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
 
-  const totalFinal = loans.reduce((s, l) => s + (l.finalAmount ?? 0), 0);
+  // Reset amounts whenever loans list changes (dialog re-opens with new selection)
+  useEffect(() => {
+    const init: Record<string, string> = {};
+    loans.forEach((l) => { init[l.id] = String(l.finalAmount ?? 0); });
+    setAmounts(init);
+  }, [loans]);
+
+  const totalPaid = loans.reduce((s, l) => {
+    const v = parseFloat(amounts[l.id] ?? "0");
+    return s + (isNaN(v) ? 0 : v);
+  }, 0);
 
   const handleConfirm = async () => {
     setIsPending(true);
     try {
       await Promise.all(
-        loans.map((l) =>
-          updateLoan.mutateAsync({
+        loans.map((l) => {
+          const paid = parseFloat(amounts[l.id] ?? "0");
+          return updateLoan.mutateAsync({
             id: l.id,
             data: {
               status: "Clear",
-              paid: l.finalAmount ?? 0,
+              paid: isNaN(paid) ? (l.finalAmount ?? 0) : paid,
               dateOfPartPayment: paidDate,
             },
-          }),
-        ),
+          });
+        }),
       );
       queryClient.invalidateQueries({ queryKey: getListLoansQueryKey() });
       toast({
@@ -127,8 +140,7 @@ function BulkMarkPaidDialog({
             Mark {loans.length} Loan{loans.length !== 1 ? "s" : ""} as Paid
           </DialogTitle>
           <DialogDescription>
-            This will set status to Clear and record the full final amount as
-            paid for each selected loan.
+            Edit each amount collected before confirming. Status will be set to Clear.
           </DialogDescription>
         </DialogHeader>
 
@@ -142,21 +154,32 @@ function BulkMarkPaidDialog({
             />
           </div>
 
-          <div className="rounded-lg border bg-muted/30 divide-y max-h-52 overflow-y-auto">
+          <div className="rounded-lg border bg-muted/30 divide-y max-h-60 overflow-y-auto">
             {loans.map((l) => (
               <div
                 key={l.id}
-                className="flex items-center justify-between px-3 py-2 text-sm"
+                className="flex items-center gap-3 px-3 py-2 text-sm"
               >
-                <div>
-                  <span className="font-medium truncate">{l.name}</span>
+                <div className="flex-1 min-w-0">
+                  <span className="font-medium truncate block">{l.name}</span>
                   {l.loanId && (
-                    <span className="ml-2 text-xs text-muted-foreground font-mono">{l.loanId}</span>
+                    <span className="text-xs text-muted-foreground font-mono">{l.loanId}</span>
                   )}
                 </div>
-                <span className="font-numeric font-semibold shrink-0 ml-3">
-                  {l.finalAmount != null ? formatCurrency(l.finalAmount) : "—"}
-                </span>
+                {/* Editable amount */}
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="text-xs text-muted-foreground">₹</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className="w-28 h-7 text-right text-sm font-numeric px-2"
+                    value={amounts[l.id] ?? ""}
+                    onChange={(e) =>
+                      setAmounts((prev) => ({ ...prev, [l.id]: e.target.value }))
+                    }
+                  />
+                </div>
               </div>
             ))}
           </div>
@@ -164,7 +187,7 @@ function BulkMarkPaidDialog({
           <div className="flex items-center justify-between rounded-lg bg-primary/5 border border-primary/20 px-4 py-3">
             <span className="font-semibold text-sm">Total</span>
             <span className="font-bold font-numeric text-lg">
-              {formatCurrency(totalFinal)}
+              {formatCurrency(totalPaid)}
             </span>
           </div>
         </div>
