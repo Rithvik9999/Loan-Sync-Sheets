@@ -25,12 +25,23 @@ import {
   ArrowRight,
   Clock,
   CheckCircle2,
+  TrendingUp,
 } from "lucide-react";
 import { Link } from "@/components/ui/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LoanStatusBadge } from "@/components/status-badges";
 import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { fetchEmiLoans, EmiLoan } from "./emi-loans/components/emi-loan-form-dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 export default function Dashboard() {
   const { isLoaded, role } = useAppAuth();
@@ -62,6 +73,12 @@ export default function Dashboard() {
       },
     },
   );
+
+  const { data: emiLoans, isLoading: isLoadingEmi } = useQuery<EmiLoan[]>({
+    queryKey: ["emi-loans"],
+    queryFn: fetchEmiLoans,
+    enabled: isReady,
+  });
 
   const now = useMemo(() => new Date(), []);
 
@@ -95,6 +112,57 @@ export default function Dashboard() {
         }),
     [allLoans, now],
   );
+
+  // ── Month-wise profit table ──────────────────────────────────────────────
+  // Groups by loan issuance month. Expected = total interest+fees scheduled.
+  // Gained = interest actually collected so far (paid − principal for regular
+  // loans; completed-months × monthly-interest for EMI loans).
+  const monthProfit = useMemo(() => {
+    const map = new Map<string, { label: string; expected: number; gained: number; count: number }>();
+    const toKey = (d: string | null | undefined) => (d ?? "").slice(0, 7); // "YYYY-MM"
+    const getOrCreate = (key: string) => {
+      if (!map.has(key)) {
+        const [yrStr, moStr] = key.split("-");
+        const yr = Number(yrStr), mo = Number(moStr);
+        const label = new Date(yr, mo - 1, 1).toLocaleDateString("en-IN", {
+          month: "short", year: "numeric",
+        });
+        map.set(key, { label, expected: 0, gained: 0, count: 0 });
+      }
+      return map.get(key)!;
+    };
+
+    // Regular loans
+    for (const loan of allLoans ?? []) {
+      const key = toKey(loan.transactionDate);
+      if (!key) continue;
+      const row = getOrCreate(key);
+      row.count++;
+      row.expected += (loan.interest ?? 0) + (loan.flatFee ?? 0);
+      // Gained = interest+fees actually collected (paid − principal), floored at 0
+      if ((loan.paid ?? 0) > 0) {
+        row.gained += Math.max((loan.paid ?? 0) - loan.principal, 0);
+      }
+    }
+
+    // EMI loans
+    for (const emi of emiLoans ?? []) {
+      const key = toKey(emi.transactionDate);
+      if (!key) continue;
+      const row = getOrCreate(key);
+      row.count++;
+      row.expected += (emi.totalInterest ?? 0) + (emi.flatFee ?? 0);
+      // Months paid = tenureMonths − remainingMonths
+      const paidMonths = (emi.tenureMonths ?? 0) - (emi.remainingMonths ?? emi.tenureMonths ?? 0);
+      const monthlyInterest = (emi.interestPerMonth ?? 0);
+      row.gained += Math.max(paidMonths * monthlyInterest, 0);
+    }
+
+    return Array.from(map.entries())
+      .sort(([a], [b]) => b.localeCompare(a)) // newest first
+      .slice(0, 24) // up to 2 years of history
+      .map(([, data]) => data);
+  }, [allLoans, emiLoans]);
 
   if (isLoadingSummary || isLoadingActivity) {
     return (
@@ -369,6 +437,64 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Month-wise Profit Table */}
+      <Card className="shadow-sm border-border/60">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <TrendingUp className="h-4 w-4 text-emerald-600" />
+            Month-wise Profit
+          </CardTitle>
+          <CardDescription>
+            Expected vs. gained interest — grouped by loan issuance month
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          {isLoadingLoans || isLoadingEmi ? (
+            <div className="p-4 space-y-2">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <Skeleton key={i} className="h-9 w-full" />
+              ))}
+            </div>
+          ) : monthProfit.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">No data yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/30">
+                    <TableHead className="w-[110px]">Month</TableHead>
+                    <TableHead className="text-right w-[60px]">Loans</TableHead>
+                    <TableHead className="text-right">Expected Profit</TableHead>
+                    <TableHead className="text-right">Gained Profit</TableHead>
+                    <TableHead className="text-right">Remaining</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {monthProfit.map((row) => {
+                    const remaining = row.expected - row.gained;
+                    return (
+                      <TableRow key={row.label} className="hover:bg-muted/20">
+                        <TableCell className="font-medium text-sm">{row.label}</TableCell>
+                        <TableCell className="text-right text-muted-foreground text-sm">{row.count}</TableCell>
+                        <TableCell className="text-right font-numeric text-sm">
+                          {formatCurrency(row.expected)}
+                        </TableCell>
+                        <TableCell className="text-right font-numeric text-sm text-emerald-700 dark:text-emerald-500">
+                          {formatCurrency(row.gained)}
+                        </TableCell>
+                        <TableCell className={`text-right font-numeric text-sm ${remaining > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600"}`}>
+                          {remaining > 0 ? formatCurrency(remaining) : "—"}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Recent Activity + Quick Actions */}
       <div className="grid gap-6 md:grid-cols-7">

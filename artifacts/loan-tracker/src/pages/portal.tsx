@@ -1421,27 +1421,26 @@ function buildRepaymentItems(
       }).filter(pe => pe.date.length >= 8);
 
       const overdueCount = (() => {
-        let count = 0;
-        // Build date strings without timezone conversion to avoid IST (+5:30) shifting
-        // new Date(yr, mo, day).toISOString() to the previous calendar day in UTC.
+        // Count how many 8/15/22/30 payment dates have elapsed since txDate.
+        // Use date-string arithmetic (no timezone shift from new Date().toISOString()).
         const txDateStr = e.transactionDate ?? "";
         const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-        let prevStr = txDateStr;
+        let elapsed = 0;
         let yr = txDate.getFullYear(), mo = txDate.getMonth();
         done: for (let mi = 0; mi < 36; mi++) {
           for (const day of MONTHLY_PAYMENT_DAYS) {
             const dueDateStr = `${yr}-${String(mo + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
             if (dueDateStr <= txDateStr) continue;
             if (dueDateStr > todayStr) break done;
-            const periodPaid = weeklyPaidEntries
-              .filter(pe => pe.date > prevStr && pe.date <= dueDateStr)
-              .reduce((s, pe) => s + pe.amount, 0);
-            if (periodPaid < weeklyAmt * 0.9) count++;
-            prevStr = dueDateStr;
+            elapsed++;
           }
           mo++; if (mo > 11) { mo = 0; yr++; }
         }
-        return count;
+        // Cumulative: total paid ÷ weeklyAmt tells us how many periods are covered,
+        // regardless of which specific window each payment falls in. A ₹5 000 payment
+        // on July 15 covers 1 period whether or not it was made in the July-8 window.
+        const totalPaidFromDates = weeklyPaidEntries.reduce((s, pe) => s + pe.amount, 0);
+        return Math.max(elapsed - Math.floor(totalPaidFromDates / weeklyAmt), 0);
       })();
 
       if (overdueCount > 0) {
