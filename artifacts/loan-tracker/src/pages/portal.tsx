@@ -1188,19 +1188,18 @@ function buildRepaymentItems(
           isOverdue: true,
           earlyDiscount: 0,
         });
-      } else {
-        // All caught up — always show today's daily payment in Coming Up
-        items.push({
-          key: `daily-today-${l.id}`,
-          id: l.id, loanId: l.loanId, type: "loan",
-          label: `Daily Payment — ₹${dailyAmt.toLocaleString("en-IN")}/day`,
-          subLabel: "Due today",
-          outstanding: dailyAmt,
-          dueDate: today,
-          isOverdue: false,
-          earlyDiscount: 0,
-        });
       }
+      // Always push today's daily payment into Coming Up regardless of overdue status
+      items.push({
+        key: `daily-today-${l.id}`,
+        id: l.id, loanId: l.loanId, type: "loan",
+        label: `Daily Payment — ₹${dailyAmt.toLocaleString("en-IN")}/day`,
+        subLabel: overdueDays > 0 ? `Today's payment (${overdueDays} missed)` : "Due today",
+        outstanding: dailyAmt,
+        dueDate: today,
+        isOverdue: false,
+        earlyDiscount: 0,
+      });
       continue;
     }
 
@@ -1292,37 +1291,61 @@ function buildRepaymentItems(
     const freq = parsePaymentFrequency(e.notes, (e as any).whatsapp);
     const txDate = e.transactionDate ? new Date(e.transactionDate + "T00:00:00Z") : null;
 
-    // ── Weekly EMI — use server-computed lateDays for overdue detection
-    // nextPaymentDate alone can advance past a missed payment date without marking it overdue;
-    // lateDays is the reliable server-computed indicator.
+    // ── Weekly EMI ── pure client-side weekly schedule from txDate.
+    // The server's lateDays/nextPaymentDate are computed from monthly EMI math and
+    // do not align with weekly periods. We derive the current week's due date directly.
+    // If paidDates has entries we use them for paidWeeks; otherwise we assume only
+    // the current period may be unpaid (avoids accumulating all elapsed weeks when
+    // the payment history column T is not populated).
     if (freq.type === "weekly" && freq.amount && freq.amount > 0) {
       const weeklyAmt = freq.amount;
-      const isOverdue = (e.lateDays ?? 0) > 0;
+      if (!txDate) continue;
 
-      if (isOverdue) {
-        const overdueWeeks = Math.max(Math.ceil((e.lateDays ?? 7) / 7), 1);
-        const overdueTotal = calcOverdueTotal(weeklyAmt, overdueWeeks, 7);
-        // Approximate first missed due date from lateDays
-        const firstDue = new Date(today.getTime() - (e.lateDays ?? 7) * 86400000);
+      const daysElapsed = Math.max(differenceInCalendarDays(today, txDate), 0);
+      const weeksElapsed = Math.floor(daysElapsed / 7);
+      // Due date for the current weekly period (always ≤ today)
+      const currentWeekDue = new Date(txDate.getTime() + weeksElapsed * 7 * 86400000);
+      const daysLate = differenceInCalendarDays(today, currentWeekDue); // ≥ 0
+
+      // Compute how many weeks have been paid
+      const totalPaidFromDates = (e.paidDates ?? []).reduce((sum, entry) => {
+        const parts = entry.split(":");
+        return sum + (Number(parts[1]) || 0);
+      }, 0);
+      const hasPaidData = (e.paidDates ?? []).length > 0;
+
+      // overdueWeeks: with payment data, compare paid vs elapsed; without, only flag
+      // the current period when it is strictly past its due date (daysLate > 0).
+      const overdueWeeks = hasPaidData
+        ? Math.max(weeksElapsed - Math.floor(totalPaidFromDates / weeklyAmt), 0)
+        : daysLate > 0 ? 1 : 0;
+
+      if (overdueWeeks > 0) {
+        const overdueTotal = hasPaidData
+          ? calcOverdueTotal(weeklyAmt, overdueWeeks, 7)
+          : Math.round(weeklyAmt * (1 + 0.02 * daysLate));
         items.push({
           key: `emi-weekly-${e.id}`,
           id: e.id, loanId: (e as any).emiId, type: "emi",
           label: `${formatCurrency(e.principal)} EMI (₹${weeklyAmt.toLocaleString("en-IN")}/week)`,
-          subLabel: `${overdueWeeks} missed week${overdueWeeks > 1 ? "s" : ""} · ${e.lateDays} day${(e.lateDays ?? 0) !== 1 ? "s" : ""} overdue`,
+          subLabel: `${overdueWeeks} missed week${overdueWeeks > 1 ? "s" : ""} · ${daysLate} day${daysLate !== 1 ? "s" : ""} overdue`,
           outstanding: overdueTotal,
-          dueDate: firstDue,
+          dueDate: currentWeekDue,
           isOverdue: true,
           earlyDiscount: 0,
         });
       } else {
-        const dueDate = e.nextPaymentDate ? new Date(e.nextPaymentDate + "T00:00:00Z") : null;
+        // Not overdue — show due-today or upcoming payment
+        const upcomingDue = daysLate === 0
+          ? currentWeekDue  // due today
+          : new Date(txDate.getTime() + (weeksElapsed + 1) * 7 * 86400000);
         items.push({
           key: `emi-weekly-${e.id}`,
           id: e.id, loanId: (e as any).emiId, type: "emi",
           label: `${formatCurrency(e.principal)} EMI (₹${weeklyAmt.toLocaleString("en-IN")}/week)`,
-          subLabel: dueDate ? `Next payment ${formatDate(e.nextPaymentDate!)}` : "Weekly payment",
+          subLabel: daysLate === 0 ? "Due today" : `Next payment ${formatDate(upcomingDue.toISOString())}`,
           outstanding: weeklyAmt,
-          dueDate,
+          dueDate: upcomingDue,
           isOverdue: false,
           earlyDiscount: 0,
         });
