@@ -1230,6 +1230,7 @@ function calcOverdueTotal(
   overdueCount: number,
   daysPerPeriod: number,
   firstDaysLate?: number,
+  rate: number = 0.01,
 ): number {
   // Most-recent missed period = firstDaysLate days ago.
   // Each older period adds another daysPerPeriod of lateness.
@@ -1239,7 +1240,7 @@ function calcOverdueTotal(
   for (let i = 1; i <= overdueCount; i++) {
     // i=1 = oldest (most days late), i=overdueCount = most recent
     const daysLate = recentLate + (overdueCount - i) * daysPerPeriod;
-    total += periodAmount * (1 + 0.01 * daysLate);
+    total += periodAmount * (1 + rate * daysLate);
   }
   return Math.round(total);
 }
@@ -1265,26 +1266,28 @@ function buildRepaymentItems(
       if (!txDate || dailyAmt <= 0) continue;
 
       const daysElapsed = Math.max(differenceInCalendarDays(today, txDate), 0);
-      // Use 1%/day extra-rate to determine overdue periods — only paying at the
-      // premium rate clears overdue; a normal daily payment just covers today.
-      const periodsElapsed = Math.max(daysElapsed - 1, 0);
+      // periodsElapsed = all days elapsed (including yesterday). Today's payment
+      // is NOT counted as overdue — it is always shown as "due today" separately.
+      // A normal ₹dailyAmt payment is on-time (>= all elapsed periods paid at normal rate).
+      // Only the +2% rate payment clears an overdue day.
+      const periodsElapsed = daysElapsed;
       const paidNormal = Math.floor((l.paid ?? 0) / dailyAmt);
-      const isOnTimeLoan = paidNormal > periodsElapsed;
-      const clearingAmtLoan = isOnTimeLoan ? dailyAmt : Math.ceil(dailyAmt * 1.01);
+      const isOnTimeLoan = paidNormal >= periodsElapsed;
+      const clearingAmtLoan = isOnTimeLoan ? dailyAmt : Math.ceil(dailyAmt * 1.02);
       const paidPeriods = Math.floor((l.paid ?? 0) / clearingAmtLoan);
       const overdueDays = Math.max(periodsElapsed - paidPeriods, 0);
       const returnDate = l.returnDate ? new Date(l.returnDate + "T00:00:00Z") : null;
       const withinTenure = !returnDate || today <= returnDate;
 
       if (overdueDays > 0) {
-        // Each missed day piles up with 1%/day late fee
-        const overdueTotal = calcOverdueTotal(dailyAmt, overdueDays, 1);
+        // Each missed day piles up with 2%/day late fee
+        const overdueTotal = calcOverdueTotal(dailyAmt, overdueDays, 1, undefined, 0.02);
         const firstDue = new Date(txDate.getTime() + (paidPeriods + 1) * 86400000);
         items.push({
           key: `daily-overdue-${l.id}`,
           id: l.id, loanId: l.loanId, type: "loan",
           label: `Daily Payment — ₹${dailyAmt.toLocaleString("en-IN")}/day`,
-          subLabel: `${overdueDays} missed payment${overdueDays > 1 ? "s" : ""} · +1%/day late fee`,
+          subLabel: `${overdueDays} missed payment${overdueDays > 1 ? "s" : ""} · +2%/day late fee`,
           outstanding: overdueTotal,
           dueDate: firstDue,
           isOverdue: true,
@@ -1419,14 +1422,17 @@ function buildRepaymentItems(
 
       const overdueCount = (() => {
         let count = 0;
-        let prevStr = txDate.toISOString().slice(0, 10);
+        // Build date strings without timezone conversion to avoid IST (+5:30) shifting
+        // new Date(yr, mo, day).toISOString() to the previous calendar day in UTC.
+        const txDateStr = e.transactionDate ?? "";
+        const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+        let prevStr = txDateStr;
         let yr = txDate.getFullYear(), mo = txDate.getMonth();
         done: for (let mi = 0; mi < 36; mi++) {
           for (const day of MONTHLY_PAYMENT_DAYS) {
-            const d = new Date(yr, mo, day);
-            if (d <= txDate) continue;
-            if (d > today) break done;
-            const dueDateStr = d.toISOString().slice(0, 10);
+            const dueDateStr = `${yr}-${String(mo + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+            if (dueDateStr <= txDateStr) continue;
+            if (dueDateStr > todayStr) break done;
             const periodPaid = weeklyPaidEntries
               .filter(pe => pe.date > prevStr && pe.date <= dueDateStr)
               .reduce((s, pe) => s + pe.amount, 0);

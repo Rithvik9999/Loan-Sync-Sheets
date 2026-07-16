@@ -338,8 +338,8 @@ export default function LoanDetail() {
           );
         };
 
-        // +1% "extra dues" amounts
-        const dailyAmtExtra = dailyAmt ? Math.ceil(dailyAmt * 1.01) : null;
+        // +2% for daily, +1% for weekly "extra dues" amounts
+        const dailyAmtExtra = dailyAmt ? Math.ceil(dailyAmt * 1.02) : null;
         const weeklyAmtExtra = weeklyAmt ? Math.ceil(weeklyAmt * 1.01) : null;
 
         if (!loan.transactionDate || periodAmount <= 0) return null;
@@ -349,17 +349,19 @@ export default function LoanDetail() {
         today.setHours(0, 0, 0, 0);
 
         const daysElapsed = Math.max(differenceInCalendarDays(today, txDate), 0);
-        // Subtract 1 so that TODAY's period is not counted as overdue — payment for today
-        // is still "due today", not missed yet. Only completed past periods count.
-        const periodsElapsed = Math.max(Math.floor((daysElapsed - 1) / daysPerPeriod), 0);
+        // For daily: count every elapsed day as a due period (no -1 offset).
+        // For weekly: use floor(elapsed/7) so partial weeks aren't counted.
+        // Today's payment is always shown as "due today" regardless of overdue status.
+        const periodsElapsed = isDaily
+          ? daysElapsed
+          : Math.max(Math.floor((daysElapsed - 1) / daysPerPeriod), 0);
         const totalPaid = loan.paid ?? 0;
-        // When there are overdue periods, a "normal" daily/weekly button click should only
-        // count toward today's payment and NOT clear overdue periods — only the +1% button
-        // should clear overdue. We use STRICT greater-than for isOnTime so that paying
-        // exactly 1×periodAmount when periodsElapsed=1 does NOT flip to "on time" and clear
-        // the overdue. The overdue can only be cleared by paying at the extra (+1%) rate.
+        // isOnTime: paid at normal rate covers all elapsed periods (use >= so paying
+        // exactly periodAmount × periodsElapsed is correctly treated as on time).
+        // When behind, only the extra-rate payment clears an overdue period:
+        // daily uses +2%, weekly uses +1%.
         const paidPeriodsNormal = Math.floor(totalPaid / periodAmount);
-        const isOnTime = paidPeriodsNormal > periodsElapsed;
+        const isOnTime = paidPeriodsNormal >= periodsElapsed;
         const clearingAmt = isOnTime
           ? periodAmount
           : (isDaily ? (dailyAmtExtra ?? periodAmount) : (weeklyAmtExtra ?? periodAmount));
@@ -371,12 +373,13 @@ export default function LoanDetail() {
         const contractTotal = totalPeriods * periodAmount;
         const remainingContract = Math.max(contractTotal - totalPaid, 0);
 
-        // Accumulated overdue with 2%/day late fee per missed period
+        // Accumulated overdue: daily uses 2%/day, weekly uses 1%/day
+        const lateRate = isDaily ? 0.02 : 0.01;
         let overdueAccumulated = 0;
         for (let i = 1; i <= overduePeriods; i++) {
           const periodsLate = overduePeriods - i + 1;
           const daysLate = periodsLate * daysPerPeriod;
-          overdueAccumulated += periodAmount * (1 + 0.01 * daysLate);
+          overdueAccumulated += periodAmount * (1 + lateRate * daysLate);
         }
         overdueAccumulated = Math.round(overdueAccumulated);
 
@@ -432,9 +435,9 @@ export default function LoanDetail() {
                               className="border-sky-400 text-sky-600 hover:bg-sky-50 gap-1 text-xs"
                               onClick={() => handleQuickPay(dailyAmtExtra, "daily")}
                               disabled={dailyPending || weeklyPending || undoPending}
-                              title="+1% extra dues"
+                              title="+2% extra dues"
                             >
-                              +1% <span className="font-numeric font-semibold">₹{dailyAmtExtra.toLocaleString("en-IN")}</span>
+                              +2% <span className="font-numeric font-semibold">₹{dailyAmtExtra.toLocaleString("en-IN")}</span>
                             </Button>
                           )}
                         </>
