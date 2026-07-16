@@ -28,7 +28,6 @@ import { LoanStatusBadge } from "@/components/status-badges";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Plus,
-  Search,
   ChevronRight,
   CreditCard,
   CheckSquare,
@@ -307,6 +306,27 @@ function LoansTable({
                     </div>
                   )}
                 </div>
+                {/* Daily / weekly quick-pay indicators */}
+                {(() => {
+                  const t = `${(loan as any).notes ?? ""} ${loan.whatsapp ?? ""}`.toLowerCase();
+                  const dm = t.match(/pay\s+daily\s+(\d+)/);
+                  const wm = t.match(/pay\s+weekly\s+(\d+)/);
+                  if (!dm && !wm) return null;
+                  return (
+                    <div className="flex gap-1 mt-1 flex-wrap">
+                      {dm && (
+                        <span className="inline-block rounded bg-sky-100 text-sky-700 px-1.5 py-0.5 text-[10px] font-medium">
+                          ₹{dm[1]}/day
+                        </span>
+                      )}
+                      {wm && (
+                        <span className="inline-block rounded bg-violet-100 text-violet-700 px-1.5 py-0.5 text-[10px] font-medium">
+                          ₹{wm[1]}/wk
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
               </TableCell>
               <TableCell className="font-numeric">
                 <div className="font-medium">{formatCurrency(loan.principal)}</div>
@@ -470,7 +490,7 @@ function EmiSection({
 // ─── Main list ────────────────────────────────────────────────────────────────
 
 export default function LoansList() {
-  const [search, setSearch] = useState("");
+  const [selectedUser, setSelectedUser] = useState("all");
   const [statusFilter, setStatusFilter] = useState<string>("Pending");
   const [dateRange, setDateRange] = useState<[number, number] | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -612,7 +632,7 @@ export default function LoansList() {
           if (statusFilter === "all") return (l.status as string) !== "Clear";
           return (l.status as string) === statusFilter;
         })
-        .filter((l) => l.name.toLowerCase().includes(search.toLowerCase()))
+        .filter((l) => selectedUser === "all" || l.name === selectedUser)
         .filter((l) => {
           if (!dateRange || minLoanTs === maxLoanTs) return true;
           const dueTs = getLoanDueTs(l);
@@ -625,7 +645,7 @@ export default function LoansList() {
           const db = b.transactionDate ? new Date(b.transactionDate).getTime() : 0;
           return db - da;
         }),
-    [allLoans, statusFilter, search, dateRange, effectiveDateRange, minLoanTs, maxLoanTs],
+    [allLoans, statusFilter, selectedUser, dateRange, effectiveDateRange, minLoanTs, maxLoanTs],
   );
 
   const toggleRow = (id: string) => {
@@ -949,30 +969,40 @@ export default function LoansList() {
         <TabsContent value="loans" className="mt-4">
           <Card className="shadow-sm border-border/60">
             <CardHeader className="pb-4">
-              <div className="flex flex-wrap gap-3">
-                <div className="relative flex-1 min-w-[180px]">
-                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search by borrower name…"
-                    className="pl-9 bg-background"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
-                </div>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="bg-background w-full sm:w-44">
-                    <SelectValue>
-                      {statusFilter === "all" ? "All (excl. Cleared)" : (statusFilter || "Filter")}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All (excl. Cleared)</SelectItem>
-                    <SelectItem value="Pending">Pending</SelectItem>
-                    <SelectItem value="Temp">Temp</SelectItem>
-                    <SelectItem value="Clear">Clear</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {(() => {
+                const borrowerNames = Array.from(
+                  new Set((allLoans ?? []).filter(l => (l.status as string) !== "Archived").map(l => l.name))
+                ).sort((a, b) => a.localeCompare(b));
+                return (
+                  <div className="flex flex-wrap gap-3">
+                    {/* User dropdown replaces text search */}
+                    <Select value={selectedUser} onValueChange={setSelectedUser}>
+                      <SelectTrigger className="bg-background flex-1 min-w-[160px]">
+                        <SelectValue placeholder="All borrowers" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All borrowers</SelectItem>
+                        {borrowerNames.map(name => (
+                          <SelectItem key={name} value={name}>{name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger className="bg-background w-full sm:w-44">
+                        <SelectValue>
+                          {statusFilter === "all" ? "All (excl. Cleared)" : (statusFilter || "Filter")}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All (excl. Cleared)</SelectItem>
+                        <SelectItem value="Pending">Pending</SelectItem>
+                        <SelectItem value="Temp">Temp</SelectItem>
+                        <SelectItem value="Clear">Clear</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                );
+              })()}
               {/* Date range slider */}
               {minLoanTs > 0 && maxLoanTs > 0 && minLoanTs !== maxLoanTs && (
                 <div className="space-y-2 pt-1">

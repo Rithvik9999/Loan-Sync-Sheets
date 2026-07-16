@@ -461,10 +461,8 @@ export default function EmiLoanDetail() {
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-2">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" asChild className="shrink-0">
-            <Link href={isStaff ? "/emi-loans" : "/portal"}>
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
+          <Button variant="ghost" size="icon" className="shrink-0" onClick={() => window.history.back()}>
+            <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
             <div className="flex items-center gap-3">

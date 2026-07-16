@@ -89,8 +89,8 @@ export default function BorrowerDetail() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4 mb-2">
-        <Button variant="ghost" size="icon" asChild className="shrink-0">
-          <Link href="/borrowers"><ArrowLeft className="h-4 w-4" /></Link>
+        <Button variant="ghost" size="icon" className="shrink-0" onClick={() => window.history.back()}>
+          <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">{borrower.name}</h1>

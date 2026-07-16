@@ -18,7 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "@/components/ui/link";
-import { ArrowLeft, Edit, Trash2, Calendar, FileText, Plus, TrendingUp, CalendarDays, CalendarRange, Loader2 } from "lucide-react";
+import { ArrowLeft, Edit, Trash2, Calendar, FileText, Plus, TrendingUp, CalendarDays, CalendarRange, Loader2, RotateCcw } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { LoanStatusBadge } from "@/components/status-badges";
 
@@ -50,6 +50,7 @@ export default function LoanDetail() {
   const [quickPayDate, setQuickPayDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [dailyPending, setDailyPending] = useState(false);
   const [weeklyPending, setWeeklyPending] = useState(false);
+  const [undoPending, setUndoPending] = useState(false);
 
   const { data: loan, isLoading: isLoanLoading } = useGetLoan(id, {
     query: { queryKey: getGetLoanQueryKey(id), enabled: !!id },
@@ -129,8 +130,8 @@ export default function LoanDetail() {
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" asChild className="shrink-0">
-            <Link href={isStaff ? "/loans" : "/portal"}><ArrowLeft className="h-4 w-4" /></Link>
+          <Button variant="ghost" size="icon" className="shrink-0" onClick={() => window.history.back()}>
+            <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
             <div className="flex items-center gap-3">
@@ -258,7 +259,7 @@ export default function LoanDetail() {
         const daysPerPeriod = isDaily ? 1 : 7;
 
         const handleQuickPay = (amount: number, freq: "daily" | "weekly") => {
-          if (!amount || dailyPending || weeklyPending) return;
+          if (!amount || dailyPending || weeklyPending || undoPending) return;
           const setter = freq === "daily" ? setDailyPending : setWeeklyPending;
           setter(true);
           updateLoan.mutate(
@@ -285,6 +286,31 @@ export default function LoanDetail() {
             },
           );
         };
+
+        /** Undo last period payment — subtracts period amount from paid (floor at 0). */
+        const handleUndo = (amount: number) => {
+          if (undoPending || dailyPending || weeklyPending) return;
+          const newPaid = Math.max((loan.paid ?? 0) - amount, 0);
+          setUndoPending(true);
+          updateLoan.mutate(
+            { id: loan.id, data: { paid: newPaid } },
+            {
+              onSuccess: (updated) => {
+                queryClient.setQueryData(getGetLoanQueryKey(loan.id), updated);
+                queryClient.invalidateQueries({ queryKey: getListLoansQueryKey() });
+                toast({ title: "Payment undone", description: `₹${amount.toLocaleString("en-IN")} removed.` });
+              },
+              onError: () => {
+                toast({ variant: "destructive", title: "Error", description: "Could not undo payment." });
+              },
+              onSettled: () => setUndoPending(false),
+            },
+          );
+        };
+
+        // +2% "extra dues" amounts
+        const dailyAmtExtra = dailyAmt ? Math.ceil(dailyAmt * 1.02) : null;
+        const weeklyAmtExtra = weeklyAmt ? Math.ceil(weeklyAmt * 1.02) : null;
 
         if (!loan.transactionDate || periodAmount <= 0) return null;
 
@@ -328,38 +354,11 @@ export default function LoanDetail() {
                     <span> · started {formatDate(loan.transactionDate)}</span>
                   </CardDescription>
                 </div>
-                {/* Quick-pay buttons + date picker */}
+                {/* Quick-pay buttons + date picker + undo */}
                 {isStaff && loan.status !== "Clear" && (
-                  <div className="flex flex-col gap-1.5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {dailyAmt != null && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="border-sky-500 text-sky-700 hover:bg-sky-50 gap-1.5"
-                          onClick={() => handleQuickPay(dailyAmt, "daily")}
-                          disabled={dailyPending || weeklyPending}
-                        >
-                          {dailyPending
-                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            : <CalendarDays className="h-3.5 w-3.5" />}
-                          Daily <span className="font-numeric font-semibold">₹{dailyAmt.toLocaleString("en-IN")}</span>
-                        </Button>
-                      )}
-                      {weeklyAmt != null && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="border-violet-500 text-violet-700 hover:bg-violet-50 gap-1.5"
-                          onClick={() => handleQuickPay(weeklyAmt, "weekly")}
-                          disabled={dailyPending || weeklyPending}
-                        >
-                          {weeklyPending
-                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            : <CalendarRange className="h-3.5 w-3.5" />}
-                          Weekly <span className="font-numeric font-semibold">₹{weeklyAmt.toLocaleString("en-IN")}</span>
-                        </Button>
-                      )}
+                  <div className="flex flex-col gap-2">
+                    {/* Date picker row */}
+                    <div className="flex items-center gap-1.5">
                       <input
                         type="date"
                         value={quickPayDate}
@@ -367,6 +366,81 @@ export default function LoanDetail() {
                         className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
                         title="Date to record this payment on"
                       />
+                    </div>
+                    {/* Pay buttons */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {dailyAmt != null && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-sky-500 text-sky-700 hover:bg-sky-50 gap-1.5"
+                            onClick={() => handleQuickPay(dailyAmt, "daily")}
+                            disabled={dailyPending || weeklyPending || undoPending}
+                          >
+                            {dailyPending
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <CalendarDays className="h-3.5 w-3.5" />}
+                            Daily <span className="font-numeric font-semibold">₹{dailyAmt.toLocaleString("en-IN")}</span>
+                          </Button>
+                          {dailyAmtExtra != null && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-sky-400 text-sky-600 hover:bg-sky-50 gap-1 text-xs"
+                              onClick={() => handleQuickPay(dailyAmtExtra, "daily")}
+                              disabled={dailyPending || weeklyPending || undoPending}
+                              title="+2% extra dues"
+                            >
+                              +2% <span className="font-numeric font-semibold">₹{dailyAmtExtra.toLocaleString("en-IN")}</span>
+                            </Button>
+                          )}
+                        </>
+                      )}
+                      {weeklyAmt != null && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-violet-500 text-violet-700 hover:bg-violet-50 gap-1.5"
+                            onClick={() => handleQuickPay(weeklyAmt, "weekly")}
+                            disabled={dailyPending || weeklyPending || undoPending}
+                          >
+                            {weeklyPending
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <CalendarRange className="h-3.5 w-3.5" />}
+                            Weekly <span className="font-numeric font-semibold">₹{weeklyAmt.toLocaleString("en-IN")}</span>
+                          </Button>
+                          {weeklyAmtExtra != null && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-violet-400 text-violet-600 hover:bg-violet-50 gap-1 text-xs"
+                              onClick={() => handleQuickPay(weeklyAmtExtra, "weekly")}
+                              disabled={dailyPending || weeklyPending || undoPending}
+                              title="+2% extra dues"
+                            >
+                              +2% <span className="font-numeric font-semibold">₹{weeklyAmtExtra.toLocaleString("en-IN")}</span>
+                            </Button>
+                          )}
+                        </>
+                      )}
+                      {/* Undo last payment */}
+                      {(loan.paid ?? 0) > 0 && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-muted-foreground hover:text-destructive gap-1.5"
+                          onClick={() => handleUndo(dailyAmt ?? weeklyAmt ?? 0)}
+                          disabled={dailyPending || weeklyPending || undoPending}
+                          title="Undo last period payment"
+                        >
+                          {undoPending
+                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            : <RotateCcw className="h-3.5 w-3.5" />}
+                          Undo
+                        </Button>
+                      )}
                     </div>
                   </div>
                 )}
