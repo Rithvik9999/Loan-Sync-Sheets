@@ -296,7 +296,8 @@ async function ensureEmiLateFeesFormula(): Promise<void> {
     // Read current formula in the cell (FORMULA render mode) to skip if already set
     const existing = await getRawValuesFromSheet(sheetId, targetCell, "FORMULA");
     const currentFormula = toText(existing?.[0]?.[0]);
-    if (currentFormula.startsWith("=ARRAYFORMULA")) {
+    // Check if formula is already written AND includes the 1.5× multiplier
+    if (currentFormula.startsWith("=ARRAYFORMULA") && currentFormula.includes("*1.5")) {
       lateFeesFormulaWritten = true;
       return;
     }
@@ -307,13 +308,13 @@ async function ensureEmiLateFeesFormula(): Promise<void> {
     //   C6:C < TODAY()         → payment was due in the past (overdue)
     //   ISNUMBER(R6:R)         → remainingMonths is computed
     //   R6:R > 0               → loan not fully repaid
-    // Value: FLOOR(TODAY()-C) = integer overdue days, ×K/30 = daily interest accrual
+    // Value: FLOOR(TODAY()-C) = integer overdue days, ×K/30×1.5 = daily interest accrual (+50% late fee)
     const formula =
       `=ARRAYFORMULA(IF(` +
       `(D${DATA_START_ROW}:D<>"")*(O${DATA_START_ROW}:O="Pending")` +
       `*(ISNUMBER(C${DATA_START_ROW}:C))*(C${DATA_START_ROW}:C<TODAY())` +
       `*(ISNUMBER(R${DATA_START_ROW}:R))*(R${DATA_START_ROW}:R>0),` +
-      `FLOOR(TODAY()-C${DATA_START_ROW}:C)*IFERROR(K${DATA_START_ROW}:K,0)/30,` +
+      `FLOOR(TODAY()-C${DATA_START_ROW}:C)*IFERROR(K${DATA_START_ROW}:K,0)/30*1.5,` +
       `0))`;
     await batchUpdateCellsInSheet(sheetId, [{ range: targetCell, values: [[formula]] }]);
     lateFeesFormulaWritten = true;
@@ -595,16 +596,25 @@ export async function recordPartialEmiPayment(
   const monthlyTarget = existing.monthlyPayment ?? 0;
   const currentRemaining = existing.remainingMonths ?? existing.tenureMonths;
 
+  // If the loan is currently overdue (next payment date is in the past), do NOT
+  // auto-close the month via accumulated partial payments — the overdue period
+  // should keep accruing until the admin explicitly records a Monthly Payment.
+  // Only auto-close when the loan is on-time (next payment is today or future).
+  const isCurrentlyOverdue =
+    existing.nextPaymentDate != null &&
+    new Date(existing.nextPaymentDate + "T00:00:00Z") < new Date();
+
   let updates: { range: string; values: (string | number)[][] }[];
 
-  if (monthlyTarget > 0 && newAccumulated >= monthlyTarget) {
-    // This partial payment completes the month — auto-decrement
+  if (!isCurrentlyOverdue && monthlyTarget > 0 && newAccumulated >= monthlyTarget) {
+    // This partial payment completes the current (non-overdue) month — auto-decrement
     const newRemaining = Math.max(currentRemaining - 1, 0);
     const newStatus: EmiLoanStatus = newRemaining <= 0 ? "Clear" : "Pending";
     const entryType: string = frequency === "D" ? "DM" : "WM";
     updates = appendEmiMonth(rowNumber, existing, newRemaining, newStatus, date, amount, entryType);
   } else {
-    // Plain partial — just append, no month change
+    // Plain partial — just append, no month change.
+    // For overdue loans, overdue months keep accruing; admin must use Monthly Payment to close them.
     const entry = `${date}:${amount}:${frequency}`;
     const prev = existing.paidDates.join("|");
     updates = [

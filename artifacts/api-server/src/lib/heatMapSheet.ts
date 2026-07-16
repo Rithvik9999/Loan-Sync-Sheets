@@ -187,7 +187,10 @@ function parsePartPayments(raw: unknown, partPayment: number | null): PartPaymen
 function parseRow(raw: unknown[], rowNumber: number): LoanRow {
   const get = (idx: number) => raw[idx];
   const lateDays = toNumberOrNull(get(COL.LATE_DAYS));
-  const lateFees = toNumberOrNull(get(COL.LATE_FEES));
+  // Apply permanent 1.5× late-fee multiplier — the sheet formula computes the base amount,
+  // the app always reports 50% higher as per business rule.
+  const rawLateFees = toNumberOrNull(get(COL.LATE_FEES));
+  const lateFees = rawLateFees != null ? Math.round(rawLateFees * 1.5) : null;
   const partPayment = toNumberOrNull(get(COL.PART_PAYMENT));
   const partPayments = parsePartPayments(get(COL.DATE_PART_PAYMENT), partPayment);
 

@@ -2508,7 +2508,16 @@ export default function Portal() {
   );
 
   const overdueItems = useMemo(
-    () => allItems.filter((i) => i.isOverdue),
+    () =>
+      allItems
+        .filter((i) => i.isOverdue)
+        .sort((a, b) => {
+          // Most overdue first (oldest due date first)
+          if (!a.dueDate && !b.dueDate) return 0;
+          if (!a.dueDate) return 1;
+          if (!b.dueDate) return -1;
+          return a.dueDate.getTime() - b.dueDate.getTime();
+        }),
     [allItems],
   );
 
@@ -2520,7 +2529,7 @@ export default function Portal() {
           if (i.isOverdue) return false;
           if (!i.dueDate) return false;
           const daysUntil = differenceInCalendarDays(i.dueDate, now);
-          return daysUntil >= 0 && daysUntil <= 7;
+          return daysUntil >= 0 && daysUntil <= 5;
         })
         .sort((a, b) => {
           if (!a.dueDate && !b.dueDate) return 0;
@@ -2534,6 +2543,26 @@ export default function Portal() {
 
   const hasOverdue = overdueItems.length > 0;
   const defaultTab = hasOverdue ? "overdue" : "coming-up";
+
+  // ── Tab persistence (browser back-navigation fix) ──────────────────────────
+  // Active tab is stored in sessionStorage so navigating to a loan detail and
+  // pressing Back restores the tab the user was on, instead of jumping to "overdue".
+  const PORTAL_TAB_SS = "borrowapp_portal_tab";
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    try { return sessionStorage.getItem(PORTAL_TAB_SS) ?? "coming-up"; } catch { return "coming-up"; }
+  });
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    try { sessionStorage.setItem(PORTAL_TAB_SS, tab); } catch {}
+  };
+  // On first load (no session choice yet), sync to the data-driven defaultTab
+  useEffect(() => {
+    try {
+      if (!sessionStorage.getItem(PORTAL_TAB_SS)) setActiveTab(defaultTab);
+    } catch {
+      setActiveTab(defaultTab);
+    }
+  }, [defaultTab]);
 
   // Summary stats
   const activeLoans = useMemo(
@@ -2624,6 +2653,64 @@ export default function Portal() {
           </Button>
         </div>
       </div>
+
+      {/* ── Urgent Payments Panel: overdue + coming up (≤5 days), sorted by date ── */}
+      {!isLoading && (overdueItems.length > 0 || comingUpItems.length > 0) && (() => {
+        const urgentItems = [
+          ...overdueItems.map((i) => ({ ...i, _urgentType: "overdue" as const })),
+          ...comingUpItems.map((i) => ({ ...i, _urgentType: "coming-up" as const })),
+        ].sort((a, b) => {
+          if (!a.dueDate && !b.dueDate) return 0;
+          if (!a.dueDate) return 1;
+          if (!b.dueDate) return -1;
+          return a.dueDate.getTime() - b.dueDate.getTime();
+        });
+        return (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between px-0.5">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                Action Required
+              </p>
+              <span className="text-xs text-muted-foreground">
+                {urgentItems.length} item{urgentItems.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+            <div className="divide-y divide-border/40 rounded-xl border border-border/60 overflow-hidden shadow-sm">
+              {urgentItems.map((item) => (
+                <div
+                  key={item.id}
+                  className={`flex items-center justify-between px-3 py-2.5 text-sm ${
+                    item._urgentType === "overdue"
+                      ? "bg-destructive/5 hover:bg-destructive/10"
+                      : "bg-amber-50/70 hover:bg-amber-50"
+                  } transition-colors`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      {item._urgentType === "overdue" ? (
+                        <AlertTriangle className="h-3 w-3 text-destructive shrink-0" />
+                      ) : (
+                        <Clock className="h-3 w-3 text-amber-600 shrink-0" />
+                      )}
+                      <p className="text-xs font-medium truncate">{item.label}</p>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground pl-[18px] truncate mt-0.5">
+                      {item.subLabel}
+                    </p>
+                  </div>
+                  <div
+                    className={`font-bold text-sm font-numeric ml-3 shrink-0 ${
+                      item._urgentType === "overdue" ? "text-destructive" : "text-amber-700"
+                    }`}
+                  >
+                    {formatCurrency(item.outstanding)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Summary Cards — drawing layout:
           [Loans] [EMI  ] [Credit Pie ↕ row-span-2]
@@ -2728,7 +2815,7 @@ export default function Portal() {
       )}
 
       {/* Tabs */}
-      <Tabs defaultValue={defaultTab}>
+      <Tabs value={activeTab} onValueChange={handleTabChange}>
         <div className="overflow-x-auto">
           <TabsList className="w-max min-w-full flex-nowrap">
             <TabsTrigger value="overdue" className="shrink-0 gap-1.5 text-xs sm:text-sm px-3">

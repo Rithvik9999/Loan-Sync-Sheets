@@ -9,6 +9,7 @@ import dashboardRouter from "./dashboard";
 import emiLoansRouter from "./emi-loans";
 import debugRouter from "./debug";
 import loanPaymentsRouter from "./loan-payments";
+import adminBackfillRouter from "./admin-backfill";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,6 @@ router.use(dashboardRouter);
 router.use(emiLoansRouter);
 router.use(loanPaymentsRouter);
 router.use(debugRouter);
+router.use(adminBackfillRouter);
 
 export default router;
