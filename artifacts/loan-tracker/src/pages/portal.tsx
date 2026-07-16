@@ -1212,20 +1212,33 @@ function getNthWeeklyPaymentDate(startDate: Date, n: number): Date | null {
 /**
  * Computes the accumulated overdue amount for periodic (daily/weekly) payments.
  * Each missed period accrues a 2%/day late fee for every day it has been overdue.
- * e.g. daily ₹600, 2 days overdue:
- *   day 1 (2 days late) → 600 × (1 + 0.02×2) = 624
+ *
+ * @param firstDaysLate  Actual calendar days since the MOST RECENT overdue period's due date.
+ *                       Defaults to daysPerPeriod (safe default for daily where period=1 day).
+ *                       For weekly loans pass the real days-late (e.g. 1 day after payment date).
+ *
+ * e.g. daily ₹600, 2 days overdue, firstDaysLate=1 (most recent missed day was yesterday):
  *   day 2 (1 day late)  → 600 × (1 + 0.02×1) = 612
+ *   day 1 (2 days late) → 600 × (1 + 0.02×2) = 624
  *   total = 1 236
+ *
+ * e.g. weekly ₹5 000, 1 payment overdue, firstDaysLate=1 (1 day past the payment date):
+ *   → 5 000 × (1 + 0.02×1) = 5 100   (not 5 700 which wrongly assumes 7-day lag)
  */
 function calcOverdueTotal(
   periodAmount: number,
   overdueCount: number,
   daysPerPeriod: number,
+  firstDaysLate?: number,
 ): number {
+  // Most-recent missed period = firstDaysLate days ago.
+  // Each older period adds another daysPerPeriod of lateness.
+  // Default: firstDaysLate = daysPerPeriod (correct for daily where 1 period = 1 day).
+  const recentLate = firstDaysLate ?? daysPerPeriod;
   let total = 0;
   for (let i = 1; i <= overdueCount; i++) {
-    const periodsLate = overdueCount - i + 1; // period 1 has been overdue longest
-    const daysLate = periodsLate * daysPerPeriod;
+    // i=1 = oldest (most days late), i=overdueCount = most recent
+    const daysLate = recentLate + (overdueCount - i) * daysPerPeriod;
     total += periodAmount * (1 + 0.02 * daysLate);
   }
   return Math.round(total);
@@ -1253,7 +1266,8 @@ function buildRepaymentItems(
 
       const daysElapsed = Math.max(differenceInCalendarDays(today, txDate), 0);
       const paidDays = Math.floor((l.paid ?? 0) / dailyAmt);
-      const overdueDays = Math.max(daysElapsed - paidDays, 0);
+      // Subtract 1 so today's payment is NOT counted as overdue — today is shown in Coming Up.
+      const overdueDays = Math.max(daysElapsed - 1 - paidDays, 0);
       const returnDate = l.returnDate ? new Date(l.returnDate + "T00:00:00Z") : null;
       const withinTenure = !returnDate || today <= returnDate;
 
@@ -1294,9 +1308,12 @@ function buildRepaymentItems(
       const paymentsElapsed = countWeeklyPaymentDates(txDate, today);
       const paidPayments = Math.floor((l.paid ?? 0) / weeklyAmt);
       const overduePayments = Math.max(paymentsElapsed - paidPayments, 0);
+      // Actual days since the most-recent missed payment date (for 2%/day fee)
+      const currentWeeklyDue = getCurrentWeeklyPaymentDate(txDate, today);
+      const loanWeeklyDaysLate = currentWeeklyDue ? differenceInCalendarDays(today, currentWeeklyDue) : 1;
 
       if (overduePayments > 0) {
-        const overdueTotal = calcOverdueTotal(weeklyAmt, overduePayments, 7);
+        const overdueTotal = calcOverdueTotal(weeklyAmt, overduePayments, 7, loanWeeklyDaysLate);
         const firstMissedDue = getNthWeeklyPaymentDate(txDate, paidPayments + 1);
         items.push({
           key: `loan-weekly-overdue-${l.id}`,
@@ -1402,9 +1419,9 @@ function buildRepaymentItems(
         : daysLate > 0 ? 1 : 0;
 
       if (overdueCount > 0) {
-        const overdueTotal = hasPaidData
-          ? calcOverdueTotal(weeklyAmt, overdueCount, 7)
-          : Math.round(weeklyAmt * (1 + 0.02 * daysLate));
+        // Always use actual daysLate (calendar days since due date) for the fee,
+        // not daysPerPeriod×periods — 1 day overdue ≠ 7 days overdue for a weekly loan.
+        const overdueTotal = calcOverdueTotal(weeklyAmt, overdueCount, 7, Math.max(daysLate, 1));
         items.push({
           key: `emi-weekly-${e.id}`,
           id: e.id, loanId: (e as any).emiId, type: "emi",
@@ -1443,6 +1460,8 @@ function buildRepaymentItems(
     if (monthly <= 0) continue;
     const dueDate = e.nextPaymentDate ? new Date(e.nextPaymentDate) : null;
     const isOverdue = !!(dueDate && dueDate < now);
+    // Add 2%/day late fee when overdue (use pre-computed server lateFees, which equals monthly × 0.02 × lateDays)
+    const emiLateFees = isOverdue ? (e.lateFees ?? 0) : 0;
     items.push({
       key: `emi-${e.id}`,
       id: e.id, loanId: (e as any).emiId, type: "emi",
@@ -1452,7 +1471,7 @@ function buildRepaymentItems(
           ? `Overdue since ${formatDate(e.nextPaymentDate!)}`
           : `Next payment ${formatDate(e.nextPaymentDate!)}`
         : "No due date",
-      outstanding: monthly, dueDate, isOverdue,
+      outstanding: monthly + emiLateFees, dueDate, isOverdue,
       earlyDiscount: 0,
     });
   }
@@ -2518,8 +2537,9 @@ function ActionRequiredPopup({ items }: { items: UrgentItem[] }) {
         className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
         onClick={dismiss}
       />
-      {/* Popup card */}
-      <div className="fixed inset-x-3 top-3 z-50 mx-auto max-w-sm rounded-2xl border border-border bg-background shadow-2xl overflow-hidden flex flex-col"
+      {/* Popup card — centered horizontally and vertically via CSS transform */}
+      <div
+        className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[calc(100%-2rem)] max-w-sm rounded-2xl border border-border bg-background shadow-2xl overflow-hidden flex flex-col"
         style={{ maxHeight: "85dvh" }}>
         {/* Header */}
         <div

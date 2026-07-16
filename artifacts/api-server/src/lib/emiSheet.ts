@@ -244,6 +244,19 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
       ? Math.floor(today - nextPaySerial)
       : 0;
 
+  // Compute late fees server-side: 2% per day on effective payment amount × days overdue.
+  // This overrides the sheet ARRAYFORMULA (which uses interestPerMonth — too high) and
+  // ensures the app always shows: payment × 0.02 × lateDays as the late penalty.
+  // Priority: weeklyAmount > dailyAmount > monthlyPayment.
+  const weeklyAmountVal = toNumberOrNull(get(COL.WEEKLY_AMOUNT));
+  const dailyAmountVal  = toNumberOrNull(get(COL.DAILY_AMOUNT));
+  const monthlyPayVal   = toNumberOrNull(get(COL.MONTHLY_PAYMENT));
+  const effectivePmt    = weeklyAmountVal ?? dailyAmountVal ?? monthlyPayVal;
+  const lateFees =
+    effectivePmt != null && effectivePmt > 0 && lateDays > 0
+      ? Math.round(effectivePmt * 0.02 * lateDays)
+      : 0;
+
   return {
     id: toText(get(COL.ID)),
     emiId: makeEmiId(rowNumber),
@@ -251,7 +264,7 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
     name: toText(get(COL.NAME)),
     statusNotes: toText(get(COL.STATUS_NOTES)),
     nextPaymentDate,
-    monthlyPayment: toNumberOrNull(get(COL.MONTHLY_PAYMENT)),
+    monthlyPayment: monthlyPayVal,
     transactionDate,
     principal: toNumberOrNull(get(COL.PRINCIPAL)) ?? 0,
     tenureMonths: toNumberOrNull(get(COL.TENURE_MONTHS)) ?? 0,
@@ -263,7 +276,7 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
     principalPerMonth: toNumberOrNull(get(COL.PRINCIPAL_PER_MONTH)),
     status,
     whatsapp: toText(get(COL.WHATSAPP)),
-    lateFees: toNumberOrNull(get(COL.LATE_FEES)),
+    lateFees,
     remainingMonths,
     notes: toText(get(COL.NOTES)),
     lateDays,
@@ -271,8 +284,8 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
       .split("|")
       .map((s) => s.trim())
       .filter(Boolean),
-    dailyAmount: toNumberOrNull(get(COL.DAILY_AMOUNT)),
-    weeklyAmount: toNumberOrNull(get(COL.WEEKLY_AMOUNT)),
+    dailyAmount: dailyAmountVal,
+    weeklyAmount: weeklyAmountVal,
   };
 }
 
