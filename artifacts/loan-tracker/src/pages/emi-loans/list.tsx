@@ -16,7 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus, Search, ChevronRight, CalendarClock, CheckSquare, CheckCircle2, Loader2, CalendarRange } from "lucide-react";
+import { Plus, Search, ChevronRight, CalendarClock, CheckSquare, CheckCircle2, Loader2, CalendarRange, Banknote } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
@@ -152,6 +152,130 @@ function BulkMarkPaidDialog({
   );
 }
 
+// ─── Per-row Record Payment Dialog ────────────────────────────────────────────
+
+function RecordEmiPaymentInlineDialog({
+  loan,
+  open,
+  onOpenChange,
+}: {
+  loan: EmiLoan;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [amount, setAmount] = useState(String(loan.monthlyPayment ?? ""));
+  const [date, setDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [markClear, setMarkClear] = useState(false);
+  const [isPending, setIsPending] = useState(false);
+
+  // Reset when loan changes
+  useEffect(() => {
+    setAmount(String(loan.monthlyPayment ?? ""));
+    setDate(format(new Date(), "yyyy-MM-dd"));
+    setMarkClear(false);
+  }, [loan.id]);
+
+  const handleSubmit = async () => {
+    const amt = Number(amount);
+    if (!amount || isNaN(amt) || amt <= 0) {
+      toast({ variant: "destructive", title: "Invalid amount", description: "Please enter a valid amount." });
+      return;
+    }
+    setIsPending(true);
+    try {
+      if (markClear) {
+        const res = await fetch(`/api/emi-loans/${loan.id}`, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "Clear" }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || "Failed");
+      } else {
+        const res = await fetch(`/api/emi-loans/${loan.id}/pay`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paidDate: date, paidAmount: amt }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || "Failed");
+      }
+      queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
+      toast({
+        title: markClear ? "Marked as Clear" : "Payment recorded",
+        description: markClear
+          ? `${loan.name} is now fully cleared.`
+          : `₹${amt.toLocaleString("en-IN")} recorded on ${date}.`,
+      });
+      onOpenChange(false);
+    } catch (err) {
+      toast({ variant: "destructive", title: "Error", description: err instanceof Error ? err.message : "Something went wrong." });
+    } finally {
+      setIsPending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Record Payment — {loan.name}</DialogTitle>
+          <DialogDescription>
+            Enter any amount for daily, weekly, or monthly payments.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 pt-1">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Amount Paid (₹)</label>
+            <Input
+              type="number"
+              min="0"
+              step="1"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder={String(loan.monthlyPayment ?? 0)}
+            />
+            {loan.monthlyPayment != null && (
+              <p className="text-xs text-muted-foreground">
+                Standard monthly: ₹{Math.round(loan.monthlyPayment).toLocaleString("en-IN")}
+              </p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Payment Date</label>
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+            <input
+              id={`clear-${loan.id}`}
+              type="checkbox"
+              checked={markClear}
+              onChange={(e) => setMarkClear(e.target.checked)}
+              className="h-4 w-4 rounded"
+            />
+            <label htmlFor={`clear-${loan.id}`} className="text-xs text-amber-900 cursor-pointer">
+              Mark loan as <strong>fully cleared</strong>
+            </label>
+          </div>
+        </div>
+        <DialogFooter className="pt-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>Cancel</Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={isPending}
+            className={markClear ? "bg-emerald-700 hover:bg-emerald-800 text-white" : ""}
+          >
+            {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {markClear ? "Mark as Clear" : "Record Payment"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function EmiLoansList() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("Pending");
@@ -159,6 +283,7 @@ export default function EmiLoansList() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkPaidOpen, setBulkPaidOpen] = useState(false);
+  const [payLoan, setPayLoan] = useState<EmiLoan | null>(null);
 
   const { data: loans, isLoading } = useQuery<EmiLoan[]>({
     queryKey: EMI_LOANS_QUERY_KEY,
@@ -398,13 +523,26 @@ export default function EmiLoansList() {
                       <TableCell>
                         <EmiStatusBadge status={loan.status} />
                       </TableCell>
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <Button variant="ghost" size="icon" asChild className="opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Link href={`/emi-loans/${loan.id}`}>
-                            <ChevronRight className="h-4 w-4" />
-                            <span className="sr-only">View Details</span>
-                          </Link>
-                        </Button>
+                      <TableCell onClick={(e) => e.stopPropagation()} className="text-right">
+                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {loan.status !== "Clear" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Record Payment"
+                              onClick={(e) => { e.stopPropagation(); setPayLoan(loan); }}
+                            >
+                              <Banknote className="h-4 w-4 text-emerald-700" />
+                              <span className="sr-only">Record Payment</span>
+                            </Button>
+                          )}
+                          <Button variant="ghost" size="icon" asChild>
+                            <Link href={`/emi-loans/${loan.id}`}>
+                              <ChevronRight className="h-4 w-4" />
+                              <span className="sr-only">View Details</span>
+                            </Link>
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -429,6 +567,14 @@ export default function EmiLoansList() {
         loans={pendingSelected}
         onDone={() => setSelected(new Set())}
       />
+
+      {payLoan && (
+        <RecordEmiPaymentInlineDialog
+          loan={payLoan}
+          open={!!payLoan}
+          onOpenChange={(v) => { if (!v) setPayLoan(null); }}
+        />
+      )}
     </div>
   );
 }

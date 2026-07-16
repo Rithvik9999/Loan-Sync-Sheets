@@ -36,7 +36,7 @@ import { Loader2 } from "lucide-react";
 
 const paymentSchema = z.object({
   paid: z.coerce.number().min(0, "Amount cannot be negative"),
-  status: z.enum(["Pending", "Clear", "Temp"]),
+  status: z.enum(["Pending", "Clear", "Temp", "Archived"]),
   partPayment: z.coerce.number().optional(),
   dateOfPartPayment: z.string().optional(),
 });

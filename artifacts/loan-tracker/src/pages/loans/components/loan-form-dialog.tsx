@@ -63,7 +63,7 @@ const loanSchema = z.object({
   discountOrChargesAbs: z.coerce.number().min(0).optional(),
   isDiscount: z.boolean().optional(),
   notes: z.string().optional(),
-  status: z.enum(["Pending", "Clear", "Temp"]).optional(),
+  status: z.enum(["Pending", "Clear", "Temp", "Archived"]).optional(),
 });
 
 type LoanFormValues = z.infer<typeof loanSchema>;

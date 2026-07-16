@@ -242,12 +242,16 @@ router.delete(
       return;
     }
 
-    const deleted = await loanRequestsRepo.deleteLoanRequest(id);
-    if (!deleted) {
-      res.status(404).json({ error: "Loan request not found" });
-      return;
+    try {
+      const deleted = await loanRequestsRepo.deleteLoanRequest(id);
+      if (!deleted) {
+        res.status(404).json({ error: "Loan request not found" });
+        return;
+      }
+      res.sendStatus(204);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to delete loan request. Please try again." });
     }
-    res.sendStatus(204);
   },
 );
 
