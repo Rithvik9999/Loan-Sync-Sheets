@@ -349,6 +349,40 @@ export async function ensureGridRowCountForSheet(
   });
 }
 
+/**
+ * Inserts a blank row at the given 1-based rowNumber, pushing existing rows down.
+ * Uses insertDimension so Sheets adjusts all relative formula references.
+ */
+export async function insertRowAt(
+  title: string,
+  rowNumber: number,
+): Promise<void> {
+  const sheets = getSheets();
+  const spreadsheetId = getSpreadsheetId();
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const sheetId = meta.data.sheets?.find((s) => s.properties?.title === title)
+    ?.properties?.sheetId;
+  if (sheetId === undefined || sheetId === null) return;
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          insertDimension: {
+            range: {
+              sheetId,
+              dimension: "ROWS",
+              startIndex: rowNumber - 1, // 0-indexed
+              endIndex: rowNumber,
+            },
+            inheritFromBefore: false,
+          },
+        },
+      ],
+    },
+  });
+}
+
 export async function deleteRowAt(
   title: string,
   rowNumber: number,

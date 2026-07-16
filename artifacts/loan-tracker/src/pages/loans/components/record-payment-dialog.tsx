@@ -54,7 +54,8 @@ export default function RecordPaymentDialog({ open, onOpenChange, loan }: Record
   const queryClient = useQueryClient();
 
   const defaults = (): PaymentFormValues => ({
-    paid: loan.paid ?? 0,
+    // When marking as Clear, default paid to finalAmount so admin can confirm or adjust
+    paid: loan.paid ?? (loan.finalAmount ?? 0),
     status: loan.status,
     partPayment: loan.partPayment ?? undefined,
     dateOfPartPayment: loan.dateOfPartPayment ?? undefined,

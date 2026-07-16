@@ -5,7 +5,6 @@ import {
   CreateLoanRequestResponse,
   UpdateLoanRequestResponse,
 } from "@workspace/api-zod";
-import { z } from "zod";
 import { attachRole, requireStaff } from "../middlewares/auth";
 import * as loanRequestsRepo from "../lib/repositories/loanRequests";
 import * as borrowersRepo from "../lib/repositories/borrowers";
@@ -18,15 +17,41 @@ const router: IRouter = Router();
 
 router.use(attachRole);
 
-// Flexible body — works for both Loan and EMI request types
-const CreateLoanRequestBodyFlex = z.object({
-  amount: z.coerce.number().min(0.01, "Amount must be positive"),
-  tenureDays: z.coerce.number().min(0).optional().default(0),
-  tenureMonths: z.coerce.number().int().min(1).optional().nullable(),
-  type: z.enum(["Loan", "EMI"]).optional().default("Loan"),
-  purpose: z.string().optional().nullable(),
-  upiId: z.string().optional().nullable(),
-});
+// ── Inline validation helpers (no zod in this file to avoid esbuild issues) ──
+
+interface CreateLoanRequestData {
+  amount: number;
+  tenureDays: number;
+  tenureMonths: number | null;
+  type: "Loan" | "EMI";
+  purpose: string | null;
+  upiId: string | null;
+}
+
+function validateCreateLoanRequest(body: unknown): { ok: true; data: CreateLoanRequestData } | { ok: false; error: string } {
+  if (!body || typeof body !== "object") return { ok: false, error: "Body must be an object" };
+  const b = body as Record<string, unknown>;
+  const amount = Number(b.amount);
+  if (!Number.isFinite(amount) || amount < 0.01) return { ok: false, error: "Amount must be positive" };
+  const tenureDays = b.tenureDays !== undefined ? Math.max(0, Number(b.tenureDays) || 0) : 0;
+  const tenureMonths = b.tenureMonths != null ? (Math.floor(Number(b.tenureMonths)) || null) : null;
+  if (tenureMonths !== null && tenureMonths < 1) return { ok: false, error: "tenureMonths must be ≥ 1" };
+  const type = (b.type === "EMI" ? "EMI" : "Loan") as "Loan" | "EMI";
+  const purpose = typeof b.purpose === "string" ? b.purpose : null;
+  const upiId = typeof b.upiId === "string" ? b.upiId : null;
+  return { ok: true, data: { amount, tenureDays, tenureMonths, type, purpose, upiId } };
+}
+
+interface PayLoanRequestData { discount: number; transactionDate?: string; notes?: string | null; }
+
+function validatePayLoanRequest(body: unknown): { ok: true; data: PayLoanRequestData } | { ok: false; error: string } {
+  if (!body || typeof body !== "object") return { ok: true, data: { discount: 0 } };
+  const b = body as Record<string, unknown>;
+  const discount = Math.max(0, Number(b.discount) || 0);
+  const transactionDate = typeof b.transactionDate === "string" ? b.transactionDate : undefined;
+  const notes = typeof b.notes === "string" ? b.notes : null;
+  return { ok: true, data: { discount, transactionDate, notes } };
+}
 
 router.get("/loan-requests", async (req, res): Promise<void> => {
   const info = req.roleInfo!;
@@ -45,9 +70,9 @@ router.post("/loan-requests", async (req, res): Promise<void> => {
     return;
   }
 
-  const parsed = CreateLoanRequestBodyFlex.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+  const parsed = validateCreateLoanRequest(req.body);
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.error });
     return;
   }
 
@@ -124,19 +149,14 @@ router.post("/loan-requests", async (req, res): Promise<void> => {
 });
 
 // ── Pay a loan request: create a Clear loan row in the sheet ─────────────────
-const PayLoanRequestBody = z.object({
-  discount: z.coerce.number().min(0).default(0),
-  transactionDate: z.string().optional(),
-  notes: z.string().optional().nullable(),
-});
 
 router.post(
   "/loan-requests/:id/pay",
   requireStaff,
   async (req, res): Promise<void> => {
-    const parsed = PayLoanRequestBody.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.message });
+    const parsed = validatePayLoanRequest(req.body);
+    if (!parsed.ok) {
+      res.status(400).json({ error: parsed.error });
       return;
     }
 

@@ -43,11 +43,19 @@ router.get("/loans", async (req, res): Promise<void> => {
     });
   }
 
+  // For borrowers, remap Archived → Pending so they see the loan as still active
+  const forRole =
+    info.role === "borrower"
+      ? enriched.map((l) =>
+          l.status === "Archived" ? { ...l, status: "Pending" as const } : l,
+        )
+      : enriched;
+
   const status = req.query.status;
   const filtered =
     typeof status === "string"
-      ? enriched.filter((l) => l.status === status)
-      : enriched;
+      ? forRole.filter((l) => l.status === status)
+      : forRole;
 
   res.json(ListLoansResponse.parse(filtered));
 });
@@ -137,6 +145,33 @@ router.patch(
     }
     const borrowers = await borrowersRepo.listBorrowers();
     res.json(UpdateLoanResponse.parse(attachBorrowerId(loan, borrowers)));
+  },
+);
+
+/**
+ * POST /loans/:id/part-payment
+ * Appends a new part-payment entry to the loan's stacked list.
+ * Updates both Q (partPayment sum) and R (stacked date:amount string).
+ */
+router.post(
+  "/loans/:id/part-payment",
+  requireStaff,
+  async (req, res): Promise<void> => {
+    const id = (req.params as { id: string }).id;
+    if (!id) { res.status(400).json({ error: "id is required" }); return; }
+    const { amount, date } = req.body as { amount?: unknown; date?: unknown };
+    if (typeof amount !== "number" || amount <= 0) {
+      res.status(400).json({ error: "amount must be a positive number" });
+      return;
+    }
+    if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      res.status(400).json({ error: "date must be a YYYY-MM-DD string" });
+      return;
+    }
+    const loan = await loansRepo.updateLoan(id, { appendPartPayment: { amount, date } });
+    if (!loan) { res.status(404).json({ error: "Loan not found" }); return; }
+    const borrowers = await borrowersRepo.listBorrowers();
+    res.json(attachBorrowerId(loan, borrowers));
   },
 );
 

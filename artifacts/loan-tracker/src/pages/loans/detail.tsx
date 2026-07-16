@@ -86,12 +86,17 @@ export default function LoanDetail() {
     { label: "Return Date", value: loan.returnDate ? formatDate(loan.returnDate) : "—" },
   ];
 
-  const computed: { label: string; value: string }[] = [
+  const isOverdue = (loan.lateDays ?? 0) > 0 && loan.status !== "Clear";
+
+  const computed: { label: string; value: string; highlight?: "red" | "amber" }[] = [
     { label: "Flat Fee", value: loan.flatFee != null ? formatCurrency(loan.flatFee) : "—" },
     { label: "Interest %", value: loan.interestPct != null ? `${Number((loan.interestPct * 100).toFixed(2))}%` : "—" },
     { label: "Interest", value: loan.interest != null ? formatCurrency(loan.interest) : "—" },
-    { label: "Late Days", value: loan.lateDays != null ? String(loan.lateDays) : "—" },
-    { label: "Late Fees", value: loan.lateFees != null ? formatCurrency(loan.lateFees) : "—" },
+    { label: "Late Days", value: loan.lateDays != null ? String(loan.lateDays) : "—", highlight: isOverdue ? "red" : undefined },
+    { label: "Late Fees", value: loan.lateFees != null ? formatCurrency(loan.lateFees) : "—", highlight: isOverdue ? "red" : undefined },
+    ...(isOverdue && (loan as any).perDayAddition != null
+      ? [{ label: "Per Day Addition", value: formatCurrency((loan as any).perDayAddition), highlight: "amber" as const }]
+      : []),
     ...(isStaff
       ? [
           { label: "Profit", value: loan.profit != null ? formatCurrency(loan.profit) : "—" },
@@ -211,12 +216,57 @@ export default function LoanDetail() {
             {computed.map((c) => (
               <div key={c.label} className="space-y-1">
                 <p className="text-xs text-muted-foreground">{c.label}</p>
-                <p className="text-lg font-semibold font-numeric">{c.value}</p>
+                <p className={`text-lg font-semibold font-numeric ${
+                  c.highlight === "red" ? "text-destructive" :
+                  c.highlight === "amber" ? "text-amber-600 dark:text-amber-400" :
+                  ""
+                }`}>{c.value}</p>
               </div>
             ))}
           </div>
         </CardContent>
       </Card>
+
+      {/* Part Payments */}
+      {(() => {
+        const partPayments = (loan as any).partPayments as Array<{ date: string | null; amount: number }> | undefined;
+        if (!partPayments || partPayments.length === 0) return null;
+        return (
+          <Card className="shadow-sm border-border/60">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Plus className="h-4 w-4 text-muted-foreground" /> Part Payments
+              </CardTitle>
+              <CardDescription>Partial payments recorded for this loan.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {partPayments.map((pp, i) => (
+                  <div key={i} className="flex items-center justify-between rounded-lg border bg-muted/20 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium">
+                        {pp.date ? formatDate(pp.date) : "Date not set"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Part payment #{i + 1}</p>
+                    </div>
+                    <div className="font-bold font-numeric text-emerald-700 dark:text-emerald-400">
+                      {pp.amount > 0 ? formatCurrency(pp.amount) : "—"}
+                    </div>
+                  </div>
+                ))}
+                {partPayments.length > 1 && (
+                  <div className="flex items-center justify-between rounded-lg bg-muted/40 px-4 py-2 text-sm">
+                    <span className="text-muted-foreground font-medium">Total part payments</span>
+                    <span className="font-bold font-numeric">
+                      {formatCurrency(partPayments.reduce((s, p) => s + p.amount, 0))}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {isStaff && (
         <>

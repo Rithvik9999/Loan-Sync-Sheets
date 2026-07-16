@@ -39,7 +39,7 @@
  *  V(21) notes              - input
  */
 import { randomUUID } from "node:crypto";
-import { batchUpdateCells, ensureGridRowCount, getRawValues } from "./sheetsClient";
+import { batchUpdateCells, deleteRowAt, ensureGridRowCount, getRawValues, insertRowAt } from "./sheetsClient";
 
 const TAB = "Heat Map";
 const HEADER_ROW = 5;
@@ -73,6 +73,12 @@ const COL = {
 
 export type LoanStatus = "Pending" | "Clear" | "Temp" | "Archived";
 
+/** A single part-payment entry parsed from the stacked datePartPayment cell. */
+export interface PartPaymentEntry {
+  date: string | null;
+  amount: number;
+}
+
 export interface LoanRow {
   id: string;
   /** Human-readable loan ID derived from the sheet row (e.g. "L-0001").
@@ -97,9 +103,15 @@ export interface LoanRow {
   finalAmount: number | null;
   partPayment: number | null;
   dateOfPartPayment: string | null;
+  /** Parsed list of part-payment entries. Derived from the stacked
+   *  "YYYY-MM-DD:AMOUNT|YYYY-MM-DD:AMOUNT" format in the datePartPayment cell. */
+  partPayments: PartPaymentEntry[];
   paid: number | null;
   profit: number | null;
   notes: string;
+  /** Per-day late-fee accrual rate (rupees/day). Derived from lateFees / lateDays
+   *  when both are available. Useful so borrowers know their daily cost of delay. */
+  perDayAddition: number | null;
 }
 
 export interface LoanRowInput {
@@ -110,20 +122,6 @@ export interface LoanRowInput {
   whatsapp?: string | null;
   status?: LoanStatus;
   discountOrCharges?: number | null;
-  notes?: string | null;
-}
-
-export interface LoanRowUpdate {
-  name?: string;
-  transactionDate?: string;
-  principal?: number;
-  tenureDays?: number;
-  whatsapp?: string | null;
-  status?: LoanStatus;
-  discountOrCharges?: number | null;
-  partPayment?: number | null;
-  dateOfPartPayment?: string | null;
-  paid?: number | null;
   notes?: string | null;
 }
 
@@ -153,8 +151,52 @@ function makeLoanId(rowNumber: number): string {
   return `L-${String(seq).padStart(4, "0")}`;
 }
 
+/**
+ * Parses the stacked part-payment string from the datePartPayment cell.
+ *
+ * Formats supported:
+ *  - Empty / null                → []
+ *  - Numeric (serial date)       → [{ date: "YYYY-MM-DD", amount: 0 }] (legacy)
+ *  - "YYYY-MM-DD"                → [{ date: "YYYY-MM-DD", amount: 0 }] (legacy single)
+ *  - "YYYY-MM-DD:AMOUNT"         → [{ date: "YYYY-MM-DD", amount: AMOUNT }]
+ *  - "YYYY-MM-DD:AMOUNT|..."     → multiple entries
+ */
+function parsePartPayments(raw: unknown, partPayment: number | null): PartPaymentEntry[] {
+  if (typeof raw === "number") {
+    const date = serialToISODate(raw);
+    return [{ date, amount: partPayment ?? 0 }];
+  }
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  const text = raw.trim();
+  if (text.includes("|") || text.includes(":")) {
+    return text
+      .split("|")
+      .filter(Boolean)
+      .map((entry) => {
+        const colonIdx = entry.indexOf(":");
+        if (colonIdx === -1) return { date: entry.trim() || null, amount: 0 };
+        const datePart = entry.slice(0, colonIdx).trim();
+        const amtPart = entry.slice(colonIdx + 1).trim();
+        return { date: datePart || null, amount: Number(amtPart) || 0 };
+      });
+  }
+  // Single date string (legacy)
+  return [{ date: text, amount: partPayment ?? 0 }];
+}
+
 function parseRow(raw: unknown[], rowNumber: number): LoanRow {
   const get = (idx: number) => raw[idx];
+  const lateDays = toNumberOrNull(get(COL.LATE_DAYS));
+  const lateFees = toNumberOrNull(get(COL.LATE_FEES));
+  const partPayment = toNumberOrNull(get(COL.PART_PAYMENT));
+  const partPayments = parsePartPayments(get(COL.DATE_PART_PAYMENT), partPayment);
+
+  // perDayAddition = lateFees / lateDays when both are positive
+  const perDayAddition =
+    lateDays != null && lateDays > 0 && lateFees != null && lateFees > 0
+      ? Math.round(lateFees / lateDays)
+      : null;
+
   return {
     id: toText(get(COL.ID)),
     loanId: makeLoanId(rowNumber),
@@ -171,15 +213,35 @@ function parseRow(raw: unknown[], rowNumber: number): LoanRow {
     interestPct: toNumberOrNull(get(COL.INTEREST_PCT)),
     interest: toNumberOrNull(get(COL.INTEREST)),
     discountOrCharges: toNumberOrNull(get(COL.DISCOUNT_OR_CHARGES)) ?? 0,
-    lateDays: toNumberOrNull(get(COL.LATE_DAYS)),
-    lateFees: toNumberOrNull(get(COL.LATE_FEES)),
+    lateDays,
+    lateFees,
     finalAmount: toNumberOrNull(get(COL.FINAL_AMOUNT)),
-    partPayment: toNumberOrNull(get(COL.PART_PAYMENT)),
-    dateOfPartPayment: serialToISODate(get(COL.DATE_PART_PAYMENT)),
+    partPayment,
+    dateOfPartPayment: typeof get(COL.DATE_PART_PAYMENT) === "string"
+      ? toText(get(COL.DATE_PART_PAYMENT)) || null
+      : serialToISODate(get(COL.DATE_PART_PAYMENT)),
+    partPayments,
     paid: toNumberOrNull(get(COL.PAID)),
     profit: toNumberOrNull(get(COL.PROFIT)),
     notes: toText(get(COL.NOTES)),
+    perDayAddition,
   };
+}
+
+export interface LoanRowUpdate {
+  name?: string;
+  transactionDate?: string;
+  principal?: number;
+  tenureDays?: number;
+  whatsapp?: string | null;
+  status?: LoanStatus;
+  discountOrCharges?: number | null;
+  partPayment?: number | null;
+  dateOfPartPayment?: string | null;
+  paid?: number | null;
+  notes?: string | null;
+  /** When set, appends this part payment to the stacked list instead of overwriting. */
+  appendPartPayment?: { amount: number; date: string } | null;
 }
 
 /** Reads every real data row (skips the header/formula rows and blanks), backfilling any missing id. */
@@ -227,7 +289,7 @@ async function findNextRowNumber(): Promise<number> {
 
 function inputCellUpdates(
   rowNumber: number,
-  input: Partial<LoanRowInput & LoanRowUpdate>,
+  input: Partial<LoanRowInput & Omit<LoanRowUpdate, "appendPartPayment">>,
 ): { range: string; values: (string | number)[][] }[] {
   const updates: { range: string; values: (string | number)[][] }[] = [];
   const set = (col: number, value: string | number | undefined | null) => {
@@ -253,22 +315,45 @@ function inputCellUpdates(
 }
 
 /**
- * Appends a new loan row, writing only input columns. Computed columns
- * (Return Date, Flat Fee, Interest %, Interest, Late days/fees, Final
- * Amount, Profit) are left completely untouched so the sheet's own array
- * formulas spill into them automatically.
+ * Creates a new loan row at the TOP of the data section (just below the
+ * formula row at row 6), inserting a blank row there so the new loan
+ * appears first in the sheet. Computed columns are left untouched so the
+ * sheet's array formulas spill into them automatically.
+ *
+ * After creation, the on-time final amount (timelyReturn) is written once
+ * from the sheet's computed finalAmount — it is never updated after this.
  */
 export async function createLoanRow(input: LoanRowInput): Promise<LoanRow> {
-  const rowNumber = await findNextRowNumber();
-  await ensureGridRowCount(TAB, rowNumber);
+  // Insert a blank row at DATA_START_ROW (7) — pushes existing data down
+  await insertRowAt(TAB, DATA_START_ROW);
+  const rowNumber = DATA_START_ROW;
+
   const id = randomUUID();
   const updates = [
     { range: `${TAB}!${colLetter(COL.ID)}${rowNumber}`, values: [[id]] },
     ...inputCellUpdates(rowNumber, { ...input, status: input.status ?? "Pending" }),
   ];
   await batchUpdateCells(updates);
-  const row = await getLoanRowAtRowNumber(rowNumber);
+
+  // Wait for array formulas to compute
+  await new Promise((r) => setTimeout(r, 1000));
+
+  // Read back the row to capture the sheet-computed finalAmount
+  let row = await getLoanRowAtRowNumber(rowNumber);
   if (!row) throw new Error("Failed to read back newly created loan row");
+
+  // Write timelyReturn = finalAmount (on-time repayment amount). Never overwrite after this.
+  if (row.finalAmount != null && row.timelyReturn == null) {
+    await batchUpdateCells([
+      {
+        range: `${TAB}!${colLetter(COL.TIMELY_RETURN)}${rowNumber}`,
+        values: [[row.finalAmount]],
+      },
+    ]);
+    // Re-read to include timelyReturn
+    row = (await getLoanRowAtRowNumber(rowNumber)) ?? row;
+  }
+
   return row;
 }
 
@@ -284,17 +369,60 @@ export async function updateLoanRow(
 ): Promise<LoanRow | null> {
   const existing = await getLoanRow(id);
   if (!existing) return null;
-  const updates = inputCellUpdates(existing.rowNumber, patch);
+
+  // Spread non-appendPartPayment fields into normal updates
+  const { appendPartPayment, ...regularPatch } = patch;
+  const updates = inputCellUpdates(existing.rowNumber, regularPatch);
+
+  // Handle appending a new part payment to the stacked list
+  if (appendPartPayment) {
+    const newEntry = `${appendPartPayment.date}:${appendPartPayment.amount}`;
+    const prevStack = existing.dateOfPartPayment ?? "";
+    const newStack = prevStack
+      ? `${prevStack}|${newEntry}`
+      : newEntry;
+
+    // Sum all existing part payments plus the new one
+    const allEntries = newStack.split("|").filter(Boolean);
+    const totalPartPayment = allEntries.reduce((sum, entry) => {
+      const colonIdx = entry.indexOf(":");
+      const amt = colonIdx !== -1 ? Number(entry.slice(colonIdx + 1)) : 0;
+      return sum + (isNaN(amt) ? 0 : amt);
+    }, 0);
+
+    updates.push(
+      {
+        range: `${TAB}!${colLetter(COL.DATE_PART_PAYMENT)}${existing.rowNumber}`,
+        values: [[newStack]],
+      },
+      {
+        range: `${TAB}!${colLetter(COL.PART_PAYMENT)}${existing.rowNumber}`,
+        values: [[totalPartPayment]],
+      },
+    );
+  }
+
   if (updates.length > 0) {
     await batchUpdateCells(updates);
   }
   return getLoanRowAtRowNumber(existing.rowNumber);
 }
 
+/**
+ * Convenience function: append a single part payment to an existing loan.
+ * Updates Q (partPayment sum) and R (stacked date:amount history).
+ */
+export async function appendPartPaymentToLoan(
+  id: string,
+  amount: number,
+  date: string,
+): Promise<LoanRow | null> {
+  return updateLoanRow(id, { appendPartPayment: { amount, date } });
+}
+
 export async function deleteLoanRow(id: string): Promise<LoanRow | null> {
   const existing = await getLoanRow(id);
   if (!existing) return null;
-  const { deleteRowAt } = await import("./sheetsClient");
   await deleteRowAt(TAB, existing.rowNumber);
   return existing;
 }

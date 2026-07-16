@@ -2325,15 +2325,16 @@ export default function Portal() {
         </div>
       </div>
 
-      {/* Summary Cards — 3-column on mobile */}
+      {/* Summary Cards — 2×2 grid on mobile, 4-column on sm+ */}
       {isLoading ? (
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <Skeleton className="h-24 w-full rounded-xl" />
           <Skeleton className="h-24 w-full rounded-xl" />
           <Skeleton className="h-24 w-full rounded-xl" />
           <Skeleton className="h-24 w-full rounded-xl" />
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {/* Loans count */}
           <Card className="shadow-sm border-border/60">
             <CardContent className="px-2 py-3 flex flex-col items-center justify-center text-center gap-1">
@@ -2356,7 +2357,9 @@ export default function Portal() {
           <Card className={`shadow-sm ${isOverLimit ? "border-destructive/40 bg-destructive/5" : "border-border/60"}`}>
             <CardContent className="px-2 py-3 flex flex-col items-center justify-center text-center gap-0.5">
               {/* Donut — margin:0 prevents Recharts default 5px clipping.
-                  cx=26,cy=26 with outerRadius=24 gives 2px buffer on all edges inside 52px SVG. */}
+                  cx=26,cy=26 with outerRadius=24 gives 2px buffer on all edges inside 52px SVG.
+                  NOTE: Use concrete hex colours — CSS custom properties (hsl(var(--x)))
+                  are not reliably resolved in SVG fill attributes by Recharts. */}
               <div className="relative shrink-0" style={{ width: 52, height: 52 }}>
                 <PieChart width={52} height={52} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                   <Pie
@@ -2379,12 +2382,13 @@ export default function Portal() {
                   >
                     {creditLimit != null && creditLimit > 0 ? (
                       <>
-                        {/* Green (hue 120) → Amber (60) → Red (0) based on % used */}
-                        <Cell fill={`hsl(${Math.round(120 * (1 - Math.min(usedPct ?? 0, 100) / 100))}, 78%, 42%)`} />
-                        <Cell fill="hsl(var(--muted))" />
+                        {/* Green (hue 120) → Amber (60) → Red (0) gradient based on % used */}
+                        <Cell fill={`hsl(${Math.round(120 * (1 - Math.min(usedPct ?? 0, 100) / 100))}, 75%, 40%)`} />
+                        {/* Available slice — use concrete colour so SVG resolves correctly */}
+                        <Cell fill="#e2e8f0" />
                       </>
                     ) : (
-                      <Cell fill="hsl(var(--muted))" />
+                      <Cell fill="#e2e8f0" />
                     )}
                   </Pie>
                 </PieChart>
@@ -2405,6 +2409,17 @@ export default function Portal() {
                   </p>
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Total Outstanding */}
+          <Card className="shadow-sm border-border/60">
+            <CardContent className="px-2 py-3 flex flex-col items-center justify-center text-center gap-1">
+              <Wallet className="h-4 w-4 text-muted-foreground" />
+              <div className="text-sm font-bold font-numeric leading-none text-destructive">
+                {formatCurrency(totalOutstanding)}
+              </div>
+              <p className="text-[10px] text-muted-foreground leading-tight">Total Due</p>
             </CardContent>
           </Card>
         </div>

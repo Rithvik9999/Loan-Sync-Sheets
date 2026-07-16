@@ -26,4 +26,9 @@ export interface LoanUpdate {
   paid?: number | null;
   /** @nullable */
   notes?: string | null;
+  /**
+   * When set, appends a new part-payment entry to the stacked list.
+   * Q (partPayment sum) and R (stacked datePartPayment) are updated automatically.
+   */
+  appendPartPayment?: { amount: number; date: string } | null;
 }

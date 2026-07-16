@@ -1,5 +1,4 @@
 import { Router, type IRouter } from "express";
-import { z } from "zod";
 import {
   GetBorrowerParams,
   UpdateBorrowerParams,
@@ -16,22 +15,57 @@ const router: IRouter = Router();
 
 router.use("/borrowers", attachRole, requireStaff);
 
-// Inline schemas (email removed — phone is the primary identity)
-const PIN_SCHEMA = z.string().regex(/^\d{6}$/, "PIN must be exactly 6 digits");
+// ── Inline validation helpers (no zod — keeps the bundle simple) ──────────────
 
-const CreateBorrowerBodyLocal = z.object({
-  name: z.string().min(1),
-  phone: z.string().nullish(),
-  pin: PIN_SCHEMA.nullish(),
-  creditLimit: z.coerce.number().positive().nullish(),
-});
+function isValidPin(v: unknown): v is string {
+  return typeof v === "string" && /^\d{6}$/.test(v);
+}
 
-const UpdateBorrowerBodyLocal = z.object({
-  name: z.string().min(1).optional(),
-  phone: z.string().nullish(),
-  pin: PIN_SCHEMA.nullish(),
-  creditLimit: z.coerce.number().positive().nullish(),
-});
+function validateCreateBorrowerBody(body: unknown): {
+  ok: true;
+  data: { name: string; phone?: string | null; pin?: string | null; creditLimit?: number | null };
+} | { ok: false; error: string } {
+  if (!body || typeof body !== "object") return { ok: false, error: "Body must be an object" };
+  const b = body as Record<string, unknown>;
+  if (typeof b.name !== "string" || b.name.trim() === "") return { ok: false, error: "name is required" };
+  if (b.pin !== undefined && b.pin !== null && !isValidPin(b.pin)) return { ok: false, error: "PIN must be exactly 6 digits" };
+  if (b.creditLimit !== undefined && b.creditLimit !== null) {
+    const n = Number(b.creditLimit);
+    if (!Number.isFinite(n) || n <= 0) return { ok: false, error: "creditLimit must be a positive number" };
+  }
+  return {
+    ok: true,
+    data: {
+      name: (b.name as string).trim(),
+      phone: typeof b.phone === "string" ? b.phone : null,
+      pin: typeof b.pin === "string" ? b.pin : null,
+      creditLimit: b.creditLimit != null ? Number(b.creditLimit) : null,
+    },
+  };
+}
+
+function validateUpdateBorrowerBody(body: unknown): {
+  ok: true;
+  data: { name?: string; phone?: string | null; pin?: string | null; creditLimit?: number | null };
+} | { ok: false; error: string } {
+  if (!body || typeof body !== "object") return { ok: false, error: "Body must be an object" };
+  const b = body as Record<string, unknown>;
+  if (b.name !== undefined && (typeof b.name !== "string" || b.name.trim() === "")) return { ok: false, error: "name cannot be empty" };
+  if (b.pin !== undefined && b.pin !== null && !isValidPin(b.pin)) return { ok: false, error: "PIN must be exactly 6 digits" };
+  if (b.creditLimit !== undefined && b.creditLimit !== null) {
+    const n = Number(b.creditLimit);
+    if (!Number.isFinite(n) || n <= 0) return { ok: false, error: "creditLimit must be a positive number" };
+  }
+  return {
+    ok: true,
+    data: {
+      ...(b.name !== undefined ? { name: (b.name as string).trim() } : {}),
+      ...(b.phone !== undefined ? { phone: typeof b.phone === "string" ? b.phone : null } : {}),
+      ...(b.pin !== undefined ? { pin: typeof b.pin === "string" ? b.pin : null } : {}),
+      ...(b.creditLimit !== undefined ? { creditLimit: b.creditLimit != null ? Number(b.creditLimit) : null } : {}),
+    },
+  };
+}
 
 router.get("/borrowers", async (_req, res): Promise<void> => {
   const borrowers = await borrowersRepo.listBorrowers();
@@ -39,9 +73,9 @@ router.get("/borrowers", async (_req, res): Promise<void> => {
 });
 
 router.post("/borrowers", async (req, res): Promise<void> => {
-  const parsed = CreateBorrowerBodyLocal.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+  const parsed = validateCreateBorrowerBody(req.body);
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.error });
     return;
   }
   const borrower = await borrowersRepo.createBorrower(parsed.data);
@@ -68,9 +102,9 @@ router.patch("/borrowers/:id", async (req, res): Promise<void> => {
     res.status(400).json({ error: params.error.message });
     return;
   }
-  const parsed = UpdateBorrowerBodyLocal.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+  const parsed = validateUpdateBorrowerBody(req.body);
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.error });
     return;
   }
   const borrower = await borrowersRepo.updateBorrower(
