@@ -186,17 +186,46 @@ function advanceOneMonth(isoDate: string): string {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * Computes the server-side next payment due date from remainingMonths and transactionDate.
+ * This avoids relying on the sheet's C-column formula (which auto-advances based on TODAY()
+ * and cannot detect overdue payments reliably).
+ *
+ * Formula: nextDue = transactionDate + (tenureMonths - remainingMonths + 1) months
+ */
+function computeNextDueDate(
+  transactionDate: string | null,
+  tenureMonths: number,
+  remainingMonths: number | null,
+): string | null {
+  if (!transactionDate || remainingMonths === null || remainingMonths <= 0) return null;
+  const paidMonths = Math.max(tenureMonths - remainingMonths, 0);
+  const d = new Date(transactionDate + "T00:00:00Z");
+  const origDay = d.getUTCDate();
+  d.setUTCMonth(d.getUTCMonth() + paidMonths + 1);
+  // Clamp: e.g. Jan 31 + 1 month → Feb 28/29
+  if (d.getUTCDate() < origDay) d.setUTCDate(0);
+  return d.toISOString().slice(0, 10);
+}
+
 function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
   const get = (idx: number) => raw[idx];
   const status = (toText(get(COL.STATUS)) || "Pending") as EmiLoanStatus;
   const remainingMonths = toNumberOrNull(get(COL.REMAINING_MONTHS));
-  const nextPaySerial = get(COL.NEXT_PAYMENT_DATE);
-  const today = todaySerial();
+  const tenureMonths = toNumberOrNull(get(COL.TENURE_MONTHS)) ?? 0;
+  const transactionDate = serialToISODate(get(COL.TRANSACTION_DATE));
 
-  // Overdue = Pending, has a next-payment date, has remaining months, and that date is in the past.
+  // Compute next payment date from server-tracked remainingMonths — this is stable
+  // and correctly identifies overdue loans even when the sheet formula has auto-advanced.
+  const nextPaymentDate = computeNextDueDate(transactionDate, tenureMonths, remainingMonths);
+
+  const today = todaySerial();
+  const nextPaySerial = nextPaymentDate ? isoToSerial(nextPaymentDate) : null;
+
+  // Overdue = Pending, has remaining months, and computed next-due date is in the past.
   const lateDays =
     status === "Pending" &&
-    typeof nextPaySerial === "number" &&
+    nextPaySerial !== null &&
     remainingMonths !== null &&
     remainingMonths > 0 &&
     nextPaySerial < today
@@ -209,9 +238,9 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
     rowNumber,
     name: toText(get(COL.NAME)),
     statusNotes: toText(get(COL.STATUS_NOTES)),
-    nextPaymentDate: serialToISODate(get(COL.NEXT_PAYMENT_DATE)),
+    nextPaymentDate,
     monthlyPayment: toNumberOrNull(get(COL.MONTHLY_PAYMENT)),
-    transactionDate: serialToISODate(get(COL.TRANSACTION_DATE)),
+    transactionDate,
     principal: toNumberOrNull(get(COL.PRINCIPAL)) ?? 0,
     tenureMonths: toNumberOrNull(get(COL.TENURE_MONTHS)) ?? 0,
     flatFee: toNumberOrNull(get(COL.FLAT_FEE)),
@@ -384,10 +413,10 @@ export async function createEmiLoanRow(input: EmiLoanInput): Promise<EmiLoanRow>
     { range: `${TAB}!${colLetter(COL.ID)}${rowNumber}`, values: [[id]] },
     ...emiInputCellUpdates(rowNumber, { ...input, status: input.status ?? "Pending" }),
   ];
-  // Write initial server-managed tracking columns (nextPaymentDate = transactionDate + 1 month; remainingMonths = tenureMonths)
-  const initialNextDate = input.nextPaymentDate ?? advanceOneMonth(input.transactionDate);
+  // Write initial server-managed tracking columns.
+  // Column C (NEXT_PAYMENT_DATE) is managed by the sheet's ARRAYFORMULA — do NOT write to it.
+  // Column R (remainingMonths) is the canonical payment counter, initialised to tenureMonths.
   updates.push(
-    { range: `${TAB}!${colLetter(COL.NEXT_PAYMENT_DATE)}${rowNumber}`, values: [[isoToSerial(initialNextDate)]] },
     { range: `${TAB}!${colLetter(COL.REMAINING_MONTHS)}${rowNumber}`, values: [[Number(input.tenureMonths)]] },
   );
 
@@ -443,19 +472,31 @@ export async function markEmiMonthlyPayment(
     { range: `${TAB}!${colLetter(COL.STATUS)}${rowNumber}`, values: [[newStatus]] },
   ];
 
-  // Advance next payment date only when months remain
-  if (newRemaining > 0) {
-    const currentNext =
-      existing.nextPaymentDate ??
-      advanceOneMonth(existing.transactionDate ?? new Date().toISOString().slice(0, 10));
-    const nextDate = advanceOneMonth(currentNext);
-    updates.push({
-      range: `${TAB}!${colLetter(COL.NEXT_PAYMENT_DATE)}${rowNumber}`,
-      values: [[isoToSerial(nextDate)]],
-    });
-  }
+  // Column C (NEXT_PAYMENT_DATE) is managed by the sheet's ARRAYFORMULA — do NOT write to it.
+  // Instead, compute the next due date server-side and write a human-readable note to column B.
+  const nextDueForNotes = computeNextDueDate(
+    existing.transactionDate,
+    existing.tenureMonths,
+    newRemaining,
+  );
+  const amountLabel = existing.monthlyPayment != null
+    ? ` ₹${Math.round(existing.monthlyPayment).toLocaleString("en-IN")}`
+    : "";
+  const statusNotesText = newRemaining <= 0
+    ? "Clear"
+    : nextDueForNotes
+      ? `Next ${new Date(nextDueForNotes + "T00:00:00Z").toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: "short",
+        })}${amountLabel}`
+      : existing.statusNotes || "";
 
-  // Append to paidDates history
+  updates.push({
+    range: `${TAB}!${colLetter(COL.STATUS_NOTES)}${rowNumber}`,
+    values: [[statusNotesText]],
+  });
+
+  // Append to paidDates history (column T) for audit trail
   const entry = paidAmount != null ? `${paidDate}:${paidAmount}` : paidDate;
   const prev = existing.paidDates.join("|");
   updates.push({
@@ -472,32 +513,24 @@ export async function markEmiMonthlyPayment(
  * the monthly-tracking system was added (remainingMonths is null).
  *
  * - Sets remainingMonths = tenureMonths (assumes no payments made so far).
- * - Sets nextPaymentDate only if currently missing.
- * - Does NOT overwrite an already-set nextPaymentDate (admin manages legacy dates).
+ * - Column C (NEXT_PAYMENT_DATE) is formula-managed — not touched here.
  */
 export async function initializeEmiTracking(id: string): Promise<EmiLoanRow | null> {
   const existing = await getEmiLoanRow(id);
   if (!existing) return null;
 
-  const sheetId = getEmiSpreadsheetId();
-  const updates: { range: string; values: (string | number)[][] }[] = [];
+  if (existing.remainingMonths !== null) {
+    // Already initialised; nothing to do.
+    return existing;
+  }
 
-  if (existing.remainingMonths === null) {
-    updates.push({
+  const sheetId = getEmiSpreadsheetId();
+  await batchUpdateCellsInSheet(sheetId, [
+    {
       range: `${TAB}!${colLetter(COL.REMAINING_MONTHS)}${existing.rowNumber}`,
       values: [[existing.tenureMonths]],
-    });
-  }
-  if (!existing.nextPaymentDate && existing.transactionDate) {
-    updates.push({
-      range: `${TAB}!${colLetter(COL.NEXT_PAYMENT_DATE)}${existing.rowNumber}`,
-      values: [[isoToSerial(advanceOneMonth(existing.transactionDate))]],
-    });
-  }
-
-  if (updates.length > 0) {
-    await batchUpdateCellsInSheet(sheetId, updates);
-  }
+    },
+  ]);
   return getEmiLoanRowAtRowNumber(existing.rowNumber);
 }
 
