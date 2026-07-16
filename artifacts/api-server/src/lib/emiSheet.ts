@@ -30,6 +30,8 @@
  *  R(17) remainingMonths     — server-managed input (decremented each month)
  *  S(18) notes               — input
  *  T(19) paidDates           — pipe-separated "YYYY-MM-DD:amount" payment history (server-managed)
+ *  U(20) dailyAmount         — optional custom daily instalment override (default: monthlyPayment ÷ 30)
+ *  V(21) weeklyAmount        — optional custom weekly instalment override (default: monthlyPayment × 7 ÷ 30)
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -42,7 +44,7 @@ import {
 
 const TAB = "Heat Map";
 const DATA_START_ROW = 6; // Row 6 is the first real data row (also has array formulas)
-const LAST_COL = "T";     // Column T = index 19
+const LAST_COL = "V";     // Column V = index 21
 
 const COL = {
   ID: 0,
@@ -65,6 +67,8 @@ const COL = {
   REMAINING_MONTHS: 17,
   NOTES: 18,
   PAID_DATES: 19,
+  DAILY_AMOUNT: 20,
+  WEEKLY_AMOUNT: 21,
 } as const;
 
 export type EmiLoanStatus = "Pending" | "Clear";
@@ -100,6 +104,10 @@ export interface EmiLoanRow {
   lateDays: number;
   /** Pipe-separated payment history entries: "YYYY-MM-DD:amount" or "YYYY-MM-DD". */
   paidDates: string[];
+  /** Optional custom daily instalment override. When null, UI falls back to monthlyPayment ÷ 30. */
+  dailyAmount: number | null;
+  /** Optional custom weekly instalment override. When null, UI falls back to monthlyPayment × 7 ÷ 30. */
+  weeklyAmount: number | null;
 }
 
 export interface EmiLoanInput {
@@ -130,6 +138,10 @@ export interface EmiLoanUpdate {
   nextPaymentDate?: string | null;
   /** Server-managed: how many months remain in the EMI tenure. */
   remainingMonths?: number | null;
+  /** Optional custom daily instalment override. null clears it (falls back to monthlyPayment ÷ 30). */
+  dailyAmount?: number | null;
+  /** Optional custom weekly instalment override. null clears it (falls back to monthlyPayment × 7 ÷ 30). */
+  weeklyAmount?: number | null;
 }
 
 function colLetter(idx: number): string {
