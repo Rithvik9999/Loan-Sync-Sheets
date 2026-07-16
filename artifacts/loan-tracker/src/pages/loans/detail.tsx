@@ -260,6 +260,36 @@ export default function LoanDetail() {
 
         const handleQuickPay = (amount: number, freq: "daily" | "weekly") => {
           if (!amount || dailyPending || weeklyPending || undoPending) return;
+          // ── Guard: today's payment already recorded ──
+          if (freq === "daily" && dailyAmt != null && loan.transactionDate) {
+            const nowD = new Date(); nowD.setHours(0, 0, 0, 0);
+            const txD = new Date(loan.transactionDate + "T00:00:00Z");
+            const elapsed = Math.max(differenceInCalendarDays(nowD, txD), 0);
+            if (Math.floor((loan.paid ?? 0) / dailyAmt) >= elapsed) {
+              toast({ variant: "destructive", title: "Already recorded", description: "Today's daily payment has already been recorded." });
+              return;
+            }
+          }
+          if (freq === "weekly" && weeklyAmt != null && loan.transactionDate) {
+            const nowW = new Date(); nowW.setHours(0, 0, 0, 0);
+            const txW = new Date(loan.transactionDate + "T00:00:00Z");
+            const WDAYS = [8, 15, 22, 30];
+            let wElapsed = 0;
+            let wyr = txW.getFullYear(), wmo = txW.getMonth();
+            wdone: for (let mi = 0; mi < 36; mi++) {
+              for (const day of WDAYS) {
+                const d = new Date(wyr, wmo, day);
+                if (d <= txW) continue;
+                if (d > nowW) break wdone;
+                wElapsed++;
+              }
+              wmo++; if (wmo > 11) { wmo = 0; wyr++; }
+            }
+            if (Math.floor((loan.paid ?? 0) / weeklyAmt) >= wElapsed) {
+              toast({ variant: "destructive", title: "Already recorded", description: "This period's weekly payment has already been recorded." });
+              return;
+            }
+          }
           const setter = freq === "daily" ? setDailyPending : setWeeklyPending;
           setter(true);
           updateLoan.mutate(
@@ -308,9 +338,9 @@ export default function LoanDetail() {
           );
         };
 
-        // +2% "extra dues" amounts
-        const dailyAmtExtra = dailyAmt ? Math.ceil(dailyAmt * 1.02) : null;
-        const weeklyAmtExtra = weeklyAmt ? Math.ceil(weeklyAmt * 1.02) : null;
+        // +1% "extra dues" amounts
+        const dailyAmtExtra = dailyAmt ? Math.ceil(dailyAmt * 1.01) : null;
+        const weeklyAmtExtra = weeklyAmt ? Math.ceil(weeklyAmt * 1.01) : null;
 
         if (!loan.transactionDate || periodAmount <= 0) return null;
 
@@ -324,10 +354,10 @@ export default function LoanDetail() {
         const periodsElapsed = Math.max(Math.floor((daysElapsed - 1) / daysPerPeriod), 0);
         const totalPaid = loan.paid ?? 0;
         // When there are overdue periods, a "normal" daily/weekly button click should only
-        // count toward today's payment and NOT clear overdue periods — only the +2% button
+        // count toward today's payment and NOT clear overdue periods — only the +1% button
         // should clear overdue. We use STRICT greater-than for isOnTime so that paying
         // exactly 1×periodAmount when periodsElapsed=1 does NOT flip to "on time" and clear
-        // the overdue. The overdue can only be cleared by paying at the extra (+2%) rate.
+        // the overdue. The overdue can only be cleared by paying at the extra (+1%) rate.
         const paidPeriodsNormal = Math.floor(totalPaid / periodAmount);
         const isOnTime = paidPeriodsNormal > periodsElapsed;
         const clearingAmt = isOnTime
@@ -346,7 +376,7 @@ export default function LoanDetail() {
         for (let i = 1; i <= overduePeriods; i++) {
           const periodsLate = overduePeriods - i + 1;
           const daysLate = periodsLate * daysPerPeriod;
-          overdueAccumulated += periodAmount * (1 + 0.02 * daysLate);
+          overdueAccumulated += periodAmount * (1 + 0.01 * daysLate);
         }
         overdueAccumulated = Math.round(overdueAccumulated);
 
@@ -402,9 +432,9 @@ export default function LoanDetail() {
                               className="border-sky-400 text-sky-600 hover:bg-sky-50 gap-1 text-xs"
                               onClick={() => handleQuickPay(dailyAmtExtra, "daily")}
                               disabled={dailyPending || weeklyPending || undoPending}
-                              title="+2% extra dues"
+                              title="+1% extra dues"
                             >
-                              +2% <span className="font-numeric font-semibold">₹{dailyAmtExtra.toLocaleString("en-IN")}</span>
+                              +1% <span className="font-numeric font-semibold">₹{dailyAmtExtra.toLocaleString("en-IN")}</span>
                             </Button>
                           )}
                         </>
@@ -430,9 +460,9 @@ export default function LoanDetail() {
                               className="border-violet-400 text-violet-600 hover:bg-violet-50 gap-1 text-xs"
                               onClick={() => handleQuickPay(weeklyAmtExtra, "weekly")}
                               disabled={dailyPending || weeklyPending || undoPending}
-                              title="+2% extra dues"
+                              title="+1% extra dues"
                             >
-                              +2% <span className="font-numeric font-semibold">₹{weeklyAmtExtra.toLocaleString("en-IN")}</span>
+                              +1% <span className="font-numeric font-semibold">₹{weeklyAmtExtra.toLocaleString("en-IN")}</span>
                             </Button>
                           )}
                         </>
@@ -485,7 +515,7 @@ export default function LoanDetail() {
                     <p className="text-xl font-bold font-numeric text-destructive">
                       {formatCurrency(overdueAccumulated)}
                     </p>
-                    <p className="text-[10px] text-muted-foreground">incl. +2%/day late fee</p>
+                    <p className="text-[10px] text-muted-foreground">incl. +1%/day late fee</p>
                   </div>
                 ) : (
                   <div className="space-y-1">

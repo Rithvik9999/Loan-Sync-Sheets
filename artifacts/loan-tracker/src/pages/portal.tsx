@@ -1211,19 +1211,19 @@ function getNthWeeklyPaymentDate(startDate: Date, n: number): Date | null {
 
 /**
  * Computes the accumulated overdue amount for periodic (daily/weekly) payments.
- * Each missed period accrues a 2%/day late fee for every day it has been overdue.
+ * Each missed period accrues a 1%/day late fee for every day it has been overdue.
  *
  * @param firstDaysLate  Actual calendar days since the MOST RECENT overdue period's due date.
  *                       Defaults to daysPerPeriod (safe default for daily where period=1 day).
  *                       For weekly loans pass the real days-late (e.g. 1 day after payment date).
  *
  * e.g. daily ₹600, 2 days overdue, firstDaysLate=1 (most recent missed day was yesterday):
- *   day 2 (1 day late)  → 600 × (1 + 0.02×1) = 612
- *   day 1 (2 days late) → 600 × (1 + 0.02×2) = 624
- *   total = 1 236
+ *   day 2 (1 day late)  → 600 × (1 + 0.01×1) = 606
+ *   day 1 (2 days late) → 600 × (1 + 0.01×2) = 612
+ *   total = 1 218
  *
  * e.g. weekly ₹5 000, 1 payment overdue, firstDaysLate=1 (1 day past the payment date):
- *   → 5 000 × (1 + 0.02×1) = 5 100   (not 5 700 which wrongly assumes 7-day lag)
+ *   → 5 000 × (1 + 0.01×1) = 5 050   (not 5 350 which wrongly assumes 7-day lag)
  */
 function calcOverdueTotal(
   periodAmount: number,
@@ -1239,7 +1239,7 @@ function calcOverdueTotal(
   for (let i = 1; i <= overdueCount; i++) {
     // i=1 = oldest (most days late), i=overdueCount = most recent
     const daysLate = recentLate + (overdueCount - i) * daysPerPeriod;
-    total += periodAmount * (1 + 0.02 * daysLate);
+    total += periodAmount * (1 + 0.01 * daysLate);
   }
   return Math.round(total);
 }
@@ -1265,21 +1265,26 @@ function buildRepaymentItems(
       if (!txDate || dailyAmt <= 0) continue;
 
       const daysElapsed = Math.max(differenceInCalendarDays(today, txDate), 0);
-      const paidDays = Math.floor((l.paid ?? 0) / dailyAmt);
-      // Subtract 1 so today's payment is NOT counted as overdue — today is shown in Coming Up.
-      const overdueDays = Math.max(daysElapsed - 1 - paidDays, 0);
+      // Use 1%/day extra-rate to determine overdue periods — only paying at the
+      // premium rate clears overdue; a normal daily payment just covers today.
+      const periodsElapsed = Math.max(daysElapsed - 1, 0);
+      const paidNormal = Math.floor((l.paid ?? 0) / dailyAmt);
+      const isOnTimeLoan = paidNormal > periodsElapsed;
+      const clearingAmtLoan = isOnTimeLoan ? dailyAmt : Math.ceil(dailyAmt * 1.01);
+      const paidPeriods = Math.floor((l.paid ?? 0) / clearingAmtLoan);
+      const overdueDays = Math.max(periodsElapsed - paidPeriods, 0);
       const returnDate = l.returnDate ? new Date(l.returnDate + "T00:00:00Z") : null;
       const withinTenure = !returnDate || today <= returnDate;
 
       if (overdueDays > 0) {
-        // Each missed day piles up with 2%/day late fee
+        // Each missed day piles up with 1%/day late fee
         const overdueTotal = calcOverdueTotal(dailyAmt, overdueDays, 1);
-        const firstDue = new Date(txDate.getTime() + (paidDays + 1) * 86400000);
+        const firstDue = new Date(txDate.getTime() + (paidPeriods + 1) * 86400000);
         items.push({
           key: `daily-overdue-${l.id}`,
           id: l.id, loanId: l.loanId, type: "loan",
           label: `Daily Payment — ₹${dailyAmt.toLocaleString("en-IN")}/day`,
-          subLabel: `${overdueDays} missed payment${overdueDays > 1 ? "s" : ""} · +2%/day late fee`,
+          subLabel: `${overdueDays} missed payment${overdueDays > 1 ? "s" : ""} · +1%/day late fee`,
           outstanding: overdueTotal,
           dueDate: firstDue,
           isOverdue: true,
@@ -1319,7 +1324,7 @@ function buildRepaymentItems(
           key: `loan-weekly-overdue-${l.id}`,
           id: l.id, loanId: l.loanId, type: "loan",
           label: `Weekly Payment — ₹${weeklyAmt.toLocaleString("en-IN")}/week`,
-          subLabel: `${overduePayments} missed payment${overduePayments > 1 ? "s" : ""} · +2%/day late fee`,
+          subLabel: `${overduePayments} missed payment${overduePayments > 1 ? "s" : ""} · +1%/day late fee`,
           outstanding: overdueTotal,
           dueDate: firstMissedDue,
           isOverdue: true,
@@ -1402,25 +1407,39 @@ function buildRepaymentItems(
       const weeklyAmt = freq.amount;
       if (!txDate) continue;
 
-      const paymentsElapsed = countWeeklyPaymentDates(txDate, today);
       const currentWeekDue = getCurrentWeeklyPaymentDate(txDate, today);
       const daysLate = currentWeekDue ? differenceInCalendarDays(today, currentWeekDue) : 0;
 
-      const totalPaidFromDates = (e.paidDates ?? []).reduce((sum, entry) => {
+      // Date-based overdue: for each elapsed 8/15/22/30 period, sum paidDates amounts
+      // within that period window. Periods with < 90% of weeklyAmt covered are overdue.
+      const weeklyPaidEntries = (e.paidDates ?? []).map(entry => {
         const parts = entry.split(":");
-        return sum + (Number(parts[1]) || 0);
-      }, 0);
-      const hasPaidData = (e.paidDates ?? []).length > 0;
+        return { date: parts[0] ?? "", amount: Number(parts[1]) || 0 };
+      }).filter(pe => pe.date.length >= 8);
 
-      // With paid history compare paid vs elapsed periods; without, flag only the
-      // current period when its due date is strictly in the past.
-      const overdueCount = hasPaidData
-        ? Math.max(paymentsElapsed - Math.floor(totalPaidFromDates / weeklyAmt), 0)
-        : daysLate > 0 ? 1 : 0;
+      const overdueCount = (() => {
+        let count = 0;
+        let prevStr = txDate.toISOString().slice(0, 10);
+        let yr = txDate.getFullYear(), mo = txDate.getMonth();
+        done: for (let mi = 0; mi < 36; mi++) {
+          for (const day of MONTHLY_PAYMENT_DAYS) {
+            const d = new Date(yr, mo, day);
+            if (d <= txDate) continue;
+            if (d > today) break done;
+            const dueDateStr = d.toISOString().slice(0, 10);
+            const periodPaid = weeklyPaidEntries
+              .filter(pe => pe.date > prevStr && pe.date <= dueDateStr)
+              .reduce((s, pe) => s + pe.amount, 0);
+            if (periodPaid < weeklyAmt * 0.9) count++;
+            prevStr = dueDateStr;
+          }
+          mo++; if (mo > 11) { mo = 0; yr++; }
+        }
+        return count;
+      })();
 
       if (overdueCount > 0) {
-        // Always use actual daysLate (calendar days since due date) for the fee,
-        // not daysPerPeriod×periods — 1 day overdue ≠ 7 days overdue for a weekly loan.
+        // Use actual daysLate (calendar days since most recent due date) for the fee.
         const overdueTotal = calcOverdueTotal(weeklyAmt, overdueCount, 7, Math.max(daysLate, 1));
         items.push({
           key: `emi-weekly-${e.id}`,
@@ -2496,16 +2515,20 @@ function LoansTab({
   );
 }
 
-// ─── Action Required Popup (shown once per login session) ────────────────────
+// ─── Action Required Popup (shown on every page reload) ──────────────────────
 
 const ACTION_POPUP_SS = "borrowapp_action_popup_dismissed";
+
+// Module-level flag: false on every hard page reload (module re-evaluation),
+// persists within the same page load across in-app navigation.
+// This guarantees the popup always appears on reload but stays dismissed once
+// the user closes it during the current session.
+let popupDismissedThisLoad = false;
 
 type UrgentItem = RepayItem & { _urgentType: "overdue" | "coming-up" };
 
 function ActionRequiredPopup({ items }: { items: UrgentItem[] }) {
-  const [dismissed, setDismissed] = useState(() => {
-    try { return sessionStorage.getItem(ACTION_POPUP_SS) === "1"; } catch { return false; }
-  });
+  const [dismissed, setDismissed] = useState(() => popupDismissedThisLoad);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
   const [repayItem, setRepayItem] = useState<RepayItem | null>(null);
@@ -2513,7 +2536,7 @@ function ActionRequiredPopup({ items }: { items: UrgentItem[] }) {
   if (dismissed || items.length === 0) return null;
 
   const dismiss = () => {
-    try { sessionStorage.setItem(ACTION_POPUP_SS, "1"); } catch {}
+    popupDismissedThisLoad = true;
     setDismissed(true);
   };
 

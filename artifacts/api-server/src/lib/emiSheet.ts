@@ -244,9 +244,9 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
       ? Math.floor(today - nextPaySerial)
       : 0;
 
-  // Compute late fees server-side: 2% per day on effective payment amount × days overdue.
+  // Compute late fees server-side: 1% per day on effective payment amount × days overdue.
   // This overrides the sheet ARRAYFORMULA (which uses interestPerMonth — too high) and
-  // ensures the app always shows: payment × 0.02 × lateDays as the late penalty.
+  // ensures the app always shows: payment × 0.01 × lateDays as the late penalty.
   // Priority: weeklyAmount > dailyAmount > monthlyPayment.
   const weeklyAmountVal = toNumberOrNull(get(COL.WEEKLY_AMOUNT));
   const dailyAmountVal  = toNumberOrNull(get(COL.DAILY_AMOUNT));
@@ -254,7 +254,7 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
   const effectivePmt    = weeklyAmountVal ?? dailyAmountVal ?? monthlyPayVal;
   const lateFees =
     effectivePmt != null && effectivePmt > 0 && lateDays > 0
-      ? Math.round(effectivePmt * 0.02 * lateDays)
+      ? Math.round(effectivePmt * 0.01 * lateDays)
       : 0;
 
   return {
