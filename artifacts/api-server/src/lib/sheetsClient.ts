@@ -86,6 +86,30 @@ export async function ensureSheetTab(title: string, headers: string[]): Promise<
       requestBody: { values: [headers] },
     });
     logger.info({ title }, "Created Google Sheet tab");
+  } else {
+    // Tab already exists — backfill any columns that were added to `headers` after
+    // the tab was originally created. This prevents the positional-fallback bug
+    // where a new header would silently alias an existing column's data.
+    const headerRes = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${title}!1:1`,
+    });
+    const currentHeaders = (headerRes.data.values?.[0] ?? []).map(String);
+    const missing = headers.filter((h) => !currentHeaders.includes(h));
+    if (missing.length > 0) {
+      const startCol = currentHeaders.length + 1; // 1-indexed column letter
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: missing.map((h, i) => ({
+            range: `${title}!${columnLetter(startCol + i)}1`,
+            values: [[h]],
+          })),
+        },
+      });
+      logger.info({ title, missing }, "Backfilled missing columns to existing tab");
+    }
   }
   ensuredTabs.add(title);
 }
@@ -122,7 +146,9 @@ export async function ensureSheetTabInSheet(
 
 /**
  * Read the header row of a sheet tab and return a map of header name → 0-based column index.
- * Falls back to the positional index for any header not present in the sheet's row 1.
+ * Falls back to the positional index for any header not present in the sheet's row 1,
+ * but only if that position isn't already claimed by a real column — otherwise uses -1
+ * (sentinel for "column not present", yields empty string on read).
  */
 async function getSheetHeaderMap(
   title: string,
@@ -136,11 +162,20 @@ async function getSheetHeaderMap(
   });
   const sheetHeaderRow = (res.data.values?.[0] ?? []).map(String);
   const map = new Map<string, number>();
+  const usedIndices = new Set<number>();
   // Populate from the sheet's actual header row first
-  sheetHeaderRow.forEach((h, idx) => map.set(h, idx));
-  // Fill in any expected headers that are missing from the sheet using positional fallback
+  sheetHeaderRow.forEach((h, idx) => {
+    map.set(h, idx);
+    usedIndices.add(idx);
+  });
+  // Fill in any expected headers that are missing from the sheet.
+  // Use the positional fallback ONLY when that index is not already claimed by a real
+  // column — otherwise -1 (sentinel: not present → returns "" on read) to prevent
+  // a missing column from silently reading another column's data.
   fallbackHeaders.forEach((h, idx) => {
-    if (!map.has(h)) map.set(h, idx);
+    if (!map.has(h)) {
+      map.set(h, usedIndices.has(idx) ? -1 : idx);
+    }
   });
   return map;
 }
@@ -158,8 +193,9 @@ export async function readTab(
   // (e.g. a tab that existed before a new column was added to the code).
   const headerMap = await getSheetHeaderMap(title, headers);
 
-  // Determine the furthest right column we need to fetch
-  const maxColIdx = Math.max(...headers.map((h) => headerMap.get(h) ?? 0));
+  // Determine the furthest right column we need to fetch (exclude sentinel -1 columns)
+  const presentIndices = headers.map((h) => headerMap.get(h) ?? -1).filter((i) => i >= 0);
+  const maxColIdx = presentIndices.length > 0 ? Math.max(...presentIndices) : headers.length - 1;
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
     range: `${title}!A2:${columnLetter(Math.max(maxColIdx + 1, headers.length))}`,
@@ -171,8 +207,11 @@ export async function readTab(
     if (row.every((cell) => cell === undefined || cell === "")) return;
     const obj: SheetRow = {};
     headers.forEach((h) => {
-      const colIdx = headerMap.get(h) ?? 0;
-      obj[h] = row[colIdx] !== undefined && row[colIdx] !== null ? String(row[colIdx]) : "";
+      const colIdx = headerMap.get(h) ?? -1;
+      // colIdx === -1 means the column doesn't exist in the sheet yet → empty string
+      obj[h] = colIdx >= 0 && row[colIdx] !== undefined && row[colIdx] !== null
+        ? String(row[colIdx])
+        : "";
     });
     rows.push(obj);
     rowNumbers.push(i + 2);
@@ -192,11 +231,12 @@ export async function appendRow(
   // Use the sheet's actual column order so we write values into the right cells
   // even if the sheet's column order differs from the `headers` array.
   const headerMap = await getSheetHeaderMap(title, headers);
-  const maxColIdx = Math.max(...headers.map((h) => headerMap.get(h) ?? 0));
+  const presentIndices = headers.map((h) => headerMap.get(h) ?? -1).filter((i) => i >= 0);
+  const maxColIdx = presentIndices.length > 0 ? Math.max(...presentIndices) : headers.length - 1;
   const rowData: string[] = new Array(maxColIdx + 1).fill("");
   headers.forEach((h) => {
-    const colIdx = headerMap.get(h) ?? headers.indexOf(h);
-    rowData[colIdx] = row[h] ?? "";
+    const colIdx = headerMap.get(h) ?? -1;
+    if (colIdx >= 0) rowData[colIdx] = row[h] ?? "";
   });
 
   await sheets.spreadsheets.values.append({
@@ -219,11 +259,12 @@ export async function updateRowAt(
 
   // Use the sheet's actual column order so we write values into the right cells.
   const headerMap = await getSheetHeaderMap(title, headers);
-  const maxColIdx = Math.max(...headers.map((h) => headerMap.get(h) ?? 0));
+  const presentIndices = headers.map((h) => headerMap.get(h) ?? -1).filter((i) => i >= 0);
+  const maxColIdx = presentIndices.length > 0 ? Math.max(...presentIndices) : headers.length - 1;
   const rowData: string[] = new Array(maxColIdx + 1).fill("");
   headers.forEach((h) => {
-    const colIdx = headerMap.get(h) ?? headers.indexOf(h);
-    rowData[colIdx] = row[h] ?? "";
+    const colIdx = headerMap.get(h) ?? -1;
+    if (colIdx >= 0) rowData[colIdx] = row[h] ?? "";
   });
 
   await sheets.spreadsheets.values.update({

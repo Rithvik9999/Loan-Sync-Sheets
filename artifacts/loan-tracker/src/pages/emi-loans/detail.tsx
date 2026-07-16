@@ -189,6 +189,16 @@ function RecordEmiPaymentDialog({
         </DialogHeader>
 
         <div className="space-y-4 pt-2">
+          {/* Final-month auto-clear warning */}
+          {!markClear && loan.remainingMonths === 1 && (
+            <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3">
+              <span className="text-rose-600 text-base leading-none mt-0.5">⚠️</span>
+              <p className="text-sm text-rose-800">
+                <strong>Final month.</strong> Recording this payment will automatically clear the loan (remaining months → 0). If {loan.name} still has more months to pay, use <strong>Edit Loan</strong> to correct the remaining months count first.
+              </p>
+            </div>
+          )}
+
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Amount Paid (₹)</label>
             <Input

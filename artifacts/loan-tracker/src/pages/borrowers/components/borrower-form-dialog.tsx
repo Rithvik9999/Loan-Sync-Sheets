@@ -45,6 +45,7 @@ const borrowerSchema = z.object({
   name: z.string().min(1, "Name is required"),
   phone: z.string().length(10, "Phone number must be exactly 10 digits"),
   pin: z.string().regex(/^\d{6}$/, "PIN must be exactly 6 digits").optional().or(z.literal("")),
+  creditLimit: z.string().optional(),
 });
 
 type BorrowerFormValues = z.infer<typeof borrowerSchema>;
@@ -71,6 +72,7 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
       name: borrower?.name || defaultName || "",
       phone: sanitizePhoneInput(borrower?.phone || defaultPhone || ""),
       pin: "",
+      creditLimit: borrower?.creditLimit != null ? String(borrower.creditLimit) : "",
     },
   });
 
@@ -85,10 +87,12 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
   const canShareNow = watchPhone.length === 10 && /^\d{6}$/.test(watchPin ?? "");
 
   function onSubmit(data: BorrowerFormValues) {
+    const parsedLimit = data.creditLimit ? parseFloat(data.creditLimit) : NaN;
     const payload = {
       name: data.name,
       phone: data.phone,
       ...(data.pin ? { pin: data.pin } : {}),
+      ...(!isNaN(parsedLimit) && parsedLimit > 0 ? { creditLimit: parsedLimit } : {}),
     };
 
     if (isEditing) {
@@ -144,6 +148,7 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
         name: borrower?.name || defaultName || "",
         phone: sanitizePhoneInput(borrower?.phone || defaultPhone || ""),
         pin: "",
+        creditLimit: borrower?.creditLimit != null ? String(borrower.creditLimit) : "",
       });
     }
   }, [open, borrower, defaultName, defaultPhone, form]);
@@ -266,6 +271,31 @@ export default function BorrowerFormDialog({ open, onOpenChange, borrower, defau
                   </FormControl>
                   <FormDescription>
                     You set and share this PIN with the borrower — there's no self-service reset.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="creditLimit"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Credit Limit (₹) <span className="text-muted-foreground font-normal">— optional</span></FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      min="0"
+                      step="1"
+                      placeholder="e.g. 50000"
+                      {...field}
+                      onChange={(e) => field.onChange(e.target.value.replace(/[^0-9]/g, ""))}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    Sets the max borrowing limit shown in the borrower's portal. Leave blank for no limit.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
