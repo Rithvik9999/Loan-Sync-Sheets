@@ -16,12 +16,17 @@ export interface LoanRequest {
   amount: number;
   tenureDays: number;
   /** @nullable */
+  tenureMonths?: number | null;
+  type?: string;
+  /** @nullable */
   purpose: string | null;
   /**
      * Optional UPI ID provided by the borrower for payment reference.
      * @nullable
      */
   upiId?: string | null;
+  /** Discount applied by admin when approving (rupees). */
+  discount?: number;
   status: LoanRequestStatus;
   createdAt: string;
 }

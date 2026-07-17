@@ -18,7 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "@/components/ui/link";
-import { ArrowLeft, Edit, Trash2, Calendar, FileText, Plus, TrendingUp, CalendarDays, CalendarRange, Loader2, RotateCcw } from "lucide-react";
+import { ArrowLeft, Edit, Trash2, Calendar, FileText, Plus, TrendingUp, CalendarDays, CalendarRange, Loader2, RotateCcw, Pencil } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { LoanStatusBadge } from "@/components/status-badges";
 
@@ -205,10 +205,63 @@ export default function LoanDetail() {
             </div>
 
             <div className="space-y-1 pt-4 border-t border-primary/10">
-              <p className="text-sm font-medium text-muted-foreground">Collected So Far</p>
-              <p className="text-xl font-semibold font-numeric text-emerald-700 dark:text-emerald-500">
-                {formatCurrency(loan.paid ?? 0)}
-              </p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-muted-foreground">Collected So Far</p>
+                {isStaff && !isEditPaid && (
+                  <button
+                    className="h-6 w-6 flex items-center justify-center rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                    title="Edit collected amount"
+                    onClick={() => { setIsEditPaid(true); setPaidEditValue(String(loan.paid ?? 0)); }}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+              {isStaff && isEditPaid ? (
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm font-numeric shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    value={paidEditValue}
+                    onChange={(e) => setPaidEditValue(e.target.value)}
+                    autoFocus
+                  />
+                  <button
+                    className="shrink-0 h-8 px-3 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50"
+                    disabled={updateLoan.isPending}
+                    onClick={() => {
+                      const newPaid = parseFloat(paidEditValue);
+                      if (isNaN(newPaid) || newPaid < 0) return;
+                      updateLoan.mutate(
+                        { id, data: { paid: newPaid } },
+                        {
+                          onSuccess: (updated) => {
+                            queryClient.setQueryData(getGetLoanQueryKey(id), updated);
+                            queryClient.invalidateQueries({ queryKey: getListLoansQueryKey() });
+                            toast({ title: "Updated", description: `Collected set to ${formatCurrency(newPaid)}.` });
+                            setIsEditPaid(false);
+                          },
+                          onError: () => toast({ variant: "destructive", title: "Error", description: "Could not update." }),
+                        }
+                      );
+                    }}
+                  >
+                    {updateLoan.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
+                  </button>
+                  <button
+                    className="shrink-0 h-8 px-2 rounded-md text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => setIsEditPaid(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xl font-semibold font-numeric text-emerald-700 dark:text-emerald-500">
+                  {formatCurrency(loan.paid ?? 0)}
+                </p>
+              )}
             </div>
 
             {isStaff && (

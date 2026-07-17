@@ -31,6 +31,92 @@ interface BorrowerEntry {
   loanCount: number;
 }
 
+// ── Change PIN Dialog ─────────────────────────────────────────────────────────
+
+function ChangePinDialog({
+  open,
+  onOpenChange,
+  borrowerId,
+  borrowerName,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  borrowerId: string;
+  borrowerName: string;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [pin, setPin] = useState("");
+  const [isPending, setIsPending] = useState(false);
+
+  function handleClose() {
+    setPin("");
+    onOpenChange(false);
+  }
+
+  async function handleSave() {
+    if (!/^\d{6}$/.test(pin)) {
+      toast({ variant: "destructive", title: "Invalid PIN", description: "PIN must be exactly 6 digits." });
+      return;
+    }
+    setIsPending(true);
+    try {
+      const res = await fetch(`/api/borrowers/${borrowerId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as any).error || "Failed to update PIN");
+      }
+      queryClient.invalidateQueries({ queryKey: getListBorrowersQueryKey() });
+      toast({ title: "PIN updated", description: `${borrowerName}'s login PIN has been changed.` });
+      handleClose();
+    } catch (err) {
+      toast({ variant: "destructive", title: "Error", description: err instanceof Error ? err.message : "Could not update PIN." });
+    } finally {
+      setIsPending(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
+      <DialogContent className="sm:max-w-[360px]">
+        <DialogHeader>
+          <DialogTitle>Change PIN</DialogTitle>
+          <DialogDescription>
+            Set a new 6-digit login PIN for <strong>{borrowerName}</strong>.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 py-2">
+          <label className="text-sm font-medium">New PIN (6 digits)</label>
+          <Input
+            type="password"
+            inputMode="numeric"
+            maxLength={6}
+            placeholder="••••••"
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            autoFocus
+          />
+          {pin.length > 0 && pin.length < 6 && (
+            <p className="text-xs text-muted-foreground">{6 - pin.length} more digit{6 - pin.length !== 1 ? "s" : ""} needed</p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={handleClose} disabled={isPending}>Cancel</Button>
+          <Button onClick={handleSave} disabled={isPending || pin.length !== 6}>
+            {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Save PIN
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Set Credit Limit Dialog ───────────────────────────────────────────────────
 
 function SetLimitDialog({
@@ -122,7 +208,7 @@ export default function BorrowersList() {
   const [setupName, setSetupName] = useState<string | null>(null);
   const [setupPhone, setSetupPhone] = useState<string>("");
   // Separate state for editing an existing borrower's PIN (passes full borrower obj to dialog)
-  const [pinEditTarget, setPinEditTarget] = useState<BorrowerEntry | null>(null);
+  const [pinTarget, setPinTarget] = useState<{ id: string; name: string } | null>(null);
   const [limitTarget, setLimitTarget] = useState<{ id: string; name: string; currentLimit: number | null } | null>(null);
 
   const { data: borrowers, isLoading: isLoadingBorrowers } = useListBorrowers({
@@ -300,7 +386,7 @@ export default function BorrowersList() {
                               variant="outline"
                               size="sm"
                               className="text-xs h-7"
-                              onClick={() => setPinEditTarget(b)}
+                              onClick={() => setPinTarget({ id: b.id!, name: b.name })}
                             >
                               Edit PIN
                             </Button>
@@ -333,18 +419,15 @@ export default function BorrowersList() {
         </CardContent>
       </Card>
 
-      {/* Edit existing borrower PIN */}
-      <BorrowerFormDialog
-        open={pinEditTarget !== null}
-        onOpenChange={(open) => { if (!open) setPinEditTarget(null); }}
-        borrower={pinEditTarget ? {
-          id: pinEditTarget.id!,
-          name: pinEditTarget.name,
-          phone: pinEditTarget.phone,
-          creditLimit: pinEditTarget.creditLimit,
-          hasPin: pinEditTarget.hasPin,
-        } : undefined}
-      />
+      {/* Change PIN for existing borrower */}
+      {pinTarget && (
+        <ChangePinDialog
+          open={pinTarget !== null}
+          onOpenChange={(open) => { if (!open) setPinTarget(null); }}
+          borrowerId={pinTarget.id}
+          borrowerName={pinTarget.name}
+        />
+      )}
       {/* Set up new borrower login */}
       <BorrowerFormDialog
         open={setupName !== null}

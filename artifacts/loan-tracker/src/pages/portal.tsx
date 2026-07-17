@@ -1887,7 +1887,7 @@ function LoanCard({ loan }: { loan: Loan }) {
         <CardContent className="p-0">
           <div className="grid grid-cols-3 divide-x text-center">
             <div className="p-4 space-y-0.5">
-              <div className="text-xs text-amber-600 font-medium pt-[2px]">Total Due</div>
+              <div className="text-xs text-amber-600 font-medium pt-[4px]">Total Due</div>
               <div className="text-lg font-bold font-numeric text-amber-700">
                 {loan.finalAmount != null
                   ? formatCurrency(loan.finalAmount)
@@ -2008,6 +2008,7 @@ function RequestDetailDialog({
           {/* Approval details — regular loan */}
           {request.status === "Approved" && !isEmi && request.tenureDays > 0 && (() => {
             const est = estimateFinalAmount({ principal: request.amount, tenureDays: request.tenureDays });
+            const adminDiscount = (request as any).discount as number | undefined;
             return (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 p-3 space-y-2 mt-1">
                 <p className="text-xs font-semibold text-emerald-900 dark:text-emerald-300">Estimated loan details</p>
@@ -2019,17 +2020,26 @@ function RequestDetailDialog({
                   <span className="text-emerald-700">Interest (est.)</span>
                   <span className="font-semibold font-numeric">{formatCurrency(est.interest)}</span>
                 </div>
+                {adminDiscount != null && adminDiscount > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-emerald-700">Admin Discount</span>
+                    <span className="font-semibold font-numeric text-emerald-800">−{formatCurrency(adminDiscount)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-xs border-t border-emerald-200 pt-1.5">
                   <span className="text-emerald-700 font-semibold">Total to repay (est.)</span>
-                  <span className="font-bold font-numeric text-emerald-900">{formatCurrency(est.finalAmount)}</span>
+                  <span className="font-bold font-numeric text-emerald-900">{formatCurrency(adminDiscount && adminDiscount > 0 ? est.finalAmount - adminDiscount : est.finalAmount)}</span>
                 </div>
-                <p className="text-[10px] text-emerald-600">Estimate only — admin will confirm the exact amount and any discount when disbursed.</p>
+                {!(adminDiscount && adminDiscount > 0) && (
+                  <p className="text-[10px] text-emerald-600">Estimate only — admin will confirm the exact amount and any discount when disbursed.</p>
+                )}
               </div>
             );
           })()}
           {/* Approval details — EMI loan */}
           {request.status === "Approved" && isEmi && request.tenureMonths && request.tenureMonths > 0 && (() => {
             const estMonthly = Math.round(request.amount / request.tenureMonths);
+            const adminDiscount = (request as any).discount as number | undefined;
             return (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 p-3 space-y-2 mt-1">
                 <p className="text-xs font-semibold text-emerald-900 dark:text-emerald-300">Estimated EMI details</p>
@@ -2041,11 +2051,19 @@ function RequestDetailDialog({
                   <span className="text-emerald-700">Tenure</span>
                   <span className="font-semibold">{request.tenureMonths} months</span>
                 </div>
+                {adminDiscount != null && adminDiscount > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-emerald-700">Admin Discount</span>
+                    <span className="font-semibold font-numeric text-emerald-800">−{formatCurrency(adminDiscount)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-xs border-t border-emerald-200 pt-1.5">
                   <span className="text-emerald-700 font-semibold">Monthly payment (est.)</span>
                   <span className="font-bold font-numeric text-emerald-900">≈ {formatCurrency(estMonthly)}</span>
                 </div>
-                <p className="text-[10px] text-emerald-600">Estimate only — admin will confirm the exact monthly amount and fees when disbursed.</p>
+                {!(adminDiscount && adminDiscount > 0) && (
+                  <p className="text-[10px] text-emerald-600">Estimate only — admin will confirm the exact monthly amount and fees when disbursed.</p>
+                )}
               </div>
             );
           })()}
@@ -2537,28 +2555,53 @@ function RecentActivitySection({
             <span className="font-semibold text-sm">New Loans ({newLoans.length + newEmi.length})</span>
           </div>
           <div className="divide-y">
-            {newLoans.map((l) => (
-              <div key={l.id} className="flex items-center justify-between px-4 py-3 text-sm">
-                <div>
-                  <span className="font-semibold font-numeric">{formatCurrency(l.principal)} Loan</span>
-                  <div className="text-xs text-muted-foreground mt-0.5">{formatDate(l.transactionDate)} · {l.tenureDays}d</div>
+            {newLoans.map((l) => {
+              const repayDate = (() => {
+                if (l.returnDate) return formatDate(l.returnDate);
+                if (l.transactionDate && l.tenureDays) {
+                  const d = new Date(l.transactionDate + "T00:00:00Z");
+                  d.setUTCDate(d.getUTCDate() + l.tenureDays);
+                  return formatDate(d.toISOString().slice(0, 10));
+                }
+                return null;
+              })();
+              return (
+                <div key={l.id} className="flex items-center justify-between px-4 py-3 text-sm">
+                  <div>
+                    <span className="font-semibold font-numeric">{formatCurrency(l.principal)} Loan</span>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {formatDate(l.transactionDate)}{repayDate ? ` · Due ${repayDate}` : ""}
+                    </div>
+                  </div>
+                  <Button variant="ghost" size="sm" className="h-6 text-xs px-2" asChild>
+                    <Link href={`/loans/${l.id}`}>Details <ChevronRight className="ml-0.5 h-3 w-3" /></Link>
+                  </Button>
                 </div>
-                <Button variant="ghost" size="sm" className="h-6 text-xs px-2" asChild>
-                  <Link href={`/loans/${l.id}`}>Details <ChevronRight className="ml-0.5 h-3 w-3" /></Link>
-                </Button>
-              </div>
-            ))}
-            {newEmi.map((e) => (
-              <div key={e.id} className="flex items-center justify-between px-4 py-3 text-sm">
-                <div>
-                  <span className="font-semibold font-numeric">{formatCurrency(e.principal)} EMI</span>
-                  <div className="text-xs text-muted-foreground mt-0.5">{formatDate(e.transactionDate)} · {e.tenureMonths} months</div>
+              );
+            })}
+            {newEmi.map((e) => {
+              const emiEndDate = (() => {
+                if (e.transactionDate && e.tenureMonths) {
+                  const d = new Date(e.transactionDate + "T00:00:00Z");
+                  d.setUTCMonth(d.getUTCMonth() + e.tenureMonths);
+                  return formatDate(d.toISOString().slice(0, 10));
+                }
+                return null;
+              })();
+              return (
+                <div key={e.id} className="flex items-center justify-between px-4 py-3 text-sm">
+                  <div>
+                    <span className="font-semibold font-numeric">{formatCurrency(e.principal)} EMI</span>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {formatDate(e.transactionDate)}{emiEndDate ? ` · Due ${emiEndDate}` : ""}
+                    </div>
+                  </div>
+                  <Button variant="ghost" size="sm" className="h-6 text-xs px-2" asChild>
+                    <Link href={`/emi-loans/${e.id}`}>Details <ChevronRight className="ml-0.5 h-3 w-3" /></Link>
+                  </Button>
                 </div>
-                <Button variant="ghost" size="sm" className="h-6 text-xs px-2" asChild>
-                  <Link href={`/emi-loans/${e.id}`}>Details <ChevronRight className="ml-0.5 h-3 w-3" /></Link>
-                </Button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

@@ -458,6 +458,8 @@ export default function EmiLoanDetail() {
   // Compute cycle accumulated (D/W entries since last M/DM/WM).
   // Uses the same date-based comparison as the backend's recordPartialEmiPayment
   // to avoid off-by-one errors when entries share the same date as a WM boundary.
+  // Also resets at the start of the current calendar month so payments from
+  // previous months don't inflate this month's progress bar.
   const parsedAll = (loan.paidDates ?? []).map((e, i) => parsePaidEntry(e, i));
   let cycleAccumulated = 0;
   if (loan.status !== "Clear" && loan.monthlyPayment) {
@@ -465,6 +467,11 @@ export default function EmiLoanDetail() {
     for (let i = parsedAll.length - 1; i >= 0; i--) {
       if (parsedAll[i].completedMonth) { cycleStartDate = parsedAll[i].date; break; }
     }
+    // Clamp to the start of the current calendar month so stale partial payments
+    // from earlier months don't carry into the current month's progress display.
+    const nowForCycle = new Date();
+    const currentMonthStart = `${nowForCycle.getFullYear()}-${String(nowForCycle.getMonth() + 1).padStart(2, "0")}-01`;
+    if (cycleStartDate < currentMonthStart) cycleStartDate = currentMonthStart;
     cycleAccumulated = parsedAll.reduce((sum, e) => {
       if ((e.type === "D" || e.type === "W") && e.date > cycleStartDate) return sum + (e.amount ?? 0);
       return sum;
