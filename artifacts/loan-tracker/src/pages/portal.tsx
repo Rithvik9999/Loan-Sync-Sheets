@@ -2146,6 +2146,24 @@ function MyLoanRequests({
 
 // ─── EMI Loans detail section ─────────────────────────────────────────────────
 
+/**
+ * For weekly-pay EMI loans: returns the next 8/15/22/30 calendar date (YYYY-MM-DD)
+ * that falls AFTER `lastPayDate`. This lets us show the next upcoming weekly
+ * installment rather than the monthly milestone stored in nextPaymentDate.
+ */
+function computeNextWeeklyDue(lastPayDate: string): string {
+  const parts = lastPayDate.split("-").map(Number);
+  let yr = parts[0], mo = parts[1] - 1; // 0-indexed month
+  for (let mi = 0; mi < 4; mi++) {
+    for (const day of MONTHLY_PAYMENT_DAYS) {
+      const d = `${yr}-${String(mo + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      if (d > lastPayDate) return d;
+    }
+    mo++; if (mo > 11) { mo = 0; yr++; }
+  }
+  return "";
+}
+
 function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
   const now = new Date();
   const active = emiLoans.filter((e) => e.status !== "Clear");
@@ -2165,9 +2183,25 @@ function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
   return (
     <div className="grid gap-4">
       {active.map((loan) => {
+        // For weekly-pay EMI loans, derive the next WEEKLY installment date from
+        // the most recent paidDates entry rather than the monthly milestone.
+        const isWeekly = (loan.weeklyAmount ?? 0) > 0;
+        let displayNextDate: string | null = loan.nextPaymentDate ?? null;
+        if (isWeekly) {
+          const paidDateStrs = (loan.paidDates ?? [])
+            .map((e: string) => e.split(":")[0])
+            .filter((d: string) => d.length >= 10)
+            .sort() as string[];
+          const lastPaid = paidDateStrs[paidDateStrs.length - 1];
+          if (lastPaid) {
+            const nextWeekly = computeNextWeeklyDue(lastPaid);
+            if (nextWeekly) displayNextDate = nextWeekly;
+          }
+        }
+
         const isOverdue =
-          loan.nextPaymentDate &&
-          new Date(loan.nextPaymentDate) < now &&
+          displayNextDate &&
+          new Date(displayNextDate + "T00:00:00Z") < now &&
           loan.status !== "Clear";
         return (
           <Card
@@ -2192,24 +2226,28 @@ function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
             <CardContent className="p-0">
               <div className="grid grid-cols-3 divide-x text-center">
                 <div className="p-4 space-y-0.5">
-                  <div className="text-xs text-muted-foreground">Monthly</div>
+                  <div className="text-xs text-muted-foreground">
+                    {isWeekly ? "Weekly" : "Monthly"}
+                  </div>
                   <div className="text-lg font-bold font-numeric">
-                    {loan.monthlyPayment != null
-                      ? formatCurrency(loan.monthlyPayment)
-                      : "—"}
+                    {isWeekly
+                      ? formatCurrency(loan.weeklyAmount ?? 0)
+                      : loan.monthlyPayment != null
+                        ? formatCurrency(loan.monthlyPayment)
+                        : "—"}
                   </div>
                 </div>
                 <div
                   className={`p-4 space-y-0.5 ${isOverdue ? "bg-destructive/5" : "bg-muted/10"}`}
                 >
                   <div className="text-xs text-muted-foreground">
-                    Next Payment
+                    {isWeekly ? "Next Weekly" : "Next Payment"}
                   </div>
                   <div
                     className={`text-sm font-semibold ${isOverdue ? "text-destructive" : "text-amber-600"}`}
                   >
-                    {loan.nextPaymentDate
-                      ? formatDate(loan.nextPaymentDate)
+                    {displayNextDate
+                      ? formatDate(displayNextDate)
                       : "—"}
                     {isOverdue && (
                       <span className="block text-xs font-normal text-destructive">Overdue</span>
@@ -2941,11 +2979,11 @@ export default function Portal() {
       allItems
         .filter((i) => i.isOverdue)
         .sort((a, b) => {
-          // Most overdue first (oldest due date first)
+          // Most recent overdue first (yesterday → older → oldest)
           if (!a.dueDate && !b.dueDate) return 0;
           if (!a.dueDate) return 1;
           if (!b.dueDate) return -1;
-          return a.dueDate.getTime() - b.dueDate.getTime();
+          return b.dueDate.getTime() - a.dueDate.getTime();
         }),
     [allItems],
   );

@@ -82,24 +82,31 @@ function toRow(request: LoanRequest): Record<string, string> {
   };
 }
 
-export async function listLoanRequests(): Promise<LoanRequest[]> {
+/**
+ * readTabWithIds: reads the LoanRequests tab and synchronously writes back any
+ * missing IDs so that subsequent find-by-id operations (update, delete) always
+ * see the same IDs the list API returned to the client.
+ */
+async function readTabWithIds(): Promise<{ rows: Record<string, string>[]; rowNumbers: number[] }> {
   const { rows, rowNumbers } = await readTab(TAB, HEADERS);
   const idBackfills: { range: string; values: (string | number)[][] }[] = [];
-
-  const result = rows.map((row, i) => {
+  rows.forEach((row, i) => {
     if (!row.id) {
       const newId = randomUUID();
       row.id = newId;
       idBackfills.push({ range: `${TAB}!A${rowNumbers[i]}`, values: [[newId]] });
     }
-    return fromRow(row);
   });
-
   if (idBackfills.length > 0) {
-    batchUpdateCells(idBackfills).catch(() => {});
+    // Await so IDs are in the sheet before any caller tries to find them by ID.
+    await batchUpdateCells(idBackfills);
   }
+  return { rows, rowNumbers };
+}
 
-  return result;
+export async function listLoanRequests(): Promise<LoanRequest[]> {
+  const { rows } = await readTabWithIds();
+  return rows.map((row) => fromRow(row));
 }
 
 export async function createLoanRequest(
@@ -127,7 +134,7 @@ export async function updateLoanRequestStatus(
   id: string,
   status: LoanRequestStatus,
 ): Promise<LoanRequest | null> {
-  const { rows, rowNumbers } = await readTab(TAB, HEADERS);
+  const { rows, rowNumbers } = await readTabWithIds();
   const idx = rows.findIndex((r) => r.id === id);
   if (idx === -1) return null;
   const updated: LoanRequest = { ...fromRow(rows[idx]), status };
@@ -138,7 +145,7 @@ export async function updateLoanRequestStatus(
 export async function deleteLoanRequest(
   id: string,
 ): Promise<LoanRequest | null> {
-  const { rows, rowNumbers } = await readTab(TAB, HEADERS);
+  const { rows, rowNumbers } = await readTabWithIds();
   const idx = rows.findIndex((r) => r.id === id);
   if (idx === -1) return null;
   const deleted = fromRow(rows[idx]);

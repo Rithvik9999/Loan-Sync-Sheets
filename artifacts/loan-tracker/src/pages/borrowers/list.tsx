@@ -343,7 +343,7 @@ export default function BorrowersList() {
           phone: pinEditTarget.phone,
           creditLimit: pinEditTarget.creditLimit,
           hasPin: pinEditTarget.hasPin,
-        } as Parameters<typeof BorrowerFormDialog>[0]["borrower"]}
+        } : undefined}
       />
       {/* Set up new borrower login */}
       <BorrowerFormDialog

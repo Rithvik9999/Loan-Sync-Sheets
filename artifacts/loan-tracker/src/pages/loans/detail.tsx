@@ -354,24 +354,25 @@ export default function LoanDetail() {
         today.setHours(0, 0, 0, 0);
 
         const daysElapsed = Math.max(differenceInCalendarDays(today, txDate), 0);
-        // For daily: count every elapsed day as a due period (no -1 offset).
-        // For weekly: use floor(elapsed/7) so partial weeks aren't counted.
-        // Today's payment is always shown as "due today" regardless of overdue status.
+        // periodsElapsed: total periods including today (used for display of "X elapsed").
+        // periodsElapsedForOverdue: excludes TODAY for daily loans — today's payment is
+        // "due today", not yet overdue. This prevents 2 showing when only 1 is truly overdue.
         const periodsElapsed = isDaily
           ? daysElapsed
           : Math.max(Math.floor((daysElapsed - 1) / daysPerPeriod), 0);
+        const periodsElapsedForOverdue = isDaily
+          ? Math.max(daysElapsed - 1, 0)
+          : periodsElapsed;
         const totalPaid = loan.paid ?? 0;
-        // isOnTime: paid at normal rate covers all elapsed periods (use >= so paying
-        // exactly periodAmount × periodsElapsed is correctly treated as on time).
-        // When behind, only the extra-rate payment clears an overdue period:
-        // daily uses +2%, weekly uses +1%.
+        // isOnTime: paid at normal rate covers all PAST (overdue-eligible) periods.
+        // When behind, only the extra-rate payment clears an overdue period.
         const paidPeriodsNormal = Math.floor(totalPaid / periodAmount);
-        const isOnTime = paidPeriodsNormal >= periodsElapsed;
+        const isOnTime = paidPeriodsNormal >= periodsElapsedForOverdue;
         const clearingAmt = isOnTime
           ? periodAmount
           : (isDaily ? (dailyAmtExtra ?? periodAmount) : (weeklyAmtExtra ?? periodAmount));
         const paidPeriods = Math.floor(totalPaid / clearingAmt);
-        const overduePeriods = Math.max(periodsElapsed - paidPeriods, 0);
+        const overduePeriods = Math.max(periodsElapsedForOverdue - paidPeriods, 0);
 
         // Contract total = periods in tenure × per-period amount
         const totalPeriods = Math.floor((loan.tenureDays ?? 0) / daysPerPeriod);
