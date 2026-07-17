@@ -118,12 +118,14 @@ function isPayDailyLoan(whatsapp: string | null | undefined, notes?: string | nu
 function parsePaymentFrequency(
   notes: string | null | undefined,
   whatsapp: string | null | undefined,
-): { type: "daily" | "weekly" | null; amount: number | null } {
+): { type: "daily" | "weekly" | "bimonthly" | null; amount: number | null } {
   const text = `${notes ?? ""} ${whatsapp ?? ""}`.toLowerCase();
   const dailyMatch = text.match(/pay\s+daily\s+(\d+)/);
   if (dailyMatch) return { type: "daily", amount: Number(dailyMatch[1]) };
   const weeklyMatch = text.match(/pay\s+weekly\s+(\d+)/);
   if (weeklyMatch) return { type: "weekly", amount: Number(weeklyMatch[1]) };
+  const bimonthlyMatch = text.match(/pay\s+bi-?monthly\s+(\d+)/);
+  if (bimonthlyMatch) return { type: "bimonthly", amount: Number(bimonthlyMatch[1]) };
   return { type: null, amount: null };
 }
 
@@ -1132,6 +1134,12 @@ const EARLY_PAYMENT_WINDOW_DAYS = 5;
  */
 const MONTHLY_PAYMENT_DAYS = [8, 15, 22, 30] as const;
 
+/**
+ * Fixed payment-date schedule for "bimonthly" (2× per month) loans.
+ * Only the 15th and 30th of each month are valid due dates.
+ */
+const BIMONTHLY_PAYMENT_DAYS = [15, 30] as const;
+
 /** Count of 8/15/22/30 dates strictly after startDate and ≤ targetDate. */
 function countWeeklyPaymentDates(startDate: Date, targetDate: Date): number {
   let count = 0;
@@ -1198,6 +1206,85 @@ function getNthWeeklyPaymentDate(startDate: Date, n: number): Date | null {
   let month = start.getMonth();
   for (let m = 0; m < 36; m++) {
     for (const day of MONTHLY_PAYMENT_DAYS) {
+      const d = new Date(year, month, day);
+      if (d <= start) continue;
+      count++;
+      if (count === n) return d;
+    }
+    month++;
+    if (month > 11) { month = 0; year++; }
+  }
+  return null;
+}
+
+// ── Bimonthly (15th / 30th) payment date helpers ──────────────────────────────
+
+/** Count of 15th/30th dates strictly after startDate and ≤ targetDate. */
+function countBimonthlyPaymentDates(startDate: Date, targetDate: Date): number {
+  let count = 0;
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const target = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  let year = start.getFullYear();
+  let month = start.getMonth();
+  for (let m = 0; m < 36; m++) {
+    for (const day of BIMONTHLY_PAYMENT_DAYS) {
+      const d = new Date(year, month, day);
+      if (d <= start) continue;
+      if (d > target) return count;
+      count++;
+    }
+    month++;
+    if (month > 11) { month = 0; year++; }
+  }
+  return count;
+}
+
+/** Most recent 15th/30th strictly after startDate and ≤ targetDate. Returns null if none yet. */
+function getCurrentBimonthlyPaymentDate(startDate: Date, targetDate: Date): Date | null {
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const target = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  let best: Date | null = null;
+  let year = start.getFullYear();
+  let month = start.getMonth();
+  for (let m = 0; m < 36; m++) {
+    for (const day of BIMONTHLY_PAYMENT_DAYS) {
+      const d = new Date(year, month, day);
+      if (d <= start) continue;
+      if (d > target) return best;
+      best = d;
+    }
+    month++;
+    if (month > 11) { month = 0; year++; }
+  }
+  return best;
+}
+
+/** Next 15th/30th strictly after both startDate and targetDate (upcoming payment). */
+function getNextBimonthlyPaymentDate(startDate: Date, targetDate: Date): Date | null {
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const target = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  let year = target.getFullYear();
+  let month = target.getMonth();
+  for (let m = 0; m < 36; m++) {
+    for (const day of BIMONTHLY_PAYMENT_DAYS) {
+      const d = new Date(year, month, day);
+      if (d <= start) continue;
+      if (d > target) return d;
+    }
+    month++;
+    if (month > 11) { month = 0; year++; }
+  }
+  return null;
+}
+
+/** The N-th (1-indexed) 15th/30th payment date strictly after startDate. */
+function getNthBimonthlyPaymentDate(startDate: Date, n: number): Date | null {
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  let count = 0;
+  let year = start.getFullYear();
+  let month = start.getMonth();
+  for (let m = 0; m < 36; m++) {
+    for (const day of BIMONTHLY_PAYMENT_DAYS) {
       const d = new Date(year, month, day);
       if (d <= start) continue;
       count++;
@@ -1293,17 +1380,32 @@ function buildRepaymentItems(
           earlyDiscount: 0,
         });
       }
-      // Always push today's daily payment into Coming Up regardless of overdue status
-      items.push({
-        key: `daily-today-${l.id}`,
-        id: l.id, loanId: l.loanId, type: "loan",
-        label: `Daily Payment — ₹${dailyAmt.toLocaleString("en-IN")}/day`,
-        subLabel: overdueDays > 0 ? `Today's payment (${overdueDays} missed)` : "Due today",
-        outstanding: dailyAmt,
-        dueDate: today,
-        isOverdue: false,
-        earlyDiscount: 0,
-      });
+      // If loan was created today (daysElapsed=0), first payment is due tomorrow — don't show today.
+      if (daysElapsed === 0) {
+        const tomorrow = new Date(today.getTime() + 86400000);
+        items.push({
+          key: `daily-today-${l.id}`,
+          id: l.id, loanId: l.loanId, type: "loan",
+          label: `Daily Payment — ₹${dailyAmt.toLocaleString("en-IN")}/day`,
+          subLabel: "Due tomorrow",
+          outstanding: dailyAmt,
+          dueDate: tomorrow,
+          isOverdue: false,
+          earlyDiscount: 0,
+        });
+      } else {
+        // Always push today's daily payment into Coming Up regardless of overdue status
+        items.push({
+          key: `daily-today-${l.id}`,
+          id: l.id, loanId: l.loanId, type: "loan",
+          label: `Daily Payment — ₹${dailyAmt.toLocaleString("en-IN")}/day`,
+          subLabel: overdueDays > 0 ? `Today's payment (${overdueDays} missed)` : "Due today",
+          outstanding: dailyAmt,
+          dueDate: today,
+          isOverdue: false,
+          earlyDiscount: 0,
+        });
+      }
       continue;
     }
 
@@ -1481,6 +1583,77 @@ function buildRepaymentItems(
               : "No upcoming payment",
           outstanding: weeklyAmt,
           dueDate: upcomingDue,
+          isOverdue: false,
+          earlyDiscount: 0,
+        });
+      }
+      continue;
+    }
+
+    // ── Bimonthly EMI (15th / 30th schedule) ──
+    if (freq.type === "bimonthly" && freq.amount && freq.amount > 0) {
+      const biAmt = freq.amount;
+      if (!txDate) continue;
+
+      const currentBiDue = getCurrentBimonthlyPaymentDate(txDate, today);
+      const daysLateBi = currentBiDue ? differenceInCalendarDays(today, currentBiDue) : 0;
+
+      const biPaidEntries = (e.paidDates ?? []).map(entry => {
+        const parts = entry.split(":");
+        return { date: parts[0] ?? "", amount: Number(parts[1]) || 0 };
+      }).filter(pe => pe.date.length >= 8);
+
+      const overdueCountBi = (() => {
+        const txDateStr = e.transactionDate ?? "";
+        const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+        const firstPaidDateStr = biPaidEntries.length > 0
+          ? [...biPaidEntries].map(pe => pe.date).filter(d => d.length >= 10).sort()[0]
+          : "";
+
+        let elapsed = 0;
+        let yr = txDate.getFullYear(), mo = txDate.getMonth();
+        done: for (let mi = 0; mi < 36; mi++) {
+          for (const day of BIMONTHLY_PAYMENT_DAYS) {
+            const dueDateStr = `${yr}-${String(mo + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+            if (dueDateStr <= txDateStr) continue;
+            if (firstPaidDateStr && dueDateStr < firstPaidDateStr) continue;
+            if (dueDateStr > todayStr) break done;
+            elapsed++;
+          }
+          mo++; if (mo > 11) { mo = 0; yr++; }
+        }
+        const totalPaidFromDates = biPaidEntries.reduce((s, pe) => s + pe.amount, 0);
+        return Math.max(elapsed - Math.floor(totalPaidFromDates / biAmt), 0);
+      })();
+
+      if (overdueCountBi > 0) {
+        const overdueTotal = calcOverdueTotal(biAmt, overdueCountBi, 15, Math.max(daysLateBi, 1));
+        items.push({
+          key: `emi-bimonthly-${e.id}`,
+          id: e.id, loanId: (e as any).emiId, type: "emi",
+          label: `${formatCurrency(e.principal)} EMI (₹${biAmt.toLocaleString("en-IN")}/15th & 30th)`,
+          subLabel: `${overdueCountBi} missed payment${overdueCountBi > 1 ? "s" : ""} · ${daysLateBi} day${daysLateBi !== 1 ? "s" : ""} overdue`,
+          outstanding: overdueTotal,
+          dueDate: currentBiDue,
+          isOverdue: true,
+          earlyDiscount: 0,
+        });
+      } else {
+        const isDueTodayBi = currentBiDue && daysLateBi === 0;
+        const upcomingBiDue = isDueTodayBi
+          ? currentBiDue!
+          : getNextBimonthlyPaymentDate(txDate, today);
+        items.push({
+          key: `emi-bimonthly-${e.id}`,
+          id: e.id, loanId: (e as any).emiId, type: "emi",
+          label: `${formatCurrency(e.principal)} EMI (₹${biAmt.toLocaleString("en-IN")}/15th & 30th)`,
+          subLabel: isDueTodayBi
+            ? "Due today"
+            : upcomingBiDue
+              ? `Next payment ${formatDate(upcomingBiDue.toISOString())}`
+              : "No upcoming payment",
+          outstanding: biAmt,
+          dueDate: upcomingBiDue,
           isOverdue: false,
           earlyDiscount: 0,
         });
