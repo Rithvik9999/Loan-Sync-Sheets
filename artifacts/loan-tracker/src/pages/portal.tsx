@@ -2520,33 +2520,6 @@ function RecentActivitySection({
 
   return (
     <div className="space-y-4">
-      {recentPayments.length > 0 && (
-        <div className="border rounded-xl overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-3 bg-muted/30">
-            <Clock className="h-4 w-4 text-muted-foreground" />
-            <span className="font-semibold text-sm">Recent Payments ({recentPayments.length})</span>
-          </div>
-          <div className="divide-y">
-            {recentPayments.map((p, i) => (
-              <div key={i} className="flex items-center justify-between px-4 py-3 bg-emerald-50/20 text-sm">
-                <div>
-                  <span className="font-semibold">{p.label}</span>
-                  <div className="text-xs text-muted-foreground mt-0.5">{formatDate(p.date)}</div>
-                </div>
-                <div className="text-right">
-                  {p.amount != null && (
-                    <div className="font-bold font-numeric text-emerald-700">{formatCurrency(p.amount)}</div>
-                  )}
-                  <Button variant="ghost" size="sm" className="h-6 text-xs px-2 mt-0.5" asChild>
-                    <Link href={p.href}>Details <ChevronRight className="ml-0.5 h-3 w-3" /></Link>
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {(newLoans.length > 0 || newEmi.length > 0) && (
         <div className="border rounded-xl overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-3 bg-muted/30">
@@ -2601,6 +2574,33 @@ function RecentActivitySection({
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {recentPayments.length > 0 && (
+        <div className="border rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 bg-muted/30">
+            <Clock className="h-4 w-4 text-muted-foreground" />
+            <span className="font-semibold text-sm">Recent Payments ({recentPayments.length})</span>
+          </div>
+          <div className="divide-y">
+            {recentPayments.map((p, i) => (
+              <div key={i} className="flex items-center justify-between px-4 py-3 bg-emerald-50/20 text-sm">
+                <div>
+                  <span className="font-semibold">{p.label}</span>
+                  <div className="text-xs text-muted-foreground mt-0.5">{formatDate(p.date)}</div>
+                </div>
+                <div className="text-right">
+                  {p.amount != null && (
+                    <div className="font-bold font-numeric text-emerald-700">{formatCurrency(p.amount)}</div>
+                  )}
+                  <Button variant="ghost" size="sm" className="h-6 text-xs px-2 mt-0.5" asChild>
+                    <Link href={p.href}>Details <ChevronRight className="ml-0.5 h-3 w-3" /></Link>
+                  </Button>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
