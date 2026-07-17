@@ -1917,25 +1917,6 @@ function LoanCard({ loan }: { loan: Loan }) {
               )}
             </div>
           </div>
-          {/* Action buttons — stacked vertically with 5px gap on the right */}
-          <div className="flex flex-col justify-center gap-[5px] px-3 border-l shrink-0">
-            {loan.status !== "Clear" && (
-              <Button
-                size="sm"
-                className="bg-emerald-700 hover:bg-emerald-800 text-white"
-                onClick={() => setRepayOpen(true)}
-              >
-                <Banknote className="mr-1.5 h-3.5 w-3.5" />
-                Repay
-              </Button>
-            )}
-            <Button variant="outline" size="sm" asChild>
-              <Link href={`/loans/${loan.id}`}>
-                Details <ChevronRight className="ml-1 h-4 w-4" />
-              </Link>
-            </Button>
-          </div>
-          </div>
         </CardContent>
       </Card>
       <RepayDialog
