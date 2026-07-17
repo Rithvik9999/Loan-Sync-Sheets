@@ -1365,6 +1365,11 @@ function buildRepaymentItems(
       const returnDate = l.returnDate ? new Date(l.returnDate + "T00:00:00Z") : null;
       const withinTenure = !returnDate || today <= returnDate;
 
+      // todayCovered: paidNormal counts how many full ₹dailyAmt payments have been
+      // received. daysElapsed counts how many payment days have occurred (including today).
+      // If paidNormal >= daysElapsed, today's instalment is already covered.
+      const todayCovered = paidNormal >= daysElapsed;
+
       if (overdueDays > 0) {
         // Each missed day piles up with 2%/day late fee
         const overdueTotal = calcOverdueTotal(dailyAmt, overdueDays, 1, undefined, 0.02);
@@ -1380,8 +1385,9 @@ function buildRepaymentItems(
           earlyDiscount: 0,
         });
       }
-      // If loan was created today (daysElapsed=0), first payment is due tomorrow — don't show today.
+
       if (daysElapsed === 0) {
+        // Created today — first payment is due tomorrow, nothing due yet.
         const tomorrow = new Date(today.getTime() + 86400000);
         items.push({
           key: `daily-today-${l.id}`,
@@ -1393,8 +1399,8 @@ function buildRepaymentItems(
           isOverdue: false,
           earlyDiscount: 0,
         });
-      } else {
-        // Always push today's daily payment into Coming Up regardless of overdue status
+      } else if (!todayCovered) {
+        // Today's instalment hasn't been paid yet — show it in Coming Up.
         items.push({
           key: `daily-today-${l.id}`,
           id: l.id, loanId: l.loanId, type: "loan",
@@ -1406,6 +1412,7 @@ function buildRepaymentItems(
           earlyDiscount: 0,
         });
       }
+      // else: todayCovered && daysElapsed > 0 → all payments through today received, nothing to show.
       continue;
     }
 
