@@ -7,6 +7,7 @@ import {
 } from "@workspace/api-zod";
 import { attachRole, requireStaff } from "../middlewares/auth";
 import * as loanRequestsRepo from "../lib/repositories/loanRequests";
+import { approveLoanRequest } from "../lib/repositories/loanRequests";
 import * as borrowersRepo from "../lib/repositories/borrowers";
 import * as loansRepo from "../lib/repositories/loans";
 import { attachBorrowerId } from "../lib/repositories/loans";
@@ -190,8 +191,8 @@ router.post(
       notes: notes ?? loanRequest.purpose ?? undefined,
     });
 
-    // Mark the request as Approved
-    await loanRequestsRepo.updateLoanRequestStatus(loanRequest.id, "Approved");
+    // Mark the request as Approved and record the discount applied by the admin
+    await approveLoanRequest(loanRequest.id, discount);
 
     const borrowers = await borrowersRepo.listBorrowers();
     res.status(201).json({ loan: attachBorrowerId(loan, borrowers) });

@@ -455,16 +455,18 @@ export default function EmiLoanDetail() {
     .map((entry, i) => parsePaidEntry(entry, i))
     .reverse(); // newest first
 
-  // Compute cycle accumulated (D/W entries since last M/DM/WM)
+  // Compute cycle accumulated (D/W entries since last M/DM/WM).
+  // Uses the same date-based comparison as the backend's recordPartialEmiPayment
+  // to avoid off-by-one errors when entries share the same date as a WM boundary.
   const parsedAll = (loan.paidDates ?? []).map((e, i) => parsePaidEntry(e, i));
   let cycleAccumulated = 0;
   if (loan.status !== "Clear" && loan.monthlyPayment) {
-    let cycleStartIdx = -1;
+    let cycleStartDate = loan.transactionDate ?? "1970-01-01";
     for (let i = parsedAll.length - 1; i >= 0; i--) {
-      if (parsedAll[i].completedMonth) { cycleStartIdx = i; break; }
+      if (parsedAll[i].completedMonth) { cycleStartDate = parsedAll[i].date; break; }
     }
-    cycleAccumulated = parsedAll.slice(cycleStartIdx + 1).reduce((sum, e) => {
-      if (e.type === "D" || e.type === "W") return sum + (e.amount ?? 0);
+    cycleAccumulated = parsedAll.reduce((sum, e) => {
+      if ((e.type === "D" || e.type === "W") && e.date > cycleStartDate) return sum + (e.amount ?? 0);
       return sum;
     }, 0);
   }

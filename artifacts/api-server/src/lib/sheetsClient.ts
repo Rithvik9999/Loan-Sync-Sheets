@@ -88,27 +88,44 @@ export async function ensureSheetTab(title: string, headers: string[]): Promise<
     logger.info({ title }, "Created Google Sheet tab");
   } else {
     // Tab already exists — backfill any columns that were added to `headers` after
-    // the tab was originally created. This prevents the positional-fallback bug
-    // where a new header would silently alias an existing column's data.
+    // the tab was originally created, AND correct any that exist with the wrong case.
+    // This prevents the positional-fallback bug where a new header would silently
+    // alias an existing column's data, and fixes sheets where e.g. "PIN" ≠ "pin".
     const headerRes = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: `${title}!1:1`,
     });
     const currentHeaders = (headerRes.data.values?.[0] ?? []).map(String);
-    const missing = headers.filter((h) => !currentHeaders.includes(h));
-    if (missing.length > 0) {
-      const startCol = currentHeaders.length + 1; // 1-indexed column letter
+
+    // Separate into: wrong-case (fix in-place) vs truly missing (append).
+    const corrections: { col: number; name: string }[] = [];
+    const missing: string[] = [];
+    headers.forEach((h) => {
+      if (currentHeaders.includes(h)) return; // exact match — fine
+      const ciIdx = currentHeaders.findIndex((ch) => ch.toLowerCase() === h.toLowerCase());
+      if (ciIdx >= 0) {
+        corrections.push({ col: ciIdx, name: h }); // correct the label in-place
+      } else {
+        missing.push(h); // truly absent — append at end
+      }
+    });
+
+    const batchData: { range: string; values: string[][] }[] = [];
+    corrections.forEach(({ col, name }) => {
+      batchData.push({ range: `${title}!${columnLetter(col + 1)}1`, values: [[name]] });
+    });
+    missing.forEach((h, i) => {
+      const startCol = currentHeaders.length + corrections.length + 1 + i;
+      batchData.push({ range: `${title}!${columnLetter(startCol)}1`, values: [[h]] });
+    });
+
+    if (batchData.length > 0) {
       await sheets.spreadsheets.values.batchUpdate({
         spreadsheetId,
-        requestBody: {
-          valueInputOption: "RAW",
-          data: missing.map((h, i) => ({
-            range: `${title}!${columnLetter(startCol + i)}1`,
-            values: [[h]],
-          })),
-        },
+        requestBody: { valueInputOption: "RAW", data: batchData },
       });
-      logger.info({ title, missing }, "Backfilled missing columns to existing tab");
+      if (corrections.length > 0) logger.info({ title, corrections }, "Corrected wrong-case column headers");
+      if (missing.length > 0) logger.info({ title, missing }, "Backfilled missing columns to existing tab");
     }
   }
   ensuredTabs.add(title);

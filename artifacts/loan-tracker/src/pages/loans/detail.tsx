@@ -47,6 +47,8 @@ export default function LoanDetail() {
   const [isDeleteStep1Open, setIsDeleteStep1Open] = useState(false);
   const [isDeleteStep2Open, setIsDeleteStep2Open] = useState(false);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
+  const [isEditPaid, setIsEditPaid] = useState(false);
+  const [paidEditValue, setPaidEditValue] = useState("");
   const [quickPayDate, setQuickPayDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [dailyPending, setDailyPending] = useState(false);
   const [weeklyPending, setWeeklyPending] = useState(false);

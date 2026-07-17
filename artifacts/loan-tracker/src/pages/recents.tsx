@@ -180,13 +180,7 @@ export default function Recents() {
                           <div className="text-sm text-muted-foreground mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
                             <span className="font-numeric font-medium">{formatCurrency(loan.principal)}</span>
                             <span>·</span>
-                            <span>{loan.tenureMonths} months</span>
-                            <span>·</span>
                             <span>{formatDate(loan.transactionDate)}</span>
-                            <span>·</span>
-                            <span className="text-xs">
-                              {daysAgo === 0 ? "Today" : `${daysAgo}d ago`}
-                            </span>
                           </div>
                           {loan.monthlyPayment && (
                             <p className="text-xs text-muted-foreground mt-0.5 font-numeric">

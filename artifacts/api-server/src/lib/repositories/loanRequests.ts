@@ -15,6 +15,7 @@ const HEADERS = [
   "upiId",
   "status",
   "createdAt",
+  "discount",
 ];
 
 export type LoanRequestStatus = "Pending" | "Approved" | "Rejected";
@@ -32,6 +33,8 @@ export interface LoanRequest {
   upiId: string | null;
   status: LoanRequestStatus;
   createdAt: string;
+  /** Discount applied by admin at approval time (₹). 0 if none. */
+  discount: number;
 }
 
 export interface LoanRequestInput {
@@ -66,6 +69,7 @@ function fromRow(row: Record<string, string>): LoanRequest {
     upiId: row.upiId || null,
     status,
     createdAt: row.createdAt,
+    discount: Number(row.discount) || 0,
   };
 }
 
@@ -79,6 +83,7 @@ function toRow(request: LoanRequest): Record<string, string> {
     tenureDays: String(request.tenureDays),
     tenureMonths: request.tenureMonths != null ? String(request.tenureMonths) : "",
     type: request.type,
+    discount: String(request.discount ?? 0),
   };
 }
 
@@ -140,6 +145,19 @@ export async function updateLoanRequestStatus(
   const idx = rows.findIndex((r) => r.id === id);
   if (idx === -1) return null;
   const updated: LoanRequest = { ...fromRow(rows[idx]), status };
+  await updateRowAt(TAB, rowNumbers[idx], HEADERS, toRow(updated));
+  return updated;
+}
+
+/** Approve a loan request and record the discount applied by the admin. */
+export async function approveLoanRequest(
+  id: string,
+  discount: number,
+): Promise<LoanRequest | null> {
+  const { rows, rowNumbers } = await readTabWithIds();
+  const idx = rows.findIndex((r) => r.id === id);
+  if (idx === -1) return null;
+  const updated: LoanRequest = { ...fromRow(rows[idx]), status: "Approved", discount: discount ?? 0 };
   await updateRowAt(TAB, rowNumbers[idx], HEADERS, toRow(updated));
   return updated;
 }

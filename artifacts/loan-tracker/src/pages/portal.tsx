@@ -1849,7 +1849,7 @@ function LoanCard({ loan }: { loan: Loan }) {
   return (
     <>
       <Card className="overflow-hidden shadow-sm border-border/60">
-        <div className="bg-primary/5 px-4 py-3 border-b">
+        <div className="bg-primary/5 px-4 py-3 border-b flex justify-between items-center gap-2 flex-wrap">
           <div>
             <h2 className="text-base font-semibold flex items-center gap-2 flex-wrap">
               {formatCurrency(loan.principal)} Loan
@@ -1865,12 +1865,29 @@ function LoanCard({ loan }: { loan: Loan }) {
               {formatDate(loan.transactionDate)} · {loan.tenureDays}d
             </p>
           </div>
+          {/* Action buttons — stacked vertically on the right of the header row */}
+          <div className="flex flex-col gap-[5px] shrink-0">
+            {loan.status !== "Clear" && (
+              <Button
+                size="sm"
+                className="bg-emerald-700 hover:bg-emerald-800 text-white"
+                onClick={() => setRepayOpen(true)}
+              >
+                <Banknote className="mr-1.5 h-3.5 w-3.5" />
+                Repay
+              </Button>
+            )}
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/loans/${loan.id}`}>
+                Details <ChevronRight className="ml-1 h-4 w-4" />
+              </Link>
+            </Button>
           </div>
+        </div>
         <CardContent className="p-0">
-          <div className="flex">
-          <div className="flex-1 grid grid-cols-3 divide-x text-center">
+          <div className="grid grid-cols-3 divide-x text-center">
             <div className="p-4 space-y-0.5">
-              <div className="text-xs text-amber-600 font-medium">Total Due</div>
+              <div className="text-xs text-amber-600 font-medium pt-[2px]">Total Due</div>
               <div className="text-lg font-bold font-numeric text-amber-700">
                 {loan.finalAmount != null
                   ? formatCurrency(loan.finalAmount)

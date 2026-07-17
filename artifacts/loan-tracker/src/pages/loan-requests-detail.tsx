@@ -381,7 +381,7 @@ export default function LoanRequestDetail() {
             <CardTitle className="text-base">Approve & Record Payment</CardTitle>
             <CardDescription>
               Enter a discount (₹0 if none) and confirm the transaction date.
-              Clicking "Mark as Paid" will create a Clear loan entry in your
+              Clicking "Mark as Paid" will create a Pending loan entry in your
               sheet.
             </CardDescription>
           </CardHeader>
