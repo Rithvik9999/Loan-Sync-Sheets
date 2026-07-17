@@ -1412,7 +1412,20 @@ function buildRepaymentItems(
           earlyDiscount: 0,
         });
       }
-      // else: todayCovered && daysElapsed > 0 → all payments through today received, nothing to show.
+      else {
+        // todayCovered && daysElapsed > 0 → today paid, show tomorrow as the next upcoming payment.
+        const tomorrow = new Date(today.getTime() + 86400000);
+        items.push({
+          key: `daily-today-${l.id}`,
+          id: l.id, loanId: l.loanId, type: "loan",
+          label: `Daily Payment — ₹${dailyAmt.toLocaleString("en-IN")}/day`,
+          subLabel: "Due tomorrow",
+          outstanding: dailyAmt,
+          dueDate: tomorrow,
+          isOverdue: false,
+          earlyDiscount: 0,
+        });
+      }
       continue;
     }
 
