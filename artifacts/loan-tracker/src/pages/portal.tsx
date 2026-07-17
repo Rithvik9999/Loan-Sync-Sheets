@@ -3294,10 +3294,10 @@ export default function Portal() {
 
           {/* Row 2 Cols 1-2 — Total Outstanding (sits left of pie which spans both rows) */}
           <Card className="col-span-2 shadow-sm border-border/60">
-            <CardContent className="px-3 py-2 flex items-center justify-between gap-2">
+            <CardContent className="px-3 py-2 flex items-center justify-between gap-2 pt-[calc(0.5rem+3px)]">
               <div className="flex items-center gap-2">
                 <Wallet className="h-4 w-4 text-muted-foreground shrink-0" />
-                <p className="text-xs text-muted-foreground leading-tight mt-[7px]">Total Due</p>
+                <p className="text-xs text-muted-foreground leading-tight">Total Due</p>
               </div>
               <div className="text-base font-bold font-numeric leading-none text-destructive">
                 {formatCurrency(totalOutstanding)}
