@@ -1855,14 +1855,14 @@ function LoanCard({ loan }: { loan: Loan }) {
               {formatCurrency(loan.principal)} Loan
               <LoanStatusBadge status={loan.status} />
             </h2>
+            {dueDate && (
+              <p className={`text-sm font-medium mt-0.5 ${isOverdue ? "text-destructive" : "text-amber-600"}`}>
+                {isOverdue ? "⚠ Overdue" : "Due"}: {formatDate(dueDate.toISOString())}
+              </p>
+            )}
             <p className="text-xs text-muted-foreground">
               <span className="font-mono mr-2">{loan.loanId}</span>
               {formatDate(loan.transactionDate)} · {loan.tenureDays}d
-              {dueDate && (
-                <span className={`ml-2 ${isOverdue ? "text-destructive" : ""}`}>
-                  · {isOverdue ? "Overdue" : "Due"} {formatDate(dueDate.toISOString())}
-                </span>
-              )}
             </p>
           </div>
           <div className="flex gap-2">
@@ -1886,8 +1886,8 @@ function LoanCard({ loan }: { loan: Loan }) {
         <CardContent className="p-0">
           <div className="grid grid-cols-3 divide-x text-center">
             <div className="p-4 space-y-0.5">
-              <div className="text-xs text-muted-foreground">Total Due</div>
-              <div className="text-lg font-bold font-numeric">
+              <div className="text-xs text-amber-600 font-medium">Total Due</div>
+              <div className="text-lg font-bold font-numeric text-amber-700">
                 {loan.finalAmount != null
                   ? formatCurrency(loan.finalAmount)
                   : "—"}
@@ -2004,6 +2004,28 @@ function RequestDetailDialog({
               <span className="text-sm">{formatDate(request.createdAt)}</span>
             </div>
           )}
+          {/* Approval details */}
+          {request.status === "Approved" && !isEmi && request.tenureDays > 0 && (() => {
+            const est = estimateFinalAmount({ principal: request.amount, tenureDays: request.tenureDays });
+            return (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 p-3 space-y-2 mt-1">
+                <p className="text-xs font-semibold text-emerald-900 dark:text-emerald-300">Estimated loan details</p>
+                <div className="flex justify-between text-xs">
+                  <span className="text-emerald-700">Flat Fee (est.)</span>
+                  <span className="font-semibold font-numeric">{formatCurrency(est.flatFee)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-emerald-700">Interest (est.)</span>
+                  <span className="font-semibold font-numeric">{formatCurrency(est.interest)}</span>
+                </div>
+                <div className="flex justify-between text-xs border-t border-emerald-200 pt-1.5">
+                  <span className="text-emerald-700 font-semibold">Total to repay (est.)</span>
+                  <span className="font-bold font-numeric text-emerald-900">{formatCurrency(est.finalAmount)}</span>
+                </div>
+                <p className="text-[10px] text-emerald-600">Estimate only — admin will confirm the exact amount and repayment date when disbursed.</p>
+              </div>
+            );
+          })()}
           {request.adminNote && (
             <div className="flex flex-col gap-1">
               <span className="text-sm text-muted-foreground">Admin note</span>
@@ -2184,13 +2206,13 @@ function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
                     Next Payment
                   </div>
                   <div
-                    className={`text-sm font-semibold ${isOverdue ? "text-destructive" : ""}`}
+                    className={`text-sm font-semibold ${isOverdue ? "text-destructive" : "text-amber-600"}`}
                   >
                     {loan.nextPaymentDate
                       ? formatDate(loan.nextPaymentDate)
                       : "—"}
                     {isOverdue && (
-                      <span className="block text-xs font-normal">Overdue</span>
+                      <span className="block text-xs font-normal text-destructive">Overdue</span>
                     )}
                   </div>
                 </div>
@@ -2339,6 +2361,144 @@ function AlreadyPaidSection({
           >
             Next →
           </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Recents Section (recent activity — payments + disbursals in last 30 days) ─
+
+const RECENT_DAYS_PORTAL = 30;
+
+function RecentActivitySection({
+  loans,
+  emiLoans,
+}: {
+  loans: Loan[];
+  emiLoans: EmiLoan[];
+}) {
+  const today = new Date();
+  const cutoff = new Date(today.getTime() - RECENT_DAYS_PORTAL * 86400000);
+
+  // New loans disbursed in last 30 days
+  const newLoans = loans.filter((l) => {
+    if (!l.transactionDate) return false;
+    return new Date(l.transactionDate + "T00:00:00Z") >= cutoff;
+  }).sort((a, b) => (b.transactionDate ?? "").localeCompare(a.transactionDate ?? ""));
+
+  // New EMI loans disbursed in last 30 days
+  const newEmi = emiLoans.filter((e) => {
+    if (!e.transactionDate) return false;
+    return new Date(e.transactionDate + "T00:00:00Z") >= cutoff;
+  }).sort((a, b) => (b.transactionDate ?? "").localeCompare(a.transactionDate ?? ""));
+
+  // Recent EMI payments (from paidDates)
+  type RecentPayment = { date: string; amount: number | null; label: string; loanId: string; href: string; type: string };
+  const recentPayments: RecentPayment[] = [];
+  for (const e of emiLoans) {
+    for (const entry of e.paidDates ?? []) {
+      const [datePart, amtPart] = entry.split(":");
+      if (!datePart) continue;
+      const entryDate = new Date(datePart + "T00:00:00Z");
+      if (entryDate < cutoff) continue;
+      recentPayments.push({
+        date: datePart,
+        amount: amtPart ? Number(amtPart) : null,
+        label: `${e.name} — EMI`,
+        loanId: e.emiId ?? e.id,
+        href: `/emi-loans/${e.id}`,
+        type: "emi",
+      });
+    }
+  }
+  // Regular loan payments
+  for (const l of loans) {
+    if (!l.dateOfPartPayment) continue;
+    const payDate = new Date(l.dateOfPartPayment + "T00:00:00Z");
+    if (payDate < cutoff) continue;
+    recentPayments.push({
+      date: l.dateOfPartPayment,
+      amount: null, // cumulative paid — no per-payment amount available
+      label: `${l.name} — ${l.loanId ?? "Loan"}`,
+      loanId: l.loanId ?? l.id,
+      href: `/loans/${l.id}`,
+      type: "loan",
+    });
+  }
+  recentPayments.sort((a, b) => b.date.localeCompare(a.date));
+
+  if (newLoans.length === 0 && newEmi.length === 0 && recentPayments.length === 0) {
+    return (
+      <div className="py-10 text-center">
+        <EmptyState
+          title="No recent activity"
+          description={`No loans or payments in the last ${RECENT_DAYS_PORTAL} days.`}
+          icon={<Clock />}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {recentPayments.length > 0 && (
+        <div className="border rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 bg-muted/30">
+            <Clock className="h-4 w-4 text-muted-foreground" />
+            <span className="font-semibold text-sm">Recent Payments ({recentPayments.length})</span>
+          </div>
+          <div className="divide-y">
+            {recentPayments.map((p, i) => (
+              <div key={i} className="flex items-center justify-between px-4 py-3 bg-emerald-50/20 text-sm">
+                <div>
+                  <span className="font-semibold">{p.label}</span>
+                  <div className="text-xs text-muted-foreground mt-0.5">{formatDate(p.date)}</div>
+                </div>
+                <div className="text-right">
+                  {p.amount != null && (
+                    <div className="font-bold font-numeric text-emerald-700">{formatCurrency(p.amount)}</div>
+                  )}
+                  <Button variant="ghost" size="sm" className="h-6 text-xs px-2 mt-0.5" asChild>
+                    <Link href={p.href}>Details <ChevronRight className="ml-0.5 h-3 w-3" /></Link>
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(newLoans.length > 0 || newEmi.length > 0) && (
+        <div className="border rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 bg-muted/30">
+            <CalendarRange className="h-4 w-4 text-muted-foreground" />
+            <span className="font-semibold text-sm">New Loans ({newLoans.length + newEmi.length})</span>
+          </div>
+          <div className="divide-y">
+            {newLoans.map((l) => (
+              <div key={l.id} className="flex items-center justify-between px-4 py-3 text-sm">
+                <div>
+                  <span className="font-semibold font-numeric">{formatCurrency(l.principal)} Loan</span>
+                  <div className="text-xs text-muted-foreground mt-0.5">{formatDate(l.transactionDate)} · {l.tenureDays}d</div>
+                </div>
+                <Button variant="ghost" size="sm" className="h-6 text-xs px-2" asChild>
+                  <Link href={`/loans/${l.id}`}>Details <ChevronRight className="ml-0.5 h-3 w-3" /></Link>
+                </Button>
+              </div>
+            ))}
+            {newEmi.map((e) => (
+              <div key={e.id} className="flex items-center justify-between px-4 py-3 text-sm">
+                <div>
+                  <span className="font-semibold font-numeric">{formatCurrency(e.principal)} EMI</span>
+                  <div className="text-xs text-muted-foreground mt-0.5">{formatDate(e.transactionDate)} · {e.tenureMonths} months</div>
+                </div>
+                <Button variant="ghost" size="sm" className="h-6 text-xs px-2" asChild>
+                  <Link href={`/emi-loans/${e.id}`}>Details <ChevronRight className="ml-0.5 h-3 w-3" /></Link>
+                </Button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -3034,7 +3194,7 @@ export default function Portal() {
             <CardContent className="px-3 py-2 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Wallet className="h-4 w-4 text-muted-foreground shrink-0" />
-                <p className="text-xs text-muted-foreground leading-tight">Total Due</p>
+                <p className="text-xs text-muted-foreground leading-tight mt-0.5">Total Due</p>
               </div>
               <div className="text-base font-bold font-numeric leading-none text-destructive">
                 {formatCurrency(totalOutstanding)}
@@ -3081,6 +3241,10 @@ export default function Portal() {
             <TabsTrigger value="paid" className="shrink-0 gap-1.5 text-xs sm:text-sm px-3">
               <BadgeCheck className="h-3.5 w-3.5 shrink-0" />
               Paid
+            </TabsTrigger>
+            <TabsTrigger value="recents" className="shrink-0 gap-1.5 text-xs sm:text-sm px-3">
+              <Clock className="h-3.5 w-3.5 shrink-0" />
+              Recents
             </TabsTrigger>
           </TabsList>
         </div>
@@ -3140,6 +3304,11 @@ export default function Portal() {
         {/* ── Paid Tab ── */}
         <TabsContent value="paid" className="mt-4">
           <AlreadyPaidSection loans={loans ?? []} emiLoans={emiLoans ?? []} />
+        </TabsContent>
+
+        {/* ── Recents Tab ── */}
+        <TabsContent value="recents" className="mt-4">
+          <RecentActivitySection loans={loans ?? []} emiLoans={emiLoans ?? []} />
         </TabsContent>
       </Tabs>
 

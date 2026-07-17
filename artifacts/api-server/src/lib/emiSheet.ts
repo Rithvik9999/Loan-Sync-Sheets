@@ -181,7 +181,9 @@ function makeEmiId(rowNumber: number): string {
 const SHEET_EPOCH_OFFSET = 25569;
 
 function todaySerial(): number {
-  return Math.floor(Date.now() / 86400000) + SHEET_EPOCH_OFFSET;
+  // Use IST (UTC+5:30) so the day flips at midnight IST, not midnight UTC.
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // 19 800 000 ms
+  return Math.floor((Date.now() + IST_OFFSET_MS) / 86400000) + SHEET_EPOCH_OFFSET;
 }
 
 /** Converts an ISO date string "YYYY-MM-DD" to a Google Sheets serial number. */

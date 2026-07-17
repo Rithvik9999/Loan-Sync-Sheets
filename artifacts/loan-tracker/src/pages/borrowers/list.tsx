@@ -121,6 +121,8 @@ export default function BorrowersList() {
   const [search, setSearch] = useState("");
   const [setupName, setSetupName] = useState<string | null>(null);
   const [setupPhone, setSetupPhone] = useState<string>("");
+  // Separate state for editing an existing borrower's PIN (passes full borrower obj to dialog)
+  const [pinEditTarget, setPinEditTarget] = useState<BorrowerEntry | null>(null);
   const [limitTarget, setLimitTarget] = useState<{ id: string; name: string; currentLimit: number | null } | null>(null);
 
   const { data: borrowers, isLoading: isLoadingBorrowers } = useListBorrowers({
@@ -298,7 +300,7 @@ export default function BorrowersList() {
                               variant="outline"
                               size="sm"
                               className="text-xs h-7"
-                              onClick={() => { setSetupName(b.name); setSetupPhone(b.phone); }}
+                              onClick={() => setPinEditTarget(b)}
                             >
                               Edit PIN
                             </Button>
@@ -331,6 +333,19 @@ export default function BorrowersList() {
         </CardContent>
       </Card>
 
+      {/* Edit existing borrower PIN */}
+      <BorrowerFormDialog
+        open={pinEditTarget !== null}
+        onOpenChange={(open) => { if (!open) setPinEditTarget(null); }}
+        borrower={pinEditTarget ? {
+          id: pinEditTarget.id!,
+          name: pinEditTarget.name,
+          phone: pinEditTarget.phone,
+          creditLimit: pinEditTarget.creditLimit,
+          hasPin: pinEditTarget.hasPin,
+        } as Parameters<typeof BorrowerFormDialog>[0]["borrower"]}
+      />
+      {/* Set up new borrower login */}
       <BorrowerFormDialog
         open={setupName !== null}
         onOpenChange={(open) => { if (!open) setSetupName(null); }}

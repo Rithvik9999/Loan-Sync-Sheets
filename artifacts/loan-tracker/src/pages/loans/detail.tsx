@@ -260,6 +260,11 @@ export default function LoanDetail() {
 
         const handleQuickPay = (amount: number, freq: "daily" | "weekly") => {
           if (!amount || dailyPending || weeklyPending || undoPending) return;
+          // ── Guard: same-date duplicate ──
+          if (loan.dateOfPartPayment === quickPayDate) {
+            toast({ variant: "destructive", title: "Already recorded", description: `A payment for ${quickPayDate} is already recorded. Change the date to add another.` });
+            return;
+          }
           // ── Guard: today's payment already recorded ──
           if (freq === "daily" && dailyAmt != null && loan.transactionDate) {
             const nowD = new Date(); nowD.setHours(0, 0, 0, 0);

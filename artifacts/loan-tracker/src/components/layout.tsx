@@ -10,7 +10,7 @@ import {
   Loader2,
   ClipboardList,
   CalendarClock,
-  MessageCircle,
+  Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -20,7 +20,7 @@ const staffNav = [
   { title: "Loans", href: "/loans", icon: CreditCard },
   { title: "EMI Loans", href: "/emi-loans", icon: CalendarClock },
   { title: "Loan Requests", href: "/loan-requests", icon: ClipboardList },
-  { title: "Reminders", href: "/reminders", icon: MessageCircle },
+  { title: "Recents", href: "/recents", icon: Clock },
 ];
 
 export function SharedLayout({ children }: { children: React.ReactNode }) {
@@ -81,23 +81,23 @@ export function SharedLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Mobile Topnav */}
-      <header className="flex h-16 items-center justify-between border-b bg-sidebar px-4 md:hidden">
+      <header className="flex h-14 items-center justify-between border-b bg-sidebar px-4 md:hidden">
         <Logo />
-        <Button variant="ghost" size="sm" className="gap-2" onClick={handleLogout}>
-          <LogOut className="h-5 w-5" />
-          <span className="text-sm font-medium">Sign Out</span>
+        <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={handleLogout}>
+          <LogOut className="h-4 w-4" />
+          Sign Out
         </Button>
       </header>
 
       {/* Mobile Nav Links — staff only */}
       {role === "staff" && (
-        <div className="md:hidden flex overflow-x-auto border-b bg-sidebar px-2 py-2 hide-scrollbar">
+        <div className="md:hidden flex overflow-x-auto border-b bg-sidebar px-1.5 py-1.5 hide-scrollbar gap-0.5">
           {staffNav.map((item) => (
             <Link
               key={item.href}
               href={item.href}
               className={cn(
-                "flex shrink-0 items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors mx-1",
+                "flex shrink-0 flex-col items-center gap-0.5 rounded-md px-2.5 py-1.5 text-[10px] font-medium transition-colors",
                 location.startsWith(item.href)
                   ? "bg-sidebar-primary text-sidebar-primary-foreground"
                   : "text-sidebar-foreground hover:bg-sidebar-accent",

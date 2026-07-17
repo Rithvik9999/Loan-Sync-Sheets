@@ -290,6 +290,11 @@ export default function EmiLoanDetail() {
     if (!loan || !loan.monthlyPayment) return;
     const amount = loan.dailyAmount ?? Math.round(loan.monthlyPayment / 30);
     const date = quickPayDate;
+    // Guard: reject duplicate entry for same date
+    if ((loan.paidDates ?? []).some((e) => e.startsWith(date + ":"))) {
+      toast({ variant: "destructive", title: "Already recorded", description: `A payment for ${date} is already in the history.` });
+      return;
+    }
     setDailyPending(true);
     try {
       const res = await fetch(`/api/emi-loans/${loan.id}/pay-partial`, {
@@ -322,6 +327,11 @@ export default function EmiLoanDetail() {
     if (!loan || !loan.monthlyPayment) return;
     const amount = loan.weeklyAmount ?? Math.round((loan.monthlyPayment * 7) / 30);
     const date = quickPayDate;
+    // Guard: reject duplicate entry for same date
+    if ((loan.paidDates ?? []).some((e) => e.startsWith(date + ":"))) {
+      toast({ variant: "destructive", title: "Already recorded", description: `A payment for ${date} is already in the history.` });
+      return;
+    }
     setWeeklyPending(true);
     try {
       const res = await fetch(`/api/emi-loans/${loan.id}/pay-partial`, {
@@ -458,7 +468,12 @@ export default function EmiLoanDetail() {
       return sum;
     }, 0);
   }
-  const monthlyTarget = loan.monthlyPayment ?? 0;
+  // For weekly EMI loans, monthly cycle = 4 weekly instalments (8/15/22/30 dates).
+  // Use weeklyAmount×4 so the bar shows correct fraction (e.g. 2 of 4 payments = 50%).
+  const monthlyTarget =
+    loan.weeklyAmount && loan.weeklyAmount > 0
+      ? loan.weeklyAmount * 4
+      : (loan.monthlyPayment ?? 0);
   const cycleProgress = monthlyTarget > 0 ? Math.min((cycleAccumulated / monthlyTarget) * 100, 100) : 0;
 
   const hasPayments = paymentHistory.length > 0;

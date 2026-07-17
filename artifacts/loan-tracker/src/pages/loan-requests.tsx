@@ -33,7 +33,9 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Loader2 } from "lucide-react";
 
 const statusColor: Record<string, string> = {
   Pending: "text-amber-600 border-amber-300 bg-amber-50",
@@ -59,9 +61,9 @@ function RequestRow({ req }: { req: LoanRequest }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const deleteReq = useDeleteLoanRequest();
-  const [deleteStep, setDeleteStep] = useState<0 | 1 | 2>(0);
 
-  const handleDelete = () => {
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
     deleteReq.mutate(
       { id: req.id },
       {
@@ -70,7 +72,6 @@ function RequestRow({ req }: { req: LoanRequest }) {
             queryKey: getListLoanRequestsQueryKey(),
           });
           toast({ title: "Request deleted" });
-          setDeleteStep(0);
         },
         onError: () => {
           toast({
@@ -137,60 +138,42 @@ function RequestRow({ req }: { req: LoanRequest }) {
               <ChevronRight className="ml-1 h-3.5 w-3.5" />
             </Link>
           </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="text-muted-foreground hover:text-destructive"
-            onClick={() => setDeleteStep(1)}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="text-muted-foreground hover:text-destructive"
+                disabled={deleteReq.isPending}
+              >
+                {deleteReq.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete this loan request?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently remove <strong>{req.name}</strong>'s request for{" "}
+                  {formatCurrency(req.amount)} from the sheet. This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleDelete}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Delete permanently
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
-
-      {/* Step 1 — first confirmation */}
-      <AlertDialog open={deleteStep === 1} onOpenChange={(o) => !o && setDeleteStep(0)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this loan request?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently remove <strong>{req.name}</strong>'s request for{" "}
-              {formatCurrency(req.amount)} from the sheet.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-amber-600 text-white hover:bg-amber-700"
-              onClick={() => setDeleteStep(2)}
-            >
-              Yes, continue →
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Step 2 — final destructive confirmation */}
-      <AlertDialog open={deleteStep === 2} onOpenChange={(o) => !o && setDeleteStep(0)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This action cannot be undone. The request will be permanently deleted.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDeleteStep(1)}>← Back</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={deleteReq.isPending}
-            >
-              {deleteReq.isPending ? "Deleting…" : "Delete permanently"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   );
 }
