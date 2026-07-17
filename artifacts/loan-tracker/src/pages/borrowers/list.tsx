@@ -280,7 +280,9 @@ export default function BorrowersList() {
         // admin always edits the same row that getBorrowerByPhone (login) finds.
         if (!existing.id) existing.id = b.id;
         existing.hasPin = b.hasPin ?? false;
-        existing.creditLimit = b.creditLimit ?? null;
+        // Prefer a non-null credit limit — null from a duplicate row must not
+        // overwrite a limit the admin has already set on another row.
+        existing.creditLimit = b.creditLimit ?? existing.creditLimit;
         existing.name = b.name.trim();
         if (b.phone) {
           existing.phone = b.phone;

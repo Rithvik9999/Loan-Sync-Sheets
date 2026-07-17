@@ -1266,16 +1266,15 @@ function buildRepaymentItems(
       if (!txDate || dailyAmt <= 0) continue;
 
       const daysElapsed = Math.max(differenceInCalendarDays(today, txDate), 0);
-      // periodsElapsed = all days elapsed (including yesterday). Today's payment
-      // is NOT counted as overdue — it is always shown as "due today" separately.
-      // A normal ₹dailyAmt payment is on-time (>= all elapsed periods paid at normal rate).
-      // Only the +2% rate payment clears an overdue day.
-      const periodsElapsed = daysElapsed;
+      // Today's payment is "due today", NOT yet overdue — exclude today from
+      // the overdue count so the portal matches the detail page's logic.
+      // periodsElapsedForOverdue = yesterday and before only.
+      const periodsElapsedForOverdue = Math.max(daysElapsed - 1, 0);
       const paidNormal = Math.floor((l.paid ?? 0) / dailyAmt);
-      const isOnTimeLoan = paidNormal >= periodsElapsed;
+      const isOnTimeLoan = paidNormal >= periodsElapsedForOverdue;
       const clearingAmtLoan = isOnTimeLoan ? dailyAmt : Math.ceil(dailyAmt * 1.02);
       const paidPeriods = Math.floor((l.paid ?? 0) / clearingAmtLoan);
-      const overdueDays = Math.max(periodsElapsed - paidPeriods, 0);
+      const overdueDays = Math.max(periodsElapsedForOverdue - paidPeriods, 0);
       const returnDate = l.returnDate ? new Date(l.returnDate + "T00:00:00Z") : null;
       const withinTenure = !returnDate || today <= returnDate;
 
@@ -1887,7 +1886,7 @@ function LoanCard({ loan }: { loan: Loan }) {
         <CardContent className="p-0">
           <div className="grid grid-cols-3 divide-x text-center">
             <div className="p-4 space-y-0.5">
-              <div className="text-xs text-amber-600 font-medium pt-[9px]">Total Due</div>
+              <div className="text-xs text-amber-600 font-medium">Total Due</div>
               <div className="text-lg font-bold font-numeric text-amber-700">
                 {loan.finalAmount != null
                   ? formatCurrency(loan.finalAmount)
@@ -3298,7 +3297,7 @@ export default function Portal() {
             <CardContent className="px-3 py-2 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Wallet className="h-4 w-4 text-muted-foreground shrink-0" />
-                <p className="text-xs text-muted-foreground leading-tight mt-0.5">Total Due</p>
+                <p className="text-xs text-muted-foreground leading-tight mt-[7px]">Total Due</p>
               </div>
               <div className="text-base font-bold font-numeric leading-none text-destructive">
                 {formatCurrency(totalOutstanding)}
