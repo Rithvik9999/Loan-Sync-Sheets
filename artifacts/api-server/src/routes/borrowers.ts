@@ -9,7 +9,7 @@ import {
 } from "@workspace/api-zod";
 import { attachRole, requireStaff } from "../middlewares/auth";
 import * as borrowersRepo from "../lib/repositories/borrowers";
-import { toPublic } from "../lib/repositories/borrowers";
+import { toPublic, updateBorrowerPin } from "../lib/repositories/borrowers";
 
 const router: IRouter = Router();
 
@@ -94,6 +94,31 @@ router.get("/borrowers/:id", async (req, res): Promise<void> => {
     return;
   }
   res.json(GetBorrowerResponse.parse(toPublic(borrower)));
+});
+
+/**
+ * Dedicated PIN-only update. Writes the new PIN to the row identified by `id`
+ * AND to every other Borrowers-tab row that shares the same phone — so login
+ * (which uses getBorrowerByPhone / first-match-by-phone) always sees the new PIN
+ * regardless of duplicate entries in the sheet.
+ */
+router.patch("/borrowers/:id/pin", async (req, res): Promise<void> => {
+  const params = UpdateBorrowerParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const { pin } = (req.body ?? {}) as Record<string, unknown>;
+  if (!isValidPin(pin)) {
+    res.status(400).json({ error: "PIN must be exactly 6 digits" });
+    return;
+  }
+  const borrower = await updateBorrowerPin(params.data.id, pin as string);
+  if (!borrower) {
+    res.status(404).json({ error: "Borrower not found" });
+    return;
+  }
+  res.json(UpdateBorrowerResponse.parse(toPublic(borrower)));
 });
 
 router.patch("/borrowers/:id", async (req, res): Promise<void> => {

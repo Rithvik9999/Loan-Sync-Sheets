@@ -1887,7 +1887,7 @@ function LoanCard({ loan }: { loan: Loan }) {
         <CardContent className="p-0">
           <div className="grid grid-cols-3 divide-x text-center">
             <div className="p-4 space-y-0.5">
-              <div className="text-xs text-amber-600 font-medium pt-[4px]">Total Due</div>
+              <div className="text-xs text-amber-600 font-medium pt-[9px]">Total Due</div>
               <div className="text-lg font-bold font-numeric text-amber-700">
                 {loan.finalAmount != null
                   ? formatCurrency(loan.finalAmount)

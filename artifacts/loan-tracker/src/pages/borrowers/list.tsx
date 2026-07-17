@@ -61,7 +61,9 @@ function ChangePinDialog({
     }
     setIsPending(true);
     try {
-      const res = await fetch(`/api/borrowers/${borrowerId}`, {
+      // Dedicated /pin endpoint syncs the PIN to every row sharing the same
+      // phone, so login (which uses first-match-by-phone) always sees the new PIN.
+      const res = await fetch(`/api/borrowers/${borrowerId}/pin`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -274,7 +276,9 @@ export default function BorrowersList() {
     for (const b of borrowers ?? []) {
       const existing = findExisting(b.phone ?? "", b.name);
       if (existing) {
-        existing.id = b.id;
+        // First-wins for ID: use the first Borrowers-tab record's ID so the
+        // admin always edits the same row that getBorrowerByPhone (login) finds.
+        if (!existing.id) existing.id = b.id;
         existing.hasPin = b.hasPin ?? false;
         existing.creditLimit = b.creditLimit ?? null;
         existing.name = b.name.trim();

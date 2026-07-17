@@ -100,6 +100,44 @@ export async function createBorrower(
   return borrower;
 }
 
+/**
+ * Updates the PIN for a borrower identified by `id`, and also syncs the new PIN
+ * to every other Borrowers-tab row that shares the same phone number.
+ * This prevents a mismatch when the sheet has duplicate entries for the same
+ * borrower — login uses `getBorrowerByPhone` (first match by phone), while the
+ * admin list uses the last matching ID, so without this sync the admin might
+ * update a different row than the one login reads.
+ */
+export async function updateBorrowerPin(
+  id: string,
+  pin: string,
+): Promise<Borrower | null> {
+  const { rows, rowNumbers } = await readTab(TAB, HEADERS);
+  const primaryIdx = rows.findIndex((r) => r.id === id);
+  if (primaryIdx === -1) return null;
+
+  const primary = fromRow(rows[primaryIdx]);
+  const targetPhone = primary.phone ? normalizePhone(primary.phone) : null;
+
+  // Update the primary row AND any other rows with the same phone so that
+  // whichever row `getBorrowerByPhone` finds will have the new PIN.
+  const updates: Promise<void>[] = [];
+  rows.forEach((row, i) => {
+    const sameId = row.id === id;
+    const samePhone =
+      targetPhone !== null &&
+      targetPhone !== "" &&
+      normalizePhone(row.phone ?? "") === targetPhone;
+    if (sameId || samePhone) {
+      const updated: Borrower = { ...fromRow(row), pin };
+      updates.push(updateRowAt(TAB, rowNumbers[i], HEADERS, toRow(updated)));
+    }
+  });
+
+  await Promise.all(updates);
+  return { ...primary, pin };
+}
+
 export async function updateBorrower(
   id: string,
   patch: Partial<BorrowerInput>,
