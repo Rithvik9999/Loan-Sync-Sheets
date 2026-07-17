@@ -93,10 +93,6 @@ export default function Recents() {
               <CardContent className="p-0">
                 <div className="divide-y">
                   {recentLoans.map((loan) => {
-                    const daysAgo = differenceInCalendarDays(
-                      today,
-                      new Date(loan.transactionDate + "T00:00:00Z"),
-                    );
                     const outstanding = Math.max((loan.finalAmount ?? 0) - (loan.paid ?? 0), 0);
                     return (
                       <div
@@ -120,10 +116,12 @@ export default function Recents() {
                             <span className="font-numeric font-medium">{formatCurrency(loan.principal)}</span>
                             <span>·</span>
                             <span>{formatDate(loan.transactionDate)}</span>
-                            <span>·</span>
-                            <span className="text-xs">
-                              {daysAgo === 0 ? "Today" : `${daysAgo}d ago`}
-                            </span>
+                            {loan.returnDate && (
+                              <>
+                                <span>→</span>
+                                <span>{formatDate(loan.returnDate)}</span>
+                              </>
+                            )}
                           </div>
                           {outstanding > 0 && loan.status !== "Clear" && (
                             <p className="text-xs text-destructive mt-0.5 font-numeric">

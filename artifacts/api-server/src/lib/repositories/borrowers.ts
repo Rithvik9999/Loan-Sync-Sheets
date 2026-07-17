@@ -111,7 +111,7 @@ export async function updateBorrower(
     ...fromRow(rows[idx]),
     ...(patch.name !== undefined ? { name: patch.name } : {}),
     ...(patch.phone !== undefined ? { phone: patch.phone ?? "" } : {}),
-    ...(patch.pin ? { pin: patch.pin } : {}),
+    ...(patch.pin !== undefined ? { pin: patch.pin ?? "" } : {}),
     ...(patch.creditLimit !== undefined ? { creditLimit: patch.creditLimit ?? null } : {}),
   };
   await updateRowAt(TAB, rowNumbers[idx], HEADERS, toRow(updated));

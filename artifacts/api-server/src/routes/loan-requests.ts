@@ -173,22 +173,22 @@ router.post(
 
     const { discount, transactionDate, notes } = parsed.data;
     const principal = loanRequest.amount;
-    const finalPaid = Math.max(0, principal - discount);
 
-    // Create the loan row in the Heat Map sheet with Clear status
+    // Create the loan row in the Heat Map sheet with Pending status.
+    // The borrower still owes this loan — marking the request as "paid" means
+    // the cash was disbursed, NOT that the borrower has repaid it.
+    // discount is stored as a negative discountOrCharges so the sheet formula
+    // (principal + fees + interest + discountOrCharges) computes the correct final amount.
     const loan = await loansRepo.createLoan({
       name: loanRequest.name,
       transactionDate: transactionDate ?? new Date().toISOString().slice(0, 10),
       principal,
       tenureDays: loanRequest.tenureDays > 0 ? loanRequest.tenureDays : 30,
       whatsapp: loanRequest.phone,
-      status: "Clear",
+      status: "Pending",
       discountOrCharges: discount > 0 ? -discount : 0,
       notes: notes ?? loanRequest.purpose ?? undefined,
     });
-
-    // Set the paid amount (separate update since createLoan doesn't accept paid)
-    await loansRepo.updateLoan(loan.id, { paid: finalPaid });
 
     // Mark the request as Approved
     await loanRequestsRepo.updateLoanRequestStatus(loanRequest.id, "Approved");

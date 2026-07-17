@@ -106,7 +106,9 @@ async function readTabWithIds(): Promise<{ rows: Record<string, string>[]; rowNu
 
 export async function listLoanRequests(): Promise<LoanRequest[]> {
   const { rows } = await readTabWithIds();
-  return rows.map((row) => fromRow(row));
+  return rows
+    .map((row) => fromRow(row))
+    .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
 }
 
 export async function createLoanRequest(

@@ -517,12 +517,56 @@ export default function LoanRequestDetail() {
         </Card>
       )}
 
-      {/* Already processed */}
+      {/* Result details — shown for already-processed requests */}
       {!isPending && (
-        <div className="text-center py-4 text-sm text-muted-foreground">
-          This request has already been{" "}
-          {req.status === "Approved" ? "approved" : "declined"}.
-        </div>
+        <Card className="shadow-sm border-border/60">
+          <CardContent className="pt-4 pb-4 space-y-3">
+            <div className="flex items-center gap-2">
+              {req.status === "Approved" ? (
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+              ) : (
+                <XCircle className="h-4 w-4 text-destructive shrink-0" />
+              )}
+              <span className="text-sm font-medium">
+                {req.status === "Approved"
+                  ? "Approved — loan disbursed and recorded in the sheet."
+                  : "This request was declined."}
+              </span>
+            </div>
+            {req.status === "Approved" && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 space-y-2">
+                <p className="text-xs font-semibold text-emerald-900">Loan summary</p>
+                <div className="flex justify-between text-xs">
+                  <span className="text-emerald-700">Principal</span>
+                  <span className="font-numeric font-semibold">{formatCurrency(principal)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-emerald-700">Tenure</span>
+                  <span className="font-semibold">{tenureLabel}</span>
+                </div>
+                {!isEmi && tenureDays > 0 && (
+                  <>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-emerald-700">Est. flat fee</span>
+                      <span className="font-numeric">+ {formatCurrency(estimatedFlatFee)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-emerald-700">Est. interest</span>
+                      <span className="font-numeric">+ {formatCurrency(estimatedInterest)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs border-t border-emerald-200 pt-1.5">
+                      <span className="text-emerald-700 font-semibold">Est. total to repay</span>
+                      <span className="font-bold font-numeric">{formatCurrency(estimatedFinalAmount)}</span>
+                    </div>
+                  </>
+                )}
+                <p className="text-[10px] text-emerald-600">
+                  See the Loans page for the exact final amount after sheet formula recalculation. Any discount applied at approval is reflected there.
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
     </div>
   );

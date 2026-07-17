@@ -1849,7 +1849,7 @@ function LoanCard({ loan }: { loan: Loan }) {
   return (
     <>
       <Card className="overflow-hidden shadow-sm border-border/60">
-        <div className="bg-primary/5 px-4 py-3 border-b flex justify-between items-center gap-2 flex-wrap">
+        <div className="bg-primary/5 px-4 py-3 border-b">
           <div>
             <h2 className="text-base font-semibold flex items-center gap-2 flex-wrap">
               {formatCurrency(loan.principal)} Loan
@@ -1865,26 +1865,10 @@ function LoanCard({ loan }: { loan: Loan }) {
               {formatDate(loan.transactionDate)} · {loan.tenureDays}d
             </p>
           </div>
-          <div className="flex gap-2">
-            {loan.status !== "Clear" && (
-              <Button
-                size="sm"
-                className="bg-emerald-700 hover:bg-emerald-800 text-white"
-                onClick={() => setRepayOpen(true)}
-              >
-                <Banknote className="mr-1.5 h-3.5 w-3.5" />
-                Repay
-              </Button>
-            )}
-            <Button variant="outline" size="sm" asChild>
-              <Link href={`/loans/${loan.id}`}>
-                Details <ChevronRight className="ml-1 h-4 w-4" />
-              </Link>
-            </Button>
           </div>
-        </div>
         <CardContent className="p-0">
-          <div className="grid grid-cols-3 divide-x text-center">
+          <div className="flex">
+          <div className="flex-1 grid grid-cols-3 divide-x text-center">
             <div className="p-4 space-y-0.5">
               <div className="text-xs text-amber-600 font-medium">Total Due</div>
               <div className="text-lg font-bold font-numeric text-amber-700">
@@ -1915,6 +1899,25 @@ function LoanCard({ loan }: { loan: Loan }) {
                 </div>
               )}
             </div>
+          </div>
+          {/* Action buttons — stacked vertically with 5px gap on the right */}
+          <div className="flex flex-col justify-center gap-[5px] px-3 border-l shrink-0">
+            {loan.status !== "Clear" && (
+              <Button
+                size="sm"
+                className="bg-emerald-700 hover:bg-emerald-800 text-white"
+                onClick={() => setRepayOpen(true)}
+              >
+                <Banknote className="mr-1.5 h-3.5 w-3.5" />
+                Repay
+              </Button>
+            )}
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/loans/${loan.id}`}>
+                Details <ChevronRight className="ml-1 h-4 w-4" />
+              </Link>
+            </Button>
+          </div>
           </div>
         </CardContent>
       </Card>
@@ -2004,7 +2007,7 @@ function RequestDetailDialog({
               <span className="text-sm">{formatDate(request.createdAt)}</span>
             </div>
           )}
-          {/* Approval details */}
+          {/* Approval details — regular loan */}
           {request.status === "Approved" && !isEmi && request.tenureDays > 0 && (() => {
             const est = estimateFinalAmount({ principal: request.amount, tenureDays: request.tenureDays });
             return (
@@ -2022,7 +2025,29 @@ function RequestDetailDialog({
                   <span className="text-emerald-700 font-semibold">Total to repay (est.)</span>
                   <span className="font-bold font-numeric text-emerald-900">{formatCurrency(est.finalAmount)}</span>
                 </div>
-                <p className="text-[10px] text-emerald-600">Estimate only — admin will confirm the exact amount and repayment date when disbursed.</p>
+                <p className="text-[10px] text-emerald-600">Estimate only — admin will confirm the exact amount and any discount when disbursed.</p>
+              </div>
+            );
+          })()}
+          {/* Approval details — EMI loan */}
+          {request.status === "Approved" && isEmi && request.tenureMonths && request.tenureMonths > 0 && (() => {
+            const estMonthly = Math.round(request.amount / request.tenureMonths);
+            return (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 p-3 space-y-2 mt-1">
+                <p className="text-xs font-semibold text-emerald-900 dark:text-emerald-300">Estimated EMI details</p>
+                <div className="flex justify-between text-xs">
+                  <span className="text-emerald-700">Principal</span>
+                  <span className="font-semibold font-numeric">{formatCurrency(request.amount)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-emerald-700">Tenure</span>
+                  <span className="font-semibold">{request.tenureMonths} months</span>
+                </div>
+                <div className="flex justify-between text-xs border-t border-emerald-200 pt-1.5">
+                  <span className="text-emerald-700 font-semibold">Monthly payment (est.)</span>
+                  <span className="font-bold font-numeric text-emerald-900">≈ {formatCurrency(estMonthly)}</span>
+                </div>
+                <p className="text-[10px] text-emerald-600">Estimate only — admin will confirm the exact monthly amount and fees when disbursed.</p>
               </div>
             );
           })()}
