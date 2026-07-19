@@ -75,13 +75,15 @@ export interface EmiLoan {
   dailyAmount?: number | null;
   /** Custom weekly instalment override stored in sheet column V. null = use monthlyPayment × 7 ÷ 30. */
   weeklyAmount?: number | null;
+  /** Custom bimonthly instalment override stored in sheet column W. null = use monthlyPayment ÷ 2. */
+  bimonthlyAmount?: number | null;
 }
 
 const emiLoanSchema = z.object({
   name: z.string().min(1, "Borrower name is required"),
   transactionDate: z.string().min(1, "Transaction date is required"),
   principal: z.coerce.number().min(0.01, "Principal must be greater than 0"),
-  tenureMonths: z.coerce.number().int().min(1, "Tenure must be at least 1 month"),
+  tenureMonths: z.coerce.number().min(0.1, "Tenure must be greater than 0"),
   whatsapp: z.string().optional(),
   discountPerMonth: z.coerce.number().optional(),
   statusNotes: z.string().optional(),
@@ -89,6 +91,7 @@ const emiLoanSchema = z.object({
   status: z.enum(["Pending", "Clear", "Temp"]).optional(),
   customDailyAmount: z.coerce.number().min(0).optional(),
   customWeeklyAmount: z.coerce.number().min(0).optional(),
+  customBimonthlyAmount: z.coerce.number().min(0).optional(),
 });
 
 /** Extract custom pay-daily / pay-weekly amounts from a notes string (used by regular Loans, not EMI). */
@@ -120,7 +123,7 @@ async function fetchEmiLoans(): Promise<EmiLoan[]> {
   return res.json();
 }
 
-async function createEmiLoan(data: EmiLoanFormValues & { dailyAmount?: number | null; weeklyAmount?: number | null }): Promise<EmiLoan> {
+async function createEmiLoan(data: EmiLoanFormValues & { dailyAmount?: number | null; weeklyAmount?: number | null; bimonthlyAmount?: number | null }): Promise<EmiLoan> {
   const res = await fetch("/api/emi-loans", {
     method: "POST",
     credentials: "include",
@@ -137,6 +140,7 @@ async function createEmiLoan(data: EmiLoanFormValues & { dailyAmount?: number | 
       notes: data.notes || null,
       dailyAmount: data.dailyAmount ?? null,
       weeklyAmount: data.weeklyAmount ?? null,
+      bimonthlyAmount: data.bimonthlyAmount ?? null,
     }),
   });
   if (!res.ok) {
@@ -146,7 +150,7 @@ async function createEmiLoan(data: EmiLoanFormValues & { dailyAmount?: number | 
   return res.json();
 }
 
-async function updateEmiLoan(id: string, data: Partial<EmiLoanFormValues> & { dailyAmount?: number | null; weeklyAmount?: number | null }): Promise<EmiLoan> {
+async function updateEmiLoan(id: string, data: Partial<EmiLoanFormValues> & { dailyAmount?: number | null; weeklyAmount?: number | null; bimonthlyAmount?: number | null }): Promise<EmiLoan> {
   const res = await fetch(`/api/emi-loans/${id}`, {
     method: "PATCH",
     credentials: "include",
@@ -163,6 +167,7 @@ async function updateEmiLoan(id: string, data: Partial<EmiLoanFormValues> & { da
       notes: data.notes || null,
       dailyAmount: data.dailyAmount ?? null,
       weeklyAmount: data.weeklyAmount ?? null,
+      bimonthlyAmount: data.bimonthlyAmount ?? null,
     }),
   });
   if (!res.ok) {
@@ -239,9 +244,10 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
     statusNotes: loan?.statusNotes || "",
     notes: loan?.notes || "",
     status: loan?.status || "Pending",
-    // Use dedicated sheet columns U/V when editing; undefined = let sheet/UI compute default
+    // Use dedicated sheet columns U/V/W when editing; undefined = let sheet/UI compute default
     customDailyAmount: loan?.dailyAmount ?? undefined,
     customWeeklyAmount: loan?.weeklyAmount ?? undefined,
+    customBimonthlyAmount: loan?.bimonthlyAmount ?? undefined,
   });
 
   const form = useForm<EmiLoanFormValues>({
@@ -256,6 +262,7 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
       ...data,
       dailyAmount: data.customDailyAmount && data.customDailyAmount > 0 ? Math.round(data.customDailyAmount) : null,
       weeklyAmount: data.customWeeklyAmount && data.customWeeklyAmount > 0 ? Math.round(data.customWeeklyAmount) : null,
+      bimonthlyAmount: data.customBimonthlyAmount && data.customBimonthlyAmount > 0 ? Math.round(data.customBimonthlyAmount) : null,
     };
     try {
       if (isEditing) {
@@ -426,7 +433,7 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
                   <FormItem>
                     <FormLabel>Tenure (Months)</FormLabel>
                     <FormControl>
-                      <Input type="number" step="1" min="1" placeholder="12" {...field} />
+                      <Input type="number" step="any" min="0.1" placeholder="12" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -479,15 +486,15 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
               )}
             />
 
-            {/* Custom daily / weekly payment amounts */}
+            {/* Custom daily / weekly / bimonthly payment amounts */}
             <div className="rounded-lg border border-sky-200 bg-sky-50/60 dark:bg-sky-950/20 dark:border-sky-800 p-4 space-y-3">
               <p className="text-xs font-semibold text-sky-800 dark:text-sky-300 uppercase tracking-wide">
-                Daily / Weekly Quick-Pay Amounts
+                Daily / Weekly / Bimonthly Quick-Pay Amounts
               </p>
               <p className="text-xs text-sky-700 dark:text-sky-400">
-                Override the auto-computed amounts (monthly ÷ 30 / × 7 ÷ 30) for the one-click daily and weekly payment buttons on the detail page.
+                Override the auto-computed amounts for the one-click daily, weekly, and bimonthly payment buttons on the detail page.
               </p>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <FormField
                   control={form.control}
                   name="customDailyAmount"
@@ -528,6 +535,31 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
                             form.watch("principal") && form.watch("tenureMonths")
                               ? String(Math.round(((Number(form.watch("principal")) * 0.02 + Number(form.watch("principal")) / Number(form.watch("tenureMonths"))) / 30) * 7))
                               : "e.g. 1750"
+                          }
+                          {...field}
+                          value={field.value ?? ""}
+                          onChange={(e) => field.onChange(e.target.value === "" ? undefined : e.target.value)}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="customBimonthlyAmount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Bimonthly Amount (₹)</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          step="1"
+                          min="0"
+                          placeholder={
+                            form.watch("principal") && form.watch("tenureMonths")
+                              ? String(Math.round((Number(form.watch("principal")) * 0.02 + Number(form.watch("principal")) / Number(form.watch("tenureMonths"))) / 2))
+                              : "e.g. 3750"
                           }
                           {...field}
                           value={field.value ?? ""}

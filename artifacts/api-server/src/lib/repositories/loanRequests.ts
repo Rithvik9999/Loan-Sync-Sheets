@@ -132,6 +132,7 @@ export async function createLoanRequest(
     upiId: input.upiId ?? null,
     status: "Pending",
     createdAt: new Date().toISOString(),
+    discount: 0,
   };
   await appendRow(TAB, HEADERS, toRow(request));
   return request;

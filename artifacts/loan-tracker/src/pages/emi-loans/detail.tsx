@@ -102,18 +102,20 @@ function parsePaidEntry(entry: string, index: number): ParsedEntry {
     date,
     amount: amount === null || isNaN(amount) ? null : amount,
     type,
-    completedMonth: type === "M" || type === "DM" || type === "WM",
+    completedMonth: type === "M" || type === "DM" || type === "WM" || type === "BMM",
   };
 }
 
 function entryTypeLabel(type: string): { label: string; color: string } {
   switch (type) {
-    case "M":  return { label: "Monthly",       color: "text-emerald-700" };
-    case "D":  return { label: "Daily",          color: "text-sky-700"    };
-    case "W":  return { label: "Weekly",         color: "text-violet-700" };
-    case "DM": return { label: "Daily ✓ Month",  color: "text-emerald-700" };
-    case "WM": return { label: "Weekly ✓ Month", color: "text-emerald-700" };
-    default:   return { label: "Payment",        color: "text-emerald-700" };
+    case "M":   return { label: "Monthly",          color: "text-emerald-700" };
+    case "D":   return { label: "Daily",             color: "text-sky-700"    };
+    case "W":   return { label: "Weekly",            color: "text-violet-700" };
+    case "BM":  return { label: "Bimonthly",         color: "text-indigo-700" };
+    case "DM":  return { label: "Daily ✓ Month",     color: "text-emerald-700" };
+    case "WM":  return { label: "Weekly ✓ Month",    color: "text-emerald-700" };
+    case "BMM": return { label: "Bimonthly ✓ Month", color: "text-emerald-700" };
+    default:    return { label: "Payment",           color: "text-emerald-700" };
   }
 }
 
@@ -270,6 +272,7 @@ export default function EmiLoanDetail() {
   const [undoPending, setUndoPending] = useState(false);
   const [dailyPending, setDailyPending] = useState(false);
   const [weeklyPending, setWeeklyPending] = useState(false);
+  const [bimonthlyPending, setBimonthlyPending] = useState(false);
   const [quickPayDate, setQuickPayDate] = useState(format(new Date(), "yyyy-MM-dd"));
 
   const { data: loan, isLoading } = useQuery<EmiLoan>({
@@ -319,6 +322,41 @@ export default function EmiLoanDetail() {
       toast({ variant: "destructive", title: "Error", description: err instanceof Error ? err.message : "Something went wrong." });
     } finally {
       setDailyPending(false);
+    }
+  };
+
+  /** One-click: record bimonthly instalment — uses dedicated sheet column W if set, else monthlyPayment ÷ 2 */
+  const handleBimonthlyPayment = async () => {
+    if (!loan || !loan.monthlyPayment) return;
+    const amount = loan.bimonthlyAmount ?? Math.round(loan.monthlyPayment / 2);
+    const date = quickPayDate;
+    if ((loan.paidDates ?? []).some((e) => e.startsWith(date + ":"))) {
+      toast({ variant: "destructive", title: "Already recorded", description: `A payment for ${date} is already in the history.` });
+      return;
+    }
+    setBimonthlyPending(true);
+    try {
+      const res = await fetch(`/api/emi-loans/${loan.id}/pay-partial`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, amount, frequency: "BM" }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed");
+      const updated: EmiLoan = await res.json();
+      refreshLoan();
+      const lastEntry = updated.paidDates?.at(-1) ?? "";
+      const completed = lastEntry.endsWith(":BMM");
+      toast({
+        title: completed ? "Bimonthly payment — Month completed! 🎉" : "Bimonthly payment recorded",
+        description: completed
+          ? `₹${amount.toLocaleString("en-IN")} received. Accumulated total met the monthly target — remaining months decremented.`
+          : `₹${amount.toLocaleString("en-IN")} recorded for ${date}.`,
+      });
+    } catch (err) {
+      toast({ variant: "destructive", title: "Error", description: err instanceof Error ? err.message : "Something went wrong." });
+    } finally {
+      setBimonthlyPending(false);
     }
   };
 
@@ -412,10 +450,11 @@ export default function EmiLoanDetail() {
       ? Math.round(loan.lateFees / (loan.lateDays ?? 1))
       : null;
 
-  // Computed quick-pay amounts — prefer dedicated sheet columns U/V, fall back to formula
+  // Computed quick-pay amounts — prefer dedicated sheet columns U/V/W, fall back to formula
   const dailyAmount = loan.dailyAmount ?? (loan.monthlyPayment != null ? Math.round(loan.monthlyPayment / 30) : null);
   const weeklyAmount = loan.weeklyAmount ?? (loan.monthlyPayment != null ? Math.round((loan.monthlyPayment * 7) / 30) : null);
-  const hasCustomAmounts = !!(loan.dailyAmount || loan.weeklyAmount);
+  const bimonthlyAmount = loan.bimonthlyAmount ?? (loan.monthlyPayment != null ? Math.round(loan.monthlyPayment / 2) : null);
+  const hasCustomAmounts = !!(loan.dailyAmount || loan.weeklyAmount || loan.bimonthlyAmount);
   // Weekly-only loan: has a weeklyAmount column set OR notes/whatsapp says "pay weekly".
   // For these loans we hide the Daily quick-pay button and daily-equivalent text.
   const isWeeklyLoan = !!(
@@ -473,16 +512,19 @@ export default function EmiLoanDetail() {
     const currentMonthStart = `${nowForCycle.getFullYear()}-${String(nowForCycle.getMonth() + 1).padStart(2, "0")}-01`;
     if (cycleStartDate < currentMonthStart) cycleStartDate = currentMonthStart;
     cycleAccumulated = parsedAll.reduce((sum, e) => {
-      if ((e.type === "D" || e.type === "W") && e.date > cycleStartDate) return sum + (e.amount ?? 0);
+      if ((e.type === "D" || e.type === "W" || e.type === "BM") && e.date > cycleStartDate) return sum + (e.amount ?? 0);
       return sum;
     }, 0);
   }
-  // For weekly EMI loans, monthly cycle = 4 weekly instalments (8/15/22/30 dates).
-  // Use weeklyAmount×4 so the bar shows correct fraction (e.g. 2 of 4 payments = 50%).
+  // For weekly EMI loans, monthly cycle = 4 weekly instalments.
+  // For bimonthly EMI loans, monthly cycle = 2 bimonthly instalments.
+  // Use the appropriate multiplier so the bar shows correct fraction.
   const monthlyTarget =
-    loan.weeklyAmount && loan.weeklyAmount > 0
-      ? loan.weeklyAmount * 4
-      : (loan.monthlyPayment ?? 0);
+    loan.bimonthlyAmount && loan.bimonthlyAmount > 0
+      ? loan.bimonthlyAmount * 2
+      : loan.weeklyAmount && loan.weeklyAmount > 0
+        ? loan.weeklyAmount * 4
+        : (loan.monthlyPayment ?? 0);
   const cycleProgress = monthlyTarget > 0 ? Math.min((cycleAccumulated / monthlyTarget) * 100, 100) : 0;
 
   const hasPayments = paymentHistory.length > 0;
@@ -537,6 +579,19 @@ export default function EmiLoanDetail() {
                       ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       : <CalendarRange className="h-3.5 w-3.5" />}
                     Weekly {weeklyAmount != null && <span className="font-numeric font-semibold">₹{weeklyAmount.toLocaleString("en-IN")}</span>}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-indigo-500 text-indigo-700 hover:bg-indigo-50 gap-1.5"
+                    onClick={handleBimonthlyPayment}
+                    disabled={bimonthlyPending}
+                    title={`Record bimonthly instalment (₹${bimonthlyAmount?.toLocaleString("en-IN")}${hasCustomAmounts ? " — custom amount" : " = monthly ÷ 2"})`}
+                  >
+                    {bimonthlyPending
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : <CalendarRange className="h-3.5 w-3.5" />}
+                    Bimonthly {bimonthlyAmount != null && <span className="font-numeric font-semibold">₹{bimonthlyAmount.toLocaleString("en-IN")}</span>}
                   </Button>
                   {/* Date picker for quick-pay */}
                   <input

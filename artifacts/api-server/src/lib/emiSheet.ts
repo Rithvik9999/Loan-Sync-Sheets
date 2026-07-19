@@ -44,7 +44,7 @@ import {
 
 const TAB = "Heat Map";
 const DATA_START_ROW = 6; // Row 6 is the first real data row (also has array formulas)
-const LAST_COL = "V";     // Column V = index 21
+const LAST_COL = "W";     // Column W = index 22
 
 const COL = {
   ID: 0,
@@ -69,6 +69,7 @@ const COL = {
   PAID_DATES: 19,
   DAILY_AMOUNT: 20,
   WEEKLY_AMOUNT: 21,
+  BIMONTHLY_AMOUNT: 22,
 } as const;
 
 export type EmiLoanStatus = "Pending" | "Clear";
@@ -108,6 +109,8 @@ export interface EmiLoanRow {
   dailyAmount: number | null;
   /** Optional custom weekly instalment override. When null, UI falls back to monthlyPayment × 7 ÷ 30. */
   weeklyAmount: number | null;
+  /** Optional custom bimonthly (twice-a-month) instalment override. When null, UI falls back to monthlyPayment ÷ 2. */
+  bimonthlyAmount: number | null;
 }
 
 export interface EmiLoanInput {
@@ -122,6 +125,8 @@ export interface EmiLoanInput {
   notes?: string | null;
   /** Override initial nextPaymentDate (defaults to transactionDate + 1 month). */
   nextPaymentDate?: string | null;
+  /** Optional custom bimonthly instalment override. */
+  bimonthlyAmount?: number | null;
 }
 
 export interface EmiLoanUpdate {
@@ -142,6 +147,8 @@ export interface EmiLoanUpdate {
   dailyAmount?: number | null;
   /** Optional custom weekly instalment override. null clears it (falls back to monthlyPayment × 7 ÷ 30). */
   weeklyAmount?: number | null;
+  /** Optional custom bimonthly instalment override. null clears it (falls back to monthlyPayment ÷ 2). */
+  bimonthlyAmount?: number | null;
 }
 
 function colLetter(idx: number): string {
@@ -259,23 +266,23 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
   let effectiveRemaining = remainingMonths;
   const paidDatesRaw = toText(get(COL.PAID_DATES)).split("|").map(s => s.trim()).filter(Boolean);
   if (effectiveRemaining !== null && monthlyPayVal !== null && monthlyPayVal > 0) {
-    // Locate cycle start: date of last month-completing entry (M / DM / WM)
+    // Locate cycle start: date of last month-completing entry (M / DM / WM / BMM)
     let cycleStartDate = "";
     for (let i = paidDatesRaw.length - 1; i >= 0; i--) {
       const parts = paidDatesRaw[i].split(":");
       const type = parts[2] ?? "M";
-      if (type === "M" || type === "DM" || type === "WM") {
+      if (type === "M" || type === "DM" || type === "WM" || type === "BMM") {
         cycleStartDate = parts[0] ?? "";
         break;
       }
     }
-    // Sum D/W amounts after cycle start
+    // Sum D/W/BM amounts after cycle start
     const cycleAccumulated = paidDatesRaw.reduce((sum, e) => {
       const parts = e.split(":");
       const eDate = parts[0] ?? "";
       const amt = parseFloat(parts[1] ?? "0") || 0;
       const type = parts[2] ?? "M";
-      if ((type === "D" || type === "W") && eDate > cycleStartDate) return sum + amt;
+      if ((type === "D" || type === "W" || type === "BM") && eDate > cycleStartDate) return sum + amt;
       return sum;
     }, 0);
     const extraMonths = Math.floor(cycleAccumulated / monthlyPayVal);
@@ -354,6 +361,7 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
       .filter(Boolean),
     dailyAmount: dailyAmountVal,
     weeklyAmount: weeklyAmountVal,
+    bimonthlyAmount: toNumberOrNull(get(COL.BIMONTHLY_AMOUNT)),
   };
 }
 
@@ -490,6 +498,7 @@ function emiInputCellUpdates(
   // Custom quick-pay override amounts (null = clear back to computed default)
   if (input.dailyAmount !== undefined) set(COL.DAILY_AMOUNT, input.dailyAmount ?? "");
   if (input.weeklyAmount !== undefined) set(COL.WEEKLY_AMOUNT, input.weeklyAmount ?? "");
+  if (input.bimonthlyAmount !== undefined) set(COL.BIMONTHLY_AMOUNT, input.bimonthlyAmount ?? "");
 
   // Server-managed tracking columns
   if (input.nextPaymentDate !== undefined) {
@@ -543,14 +552,16 @@ export async function updateEmiLoanRow(
 
 // ─── paidDates entry format ────────────────────────────────────────────────────
 // Each entry: "YYYY-MM-DD:amount:type"
-//   type = "M"  → monthly full payment (decrements remainingMonths)
-//   type = "D"  → daily partial (no decrement)
-//   type = "W"  → weekly partial (no decrement)
-//   type = "DM" → daily partial that completed the month (decrements)
-//   type = "WM" → weekly partial that completed the month (decrements)
+//   type = "M"   → monthly full payment (decrements remainingMonths)
+//   type = "D"   → daily partial (no decrement)
+//   type = "W"   → weekly partial (no decrement)
+//   type = "BM"  → bimonthly partial (no decrement)
+//   type = "DM"  → daily partial that completed the month (decrements)
+//   type = "WM"  → weekly partial that completed the month (decrements)
+//   type = "BMM" → bimonthly partial that completed the month (decrements)
 //   (no type / legacy) → treated as "M" for backward compat
 //
-// Undo rule: if type contains "M" (i.e. "M", "DM", "WM") → also restore +1 month.
+// Undo rule: if type contains "M" (i.e. "M", "DM", "WM", "BMM") → also restore +1 month.
 
 function parsePaidEntry(entry: string): { date: string; amount: number | null; type: string } {
   const parts = entry.split(":");
@@ -645,7 +656,7 @@ export async function recordPartialEmiPayment(
   id: string,
   date: string,
   amount: number,
-  frequency: "D" | "W",
+  frequency: "D" | "W" | "BM",
 ): Promise<EmiLoanRow | null> {
   const existing = await getEmiLoanRow(id);
   if (!existing) return null;
@@ -654,20 +665,20 @@ export async function recordPartialEmiPayment(
   const sheetId = getEmiSpreadsheetId();
   const rowNumber = existing.rowNumber;
 
-  // Find cycle start date: date of last M / DM / WM entry (or transactionDate)
+  // Find cycle start date: date of last M / DM / WM / BMM entry (or transactionDate)
   let cycleStartDate = existing.transactionDate ?? "1970-01-01";
   for (let i = existing.paidDates.length - 1; i >= 0; i--) {
     const { date: d, type } = parsePaidEntry(existing.paidDates[i]);
-    if (type === "M" || type === "DM" || type === "WM") {
+    if (type === "M" || type === "DM" || type === "WM" || type === "BMM") {
       cycleStartDate = d;
       break;
     }
   }
 
-  // Accumulate partial payments in current cycle (D/W entries after cycle start)
+  // Accumulate partial payments in current cycle (D/W/BM entries after cycle start)
   const accumulated = existing.paidDates.reduce((sum, e) => {
     const { date: d, amount: a, type } = parsePaidEntry(e);
-    if ((type === "D" || type === "W") && d > cycleStartDate) {
+    if ((type === "D" || type === "W" || type === "BM") && d > cycleStartDate) {
       return sum + (a ?? 0);
     }
     return sum;
@@ -677,13 +688,20 @@ export async function recordPartialEmiPayment(
   const monthlyTarget = existing.monthlyPayment ?? 0;
   const currentRemaining = existing.remainingMonths ?? existing.tenureMonths;
 
+  // For the final partial cycle (remainingMonths < 1) scale the target proportionally.
+  // e.g. a 1.5-month loan: after 1 full month, remaining = 0.5 and the
+  // cycle closes when accumulated ≥ monthlyPayment × 0.5, not the full amount.
+  const cycleFraction = Math.min(currentRemaining, 1);
+  const cycleTarget = monthlyTarget * (cycleFraction > 0 ? cycleFraction : 1);
+
   let updates: { range: string; values: (string | number)[][] }[];
 
-  if (monthlyTarget > 0 && newAccumulated >= monthlyTarget) {
-    // Accumulated partial payments cover the full monthly amount — auto-decrement.
-    // This applies whether or not the loan is currently overdue: once enough has been
-    // paid to cover the monthly instalment, the month closes and nextPaymentDate advances.
-    const newRemaining = Math.max(currentRemaining - 1, 0);
+  if (monthlyTarget > 0 && newAccumulated >= cycleTarget) {
+    // Accumulated partial payments cover the cycle target — auto-decrement.
+    // For a full cycle cycleFraction = 1 so cycleTarget = monthlyPayment (unchanged).
+    // For a partial final cycle decrement by the actual remaining fraction so
+    // remainingMonths reaches exactly 0 and the loan clears correctly.
+    const newRemaining = Math.max(currentRemaining - cycleFraction, 0);
 
     // Safety cap: prevent over-decrement beyond what calendar time allows.
     // monthsWouldBePaid = number of months that would be marked as paid after this decrement.
@@ -704,7 +722,7 @@ export async function recordPartialEmiPayment(
     }
 
     const newStatus: EmiLoanStatus = newRemaining <= 0 ? "Clear" : "Pending";
-    const entryType: string = frequency === "D" ? "DM" : "WM";
+    const entryType: string = frequency === "D" ? "DM" : frequency === "W" ? "WM" : "BMM";
     updates = appendEmiMonth(rowNumber, existing, newRemaining, newStatus, date, amount, entryType);
   } else {
     // Plain partial — just append, no month change yet.
@@ -746,7 +764,7 @@ export async function undoLastEmiPayment(id: string): Promise<EmiLoanRow | null>
   ];
 
   // Any type containing "M" means a month was consumed — restore it
-  if (lastType === "M" || lastType === "DM" || lastType === "WM") {
+  if (lastType === "M" || lastType === "DM" || lastType === "WM" || lastType === "BMM") {
     const currentRemaining = existing.remainingMonths ?? 0;
     const newRemaining = Math.min(currentRemaining + 1, existing.tenureMonths);
     const statusNotesText = buildStatusNotes(

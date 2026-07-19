@@ -50,7 +50,7 @@ router.get("/emi-loans", async (req, res): Promise<void> => {
 
 // POST /api/emi-loans — create (staff only)
 router.post("/emi-loans", requireStaff, async (req, res): Promise<void> => {
-  const { name, transactionDate, principal, tenureMonths, whatsapp, discountPerMonth, status, statusNotes, notes } = req.body;
+  const { name, transactionDate, principal, tenureMonths, whatsapp, discountPerMonth, status, statusNotes, notes, dailyAmount, weeklyAmount, bimonthlyAmount } = req.body;
   if (!name || !transactionDate || principal == null || !tenureMonths) {
     res.status(400).json({ error: "name, transactionDate, principal, and tenureMonths are required" });
     return;
@@ -66,7 +66,15 @@ router.post("/emi-loans", requireStaff, async (req, res): Promise<void> => {
       status: status ?? "Pending",
       statusNotes: statusNotes ?? null,
       notes: notes ?? null,
+      bimonthlyAmount: bimonthlyAmount != null ? Number(bimonthlyAmount) : null,
     });
+    // Write optional quick-pay override amounts after creation (cols U/V already handled by emiInputCellUpdates via bimonthlyAmount)
+    if (dailyAmount != null || weeklyAmount != null) {
+      await emiSheet.updateEmiLoanRow(row.id, {
+        dailyAmount: dailyAmount != null ? Number(dailyAmount) : undefined,
+        weeklyAmount: weeklyAmount != null ? Number(weeklyAmount) : undefined,
+      });
+    }
     res.status(201).json(row);
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -125,8 +133,8 @@ router.post("/emi-loans/:id/pay", requireStaff, async (req, res): Promise<void> 
 router.post("/emi-loans/:id/pay-partial", requireStaff, async (req, res): Promise<void> => {
   const id = String(req.params.id);
   const { date, amount, frequency } = req.body;
-  if (!date || amount == null || !["D", "W"].includes(frequency)) {
-    res.status(400).json({ error: "date, amount, and frequency ('D' or 'W') are required" });
+  if (!date || amount == null || !["D", "W", "BM"].includes(frequency)) {
+    res.status(400).json({ error: "date, amount, and frequency ('D', 'W', or 'BM') are required" });
     return;
   }
   try {
@@ -134,7 +142,7 @@ router.post("/emi-loans/:id/pay-partial", requireStaff, async (req, res): Promis
       id,
       String(date),
       Number(amount),
-      frequency as "D" | "W",
+      frequency as "D" | "W" | "BM",
     );
     if (!updated) { res.status(404).json({ error: "EMI loan not found" }); return; }
     res.json(updated);

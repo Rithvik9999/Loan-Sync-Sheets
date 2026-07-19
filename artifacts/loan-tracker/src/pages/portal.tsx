@@ -198,6 +198,19 @@ function notifyAdminPaymentMade(params: {
   window.open(`https://wa.me/91${WA_ADMIN}?text=${encodeURIComponent(lines.join("\n"))}`, "_blank");
 }
 
+// ─── Loan Amount Rounding ─────────────────────────────────────────────────────
+
+/**
+ * Round loan amount down to the nearest:
+ *  - multiple of 5    when amount < 1000
+ *  - multiple of 1000 when amount ≥ 1000
+ * Returns the rounded value (always ≤ the input).
+ */
+function floorLoanAmount(amount: number): number {
+  if (amount < 1000) return Math.floor(amount / 5) * 5;
+  return Math.floor(amount / 1000) * 1000;
+}
+
 // ─── Loan Request Dialog ──────────────────────────────────────────────────────
 
 const loanRequestSchema = z.object({
@@ -211,6 +224,8 @@ const loanRequestSchema = z.object({
   returnDate: z.string().optional(),
   purpose: z.string().optional(),
   upiId: z.string().optional(),
+  discountOrChargesAbs: z.coerce.number().min(0).optional(),
+  isDiscount: z.boolean().optional(),
 });
 
 type LoanRequestValues = z.infer<typeof loanRequestSchema>;
@@ -244,11 +259,29 @@ function LoanRequestDialog({
       tenureDays: 30,
       returnDate: dateFnsFormat(addDays(new Date(), 30), "yyyy-MM-dd"),
       purpose: "",
+      discountOrChargesAbs: 0,
+      isDiscount: true,
     },
   });
 
   const watchedAmount = form.watch("amount");
   const watchedTenure = form.watch("tenureDays");
+  const watchedIsDiscount = form.watch("isDiscount");
+
+  // Auto-populate discount from rounding when amount changes
+  useEffect(() => {
+    const amt = Number(watchedAmount);
+    if (!amt || amt <= 0) return;
+    const rounded = floorLoanAmount(amt);
+    const diff = amt - rounded;
+    if (diff > 0) {
+      form.setValue("discountOrChargesAbs", diff, { shouldDirty: false });
+      form.setValue("isDiscount", true, { shouldDirty: false });
+    } else {
+      form.setValue("discountOrChargesAbs", 0, { shouldDirty: false });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedAmount]);
 
   const loanPreview = useMemo(() => {
     const p = Number(watchedAmount);
@@ -294,12 +327,15 @@ function LoanRequestDialog({
       toast({ variant: "destructive", title: "Credit limit exceeded", description: creditLimitError });
       return;
     }
+    const discountNote = data.discountOrChargesAbs && data.discountOrChargesAbs > 0
+      ? ` [${data.isDiscount ? "Discount" : "Charge"}: ${data.isDiscount ? "-" : "+"}₹${data.discountOrChargesAbs}]`
+      : "";
     createLoanRequest.mutate(
       {
         data: {
           amount: data.amount,
           tenureDays: data.tenureDays,
-          purpose: data.purpose || null,
+          purpose: (data.purpose || "") + discountNote || null,
           upiId: data.upiId || null,
         },
       },
@@ -409,6 +445,60 @@ function LoanRequestDialog({
                 </FormItem>
               )}
             />
+
+            {/* Discount / Charges with checkbox */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Discount / Charges (₹)</label>
+              <div className="flex items-center gap-3">
+                <FormField
+                  control={form.control}
+                  name="discountOrChargesAbs"
+                  render={({ field }) => (
+                    <FormItem className="flex-1 space-y-0">
+                      <FormControl>
+                        <div className="relative">
+                          {watchedIsDiscount && (
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-emerald-600 font-medium pointer-events-none">−</span>
+                          )}
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="0"
+                            className={watchedIsDiscount ? "pl-6" : ""}
+                            {...field}
+                            value={field.value ?? ""}
+                          />
+                        </div>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="isDiscount"
+                  render={({ field }) => (
+                    <FormItem className="flex items-center gap-2 space-y-0 shrink-0">
+                      <FormControl>
+                        <Checkbox
+                          checked={!!field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                      <label className="text-sm font-normal cursor-pointer flex items-center gap-1 mb-0">
+                        Is Discount
+                      </label>
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                {watchedIsDiscount
+                  ? "Auto-filled from rounding. Negative value = discount on final amount."
+                  : "Positive value = extra charge on final amount."}
+              </p>
+            </div>
 
             {/* Tenure + Return Date — linked pair */}
             <div className="grid grid-cols-2 gap-3">
@@ -561,8 +651,7 @@ const emiRequestSchema = z.object({
     .positive("Amount must be greater than 0"),
   tenureMonths: z.coerce
     .number({ invalid_type_error: "Enter a valid tenure" })
-    .int()
-    .positive("Tenure must be at least 1 month"),
+    .positive("Tenure must be greater than 0"),
   purpose: z.string().optional(),
   upiId: z.string().optional(),
 });
@@ -703,8 +792,8 @@ function EmiRequestDialog({
                     <Input
                       type="number"
                       placeholder="e.g. 12"
-                      min="1"
-                      step="1"
+                      min="0.1"
+                      step="any"
                       {...field}
                       value={field.value ?? ""}
                     />
@@ -3339,11 +3428,11 @@ export default function Portal() {
     [activeLoans, activeEmi],
   );
 
-  // Credit limit utilisation — for EMI loans use remaining principal (principalPerMonth × remainingMonths)
-  // when tracking has been initialised; fall back to original principal for legacy rows.
+  // Credit limit utilisation — for regular loans, use outstanding balance (principal − paid);
+  // for EMI loans use remaining principal (principalPerMonth × remainingMonths).
   const usedPrincipal = useMemo(
     () =>
-      activeLoans.reduce((s, l) => s + (l.principal ?? 0), 0) +
+      activeLoans.reduce((s, l) => s + Math.max((l.principal ?? 0) - (l.paid ?? 0), 0), 0) +
       activeEmi.reduce((s, e) => {
         if (e.principalPerMonth != null && e.remainingMonths != null) {
           return s + e.principalPerMonth * Math.max(e.remainingMonths, 0);

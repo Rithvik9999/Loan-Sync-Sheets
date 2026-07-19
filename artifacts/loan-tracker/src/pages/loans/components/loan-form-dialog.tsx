@@ -131,6 +131,29 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
   const watchedTransactionDate = form.watch("transactionDate");
   const watchedTenureDays = form.watch("tenureDays");
   const watchedReturnDate = form.watch("returnDate");
+  const watchedPrincipal = form.watch("principal");
+
+  /** Round loan amount down: nearest 5 if < 1000, nearest 1000 otherwise */
+  function floorLoanAmount(amount: number): number {
+    if (amount < 1000) return Math.floor(amount / 5) * 5;
+    return Math.floor(amount / 1000) * 1000;
+  }
+
+  // Auto-populate discount from rounding when principal changes (new loans only)
+  useEffect(() => {
+    if (isEditing) return;
+    const amt = Number(watchedPrincipal);
+    if (!amt || amt <= 0) return;
+    const rounded = floorLoanAmount(amt);
+    const diff = amt - rounded;
+    if (diff > 0) {
+      form.setValue("discountOrChargesAbs", diff, { shouldDirty: false });
+      form.setValue("isDiscount", true, { shouldDirty: false });
+    } else {
+      form.setValue("discountOrChargesAbs", 0, { shouldDirty: false });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedPrincipal]);
 
   // When tenureDays changes, update returnDate
   const handleTenureChange = (value: string) => {
@@ -243,7 +266,6 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
     b.name.toLowerCase().includes(nameSearch.toLowerCase()),
   );
 
-  const watchedPrincipal = form.watch("principal");
   const calcPreview = useMemo(() => {
     const p = Number(watchedPrincipal);
     const t = Number(watchedTenureDays);

@@ -35,8 +35,8 @@ function validateCreateLoanRequest(body: unknown): { ok: true; data: CreateLoanR
   const amount = Number(b.amount);
   if (!Number.isFinite(amount) || amount < 0.01) return { ok: false, error: "Amount must be positive" };
   const tenureDays = b.tenureDays !== undefined ? Math.max(0, Number(b.tenureDays) || 0) : 0;
-  const tenureMonths = b.tenureMonths != null ? (Math.floor(Number(b.tenureMonths)) || null) : null;
-  if (tenureMonths !== null && tenureMonths < 1) return { ok: false, error: "tenureMonths must be ≥ 1" };
+  const tenureMonths = b.tenureMonths != null ? (Number(b.tenureMonths) || null) : null;
+  if (tenureMonths !== null && tenureMonths < 0.1) return { ok: false, error: "tenureMonths must be ≥ 0.1" };
   const type = (b.type === "EMI" ? "EMI" : "Loan") as "Loan" | "EMI";
   const purpose = typeof b.purpose === "string" ? b.purpose : null;
   const upiId = typeof b.upiId === "string" ? b.upiId : null;
@@ -108,7 +108,7 @@ router.post("/loan-requests", async (req, res): Promise<void> => {
               l.status !== "Clear" &&
               matchBorrower(extractPhoneFromWhatsapp(l.whatsapp), l.name),
           )
-          .reduce((sum, l) => sum + (l.principal ?? 0), 0);
+          .reduce((sum, l) => sum + Math.max((l.principal ?? 0) - (l.paid ?? 0), 0), 0);
 
         const activeEmiTotal = emiLoans
           .filter(
@@ -119,7 +119,13 @@ router.post("/loan-requests", async (req, res): Promise<void> => {
                 e.name,
               ),
           )
-          .reduce((sum, e) => sum + (e.principal ?? 0), 0);
+          .reduce((sum, e) => {
+            // Use remaining principal (principalPerMonth × remainingMonths) when tracking is initialised
+            if (e.principalPerMonth != null && e.remainingMonths != null) {
+              return sum + e.principalPerMonth * Math.max(e.remainingMonths, 0);
+            }
+            return sum + (e.principal ?? 0);
+          }, 0);
 
         const currentTotal = activeLoansTotal + activeEmiTotal;
         if (currentTotal + amount > borrower.creditLimit) {
