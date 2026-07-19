@@ -627,6 +627,15 @@ components:
         upiId:
           type: ["string", "null"]
           description: Optional UPI ID provided by the borrower for payment reference.
+        tenureMonths:
+          type: ["integer", "null"]
+          description: Tenure in months (for EMI-type requests). Null for regular day-based loans.
+        adminNote:
+          type: ["string", "null"]
+          description: Optional note left by the admin when approving or declining.
+        discount:
+          type: number
+          description: Discount applied by the admin at approval (≥ 0). Zero if none.
         status:
           $ref: "#/components/schemas/LoanRequestStatus"
         createdAt:

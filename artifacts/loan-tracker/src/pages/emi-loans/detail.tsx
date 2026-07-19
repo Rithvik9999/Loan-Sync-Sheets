@@ -483,46 +483,52 @@ export default function EmiLoanDetail() {
   // isDailyLoan: sheet dailyAmount column > 0 OR explicit "pay daily" in notes.
   // NOTE: dailyAmount is ALSO computed below as a fallback (monthly ÷ 30) for display,
   // but a computed value doesn't make this a daily-frequency loan.
-  const isDailyLoan = !!(
+  // Mutually exclusive with isWeeklyLoan / isBimonthlyLoan — if a higher-frequency
+  // type is already detected, the daily column is ignored (it may be present on all
+  // rows as a sheet-computed fallback).
+  const isDailyLoan = !isWeeklyLoan && !isBimonthlyLoan && !!(
     (loan.dailyAmount != null && loan.dailyAmount > 0) ||
     _notesText.includes("pay daily")
   );
 
-  // Total installments by frequency: bimonthly = tenureMonths × 2, weekly = tenureMonths × 4
+  // Total installments by frequency.
+  // Monthly EMI also uses this path so the count comes from actual paid entries,
+  // NOT from loan.remainingMonths which is calendar-based (months elapsed since
+  // disbursement) and drifts when the borrower skips or delays payments.
   const totalInstallments =
     isBimonthlyLoan
       ? Math.round(loan.tenureMonths * 2)
       : isWeeklyLoan
         ? Math.round(loan.tenureMonths * 4)
-        : null;
-  // Remaining installments: always count from actual paid entries, not from remainingMonths × multiplier
-  // (remainingMonths tracks calendar months and diverges from paid installment count for bi-weekly loans)
-  const paidInstallmentCount = totalInstallments != null
-    ? (loan.paidDates ?? []).filter(entry => {
-        const t = entry.split(":")[2];
-        return isBimonthlyLoan ? (t === "BM" || t === "BMM") : (t === "W" || t === "WM");
-      }).length
-    : 0;
-  const remainingInstallments =
-    totalInstallments != null
-      ? Math.max(0, totalInstallments - paidInstallmentCount)
-      : null;
+        : loan.tenureMonths; // monthly: 1 installment per month
+
+  // Count paid installments from paidDates entries, keyed by type tag.
+  // Monthly entries use type "M" (or legacy entries with no type, which default to "M").
+  const paidInstallmentCount = (loan.paidDates ?? []).filter(entry => {
+    const t = entry.split(":")[2] ?? "M";
+    if (isBimonthlyLoan) return t === "BM" || t === "BMM";
+    if (isWeeklyLoan)    return t === "W"  || t === "WM";
+    return t === "M"; // monthly + legacy (missing type defaults to "M")
+  }).length;
+
+  const remainingInstallments = Math.max(0, totalInstallments - paidInstallmentCount);
 
   const stats: { label: string; value: string; highlight?: boolean }[] = [
     { label: "EMI ID", value: loan.emiId ?? "—" },
     { label: "Principal", value: formatCurrency(loan.principal) },
     { label: "Tenure", value: `${loan.tenureMonths} months` },
-    ...(totalInstallments != null && remainingInstallments != null
+    ...(totalInstallments > 0
       ? [{
-          label: isBimonthlyLoan ? "Bimonthly Instalments" : "Weekly Instalments",
-          value: `${remainingInstallments} / ${totalInstallments} remaining`,
+          label: isBimonthlyLoan
+            ? "Bimonthly Instalments"
+            : isWeeklyLoan
+              ? "Weekly Instalments"
+              : "Monthly Instalments",
+          value: isBimonthlyLoan || isWeeklyLoan
+            ? `${remainingInstallments} / ${totalInstallments} remaining`
+            : `${remainingInstallments} / ${totalInstallments} months remaining`,
         }]
-      : loan.remainingMonths != null
-        ? [{
-            label: "Monthly Instalments",
-            value: `${loan.remainingMonths} / ${loan.tenureMonths} months remaining`,
-          }]
-        : []),
+      : []),
     { label: "Transaction Date", value: formatDate(loan.transactionDate) },
     {
       label: "Next Payment",
