@@ -635,7 +635,7 @@ export default function LoanRequestDetail() {
                         <span className="font-bold font-numeric">{formatCurrency(approvedLoan.finalAmount)}</span>
                       ) : (
                         <span className="font-bold font-numeric">
-                          {formatCurrency(estimatedFinalAmount - (req.discount ?? 0))}
+                          {formatCurrency(estimatedFinalAmount)}
                           <span className="ml-1 text-[10px] font-normal text-muted-foreground">(est.)</span>
                         </span>
                       )}

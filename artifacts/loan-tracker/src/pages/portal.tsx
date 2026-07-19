@@ -1353,7 +1353,7 @@ function calcOverdueTotal(
     const daysLate = recentLate + (overdueCount - i) * daysPerPeriod;
     total += periodAmount * (1 + rate * daysLate);
   }
-  return Math.round(total);
+  return Math.ceil(total);
 }
 
 function buildRepaymentItems(
@@ -2456,7 +2456,16 @@ function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
         // For weekly-pay EMI loans, derive the next WEEKLY installment date from
         // the most recent paidDates entry rather than the monthly milestone.
         const isWeekly = (loan.weeklyAmount ?? 0) > 0;
-        const isBimonthly = !isWeekly && (loan.bimonthlyAmount ?? 0) > 0;
+        // Mirror the detail-page's multi-signal bimonthly detection:
+        // 1. Dedicated sheet column bimonthlyAmount > 0
+        // 2. Notes / WhatsApp text contains "pay bi-monthly NNN" or "pay bimonthly NNN"
+        // 3. Any paidDates entry carries type tag "BM" or "BMM"
+        const _loanNotesText = `${(loan as any).notes ?? ""} ${(loan as any).whatsapp ?? ""}`.toLowerCase();
+        const isBimonthly = !isWeekly && (
+          (loan.bimonthlyAmount ?? 0) > 0 ||
+          /pay\s+bi-?monthly\s+\d+/.test(_loanNotesText) ||
+          (loan.paidDates ?? []).some((e: string) => { const t = e.split(":")[2]; return t === "BM" || t === "BMM"; })
+        );
         let displayNextDate: string | null = loan.nextPaymentDate ?? null;
         if (isWeekly) {
           const paidDateStrs = (loan.paidDates ?? [])
@@ -2469,7 +2478,7 @@ function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
             if (nextWeekly) displayNextDate = nextWeekly;
           }
         } else if (isBimonthly) {
-          // Compute the next 15th/30th payment date from the transaction start date.
+          // Compute the next 15th/30th strictly after today from the transaction start date.
           const txDate = loan.transactionDate
             ? new Date(loan.transactionDate + "T00:00:00Z")
             : null;
@@ -2479,6 +2488,16 @@ function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
               displayNextDate = `${nextBi.getFullYear()}-${String(nextBi.getMonth() + 1).padStart(2, "0")}-${String(nextBi.getDate()).padStart(2, "0")}`;
             }
           }
+        }
+        // Fallback for regular monthly EMI loans whose nextPaymentDate isn't set yet
+        // (e.g. new loans before the first payment is recorded in the sheet).
+        if (!displayNextDate && loan.transactionDate && !isWeekly && !isBimonthly) {
+          const txDate = new Date(loan.transactionDate + "T00:00:00Z");
+          let nextMonthly = new Date(txDate.getFullYear(), txDate.getMonth() + 1, txDate.getDate());
+          while (nextMonthly <= now) {
+            nextMonthly = new Date(nextMonthly.getFullYear(), nextMonthly.getMonth() + 1, nextMonthly.getDate());
+          }
+          displayNextDate = `${nextMonthly.getFullYear()}-${String(nextMonthly.getMonth() + 1).padStart(2, "0")}-${String(nextMonthly.getDate()).padStart(2, "0")}`;
         }
 
         const isOverdue =

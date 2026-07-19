@@ -332,7 +332,7 @@ export default function BorrowersList() {
         if (rem != null && emi.principalPerMonth != null) {
           existing.creditUsed += emi.principalPerMonth * rem;
         } else if (rem != null && emi.tenureMonths > 0) {
-          existing.creditUsed += Math.round((emi.principal ?? 0) * rem / emi.tenureMonths);
+          existing.creditUsed += Math.ceil((emi.principal ?? 0) * rem / emi.tenureMonths);
         } else {
           existing.creditUsed += (emi.principal ?? 0);
         }

@@ -300,8 +300,8 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
     if (!p || !t || p <= 0 || t <= 0) return null;
     // Estimate using 2% per month flat interest (mirrors lending setup)
     const monthlyRate = 0.02;
-    const interestPerMonth = Math.round(p * monthlyRate);
-    const principalPerMonth = Math.round(p / t);
+    const interestPerMonth = Math.ceil(p * monthlyRate);
+    const principalPerMonth = Math.ceil(p / t);
     const monthlyPayment = interestPerMonth + principalPerMonth;
     const totalInterest = interestPerMonth * t;
     const totalAmount = p + totalInterest;

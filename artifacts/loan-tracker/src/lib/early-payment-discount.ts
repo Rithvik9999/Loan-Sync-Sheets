@@ -152,8 +152,8 @@ export function estimateFinalAmount(params: {
   if (!principal || !tenureDays) {
     return { flatFee: 0, interest: 0, finalAmount: principal - discount };
   }
-  const flatFee = Math.round(principal * flatFeeTierRate(tenureDays));
-  const interest = Math.round(
+  const flatFee = Math.ceil(principal * flatFeeTierRate(tenureDays));
+  const interest = Math.ceil(
     principal *
       (0.1 + tenureInterestTierRate(tenureDays) + principalInterestTierRate(principal)) /
       30 *

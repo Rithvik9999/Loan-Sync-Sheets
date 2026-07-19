@@ -442,7 +442,7 @@ export default function LoanDetail() {
           const daysLate = periodsLate * daysPerPeriod;
           overdueAccumulated += periodAmount * (1 + lateRate * daysLate);
         }
-        overdueAccumulated = Math.round(overdueAccumulated);
+        overdueAccumulated = Math.ceil(overdueAccumulated);
 
         return (
           <Card className={`shadow-sm ${overduePeriods > 0 ? "border-destructive/30" : "border-border/60"}`}>
