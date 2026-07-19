@@ -26,14 +26,19 @@ import {
   Clock,
   CheckCircle2,
   TrendingUp,
+  Banknote,
+  XCircle,
+  AlertTriangle,
+  CalendarClock,
+  Loader2,
 } from "lucide-react";
 import { Link } from "@/components/ui/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LoanStatusBadge } from "@/components/status-badges";
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { fetchEmiLoans, EmiLoan } from "./emi-loans/components/emi-loan-form-dialog";
+import { useState, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchEmiLoans, EmiLoan, markEmiLoanMonthlyPaid, EMI_LOANS_QUERY_KEY } from "./emi-loans/components/emi-loan-form-dialog";
 import {
   Table,
   TableBody,
@@ -42,6 +47,430 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { differenceInCalendarDays, format as dateFnsFormat } from "date-fns";
+import { useToast } from "@/hooks/use-toast";
+
+// ─── Admin Collection Popup ───────────────────────────────────────────────────
+
+/** Dismissed flag resets on hard page reload (module re-evaluation). */
+let adminPopupDismissedThisLoad = false;
+
+type AdminItemFrequency = "daily" | "weekly" | "bimonthly" | "monthly";
+type AdminItemUrgency = "overdue" | "today" | "upcoming";
+
+interface AdminCollectionItem {
+  key: string;
+  loan: EmiLoan;
+  name: string;
+  frequency: AdminItemFrequency;
+  amountDue: number;
+  urgency: AdminItemUrgency;
+  dueDate: Date | null;
+}
+
+function detectEmiFrequency(loan: EmiLoan): { frequency: AdminItemFrequency; amountDue: number } {
+  const notesText = (loan.notes ?? "").toLowerCase();
+  const paidDates = loan.paidDates ?? [];
+  const isBimonthly = !!(
+    (loan.bimonthlyAmount != null && loan.bimonthlyAmount > 0) ||
+    /pay\s+bi-?monthly\s+\d+/.test(notesText) ||
+    paidDates.some(e => { const t = e.split(":")[2]; return t === "BM" || t === "BMM"; })
+  );
+  const isWeekly = !isBimonthly && !!(
+    (loan.weeklyAmount != null && loan.weeklyAmount > 0) ||
+    /pay\s+weekly\s+\d+/.test(notesText) ||
+    paidDates.some(e => { const t = e.split(":")[2]; return t === "W" || t === "WM"; })
+  );
+  const isDaily = !isWeekly && !isBimonthly && !!(
+    (loan.dailyAmount != null && loan.dailyAmount > 0) ||
+    /pay\s+daily\s+\d+/.test(notesText)
+  );
+  if (isDaily) return { frequency: "daily", amountDue: loan.dailyAmount ?? Math.round((loan.monthlyPayment ?? 0) / 30) };
+  if (isWeekly) return { frequency: "weekly", amountDue: loan.weeklyAmount ?? Math.round((loan.monthlyPayment ?? 0) / 4) };
+  if (isBimonthly) return { frequency: "bimonthly", amountDue: loan.bimonthlyAmount ?? Math.round((loan.monthlyPayment ?? 0) / 2) };
+  return { frequency: "monthly", amountDue: loan.monthlyPayment ?? 0 };
+}
+
+function buildAdminCollectionItems(emiLoans: EmiLoan[]): AdminCollectionItem[] {
+  const todayStr = dateFnsFormat(new Date(), "yyyy-MM-dd");
+  const now = new Date();
+  const items: AdminCollectionItem[] = [];
+
+  for (const loan of emiLoans) {
+    if (loan.status !== "Pending") continue;
+    const { frequency, amountDue } = detectEmiFrequency(loan);
+
+    // Daily: skip if today's instalment is already in paidDates
+    if (frequency === "daily") {
+      const alreadyPaidToday = (loan.paidDates ?? []).some(e => e.startsWith(todayStr + ":"));
+      if (alreadyPaidToday) continue;
+    }
+
+    const nextDate = loan.nextPaymentDate ? new Date(loan.nextPaymentDate) : null;
+    const isOverdue = (loan.lateDays ?? 0) > 0;
+
+    let urgency: AdminItemUrgency;
+    if (isOverdue) {
+      urgency = "overdue";
+    } else if (frequency === "daily") {
+      urgency = "today";
+    } else if (nextDate) {
+      const daysUntil = differenceInCalendarDays(nextDate, now);
+      if (daysUntil <= 0) urgency = "today";
+      else if (daysUntil <= 7) urgency = "upcoming";
+      else continue;
+    } else {
+      continue;
+    }
+
+    items.push({ key: loan.emiId ?? loan.id, loan, name: loan.name, frequency, amountDue, urgency, dueDate: nextDate });
+  }
+
+  const urgencyOrder: Record<AdminItemUrgency, number> = { overdue: 0, today: 1, upcoming: 2 };
+  return items.sort((a, b) => {
+    if (urgencyOrder[a.urgency] !== urgencyOrder[b.urgency]) return urgencyOrder[a.urgency] - urgencyOrder[b.urgency];
+    return (a.dueDate?.getTime() ?? 0) - (b.dueDate?.getTime() ?? 0);
+  });
+}
+
+const FREQ_LABELS: Record<AdminItemFrequency, string> = {
+  daily: "Daily", weekly: "Weekly", bimonthly: "Bi-monthly", monthly: "Monthly",
+};
+const FREQ_COLORS: Record<AdminItemFrequency, string> = {
+  daily: "bg-sky-100 text-sky-800",
+  weekly: "bg-violet-100 text-violet-800",
+  bimonthly: "bg-indigo-100 text-indigo-800",
+  monthly: "bg-slate-100 text-slate-700",
+};
+
+async function recordAdminPayment(item: AdminCollectionItem, date: string): Promise<void> {
+  const loanKey = item.loan.emiId ?? item.loan.id;
+  if (item.frequency === "monthly") {
+    await markEmiLoanMonthlyPaid(loanKey, date, item.amountDue);
+  } else {
+    const res = await fetch(`/api/emi-loans/${loanKey}/pay-partial`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paidDate: date, paidAmount: item.amountDue }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed" }));
+      throw new Error(err.error || "Failed to record payment");
+    }
+  }
+}
+
+function AdminPayDialog({
+  item, open, onOpenChange, onDone,
+}: {
+  item: AdminCollectionItem; open: boolean;
+  onOpenChange: (v: boolean) => void; onDone: () => void;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [date, setDate] = useState(dateFnsFormat(new Date(), "yyyy-MM-dd"));
+  const [isPending, setIsPending] = useState(false);
+
+  const handleConfirm = async () => {
+    setIsPending(true);
+    try {
+      await recordAdminPayment(item, date);
+      queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
+      toast({ title: "Payment recorded", description: `${item.name} — ₹${item.amountDue.toLocaleString("en-IN")} on ${date}` });
+      onDone();
+      onOpenChange(false);
+    } catch (err) {
+      toast({ variant: "destructive", title: "Error", description: err instanceof Error ? err.message : "Failed." });
+    } finally {
+      setIsPending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-xs">
+        <DialogHeader>
+          <DialogTitle>Record Payment</DialogTitle>
+          <DialogDescription>{item.name}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-1">
+          <div className="flex items-center justify-between rounded-lg bg-muted/40 border px-4 py-3">
+            <span className="text-sm text-muted-foreground">{FREQ_LABELS[item.frequency]} payment</span>
+            <span className="font-bold font-numeric text-lg">₹{item.amountDue.toLocaleString("en-IN")}</span>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Date</label>
+            <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+          </div>
+        </div>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>Cancel</Button>
+          <Button className="bg-emerald-700 hover:bg-emerald-800 text-white" onClick={handleConfirm} disabled={isPending || !date}>
+            {isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+            Collect
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AdminBulkPayDialog({
+  items, open, onOpenChange, onDone,
+}: {
+  items: AdminCollectionItem[]; open: boolean;
+  onOpenChange: (v: boolean) => void; onDone: () => void;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [date, setDate] = useState(dateFnsFormat(new Date(), "yyyy-MM-dd"));
+  const [isPending, setIsPending] = useState(false);
+  const total = items.reduce((s, i) => s + i.amountDue, 0);
+
+  const handleConfirm = async () => {
+    setIsPending(true);
+    try {
+      await Promise.all(items.map(item => recordAdminPayment(item, date)));
+      queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
+      toast({
+        title: `${items.length} payment${items.length !== 1 ? "s" : ""} recorded`,
+        description: `Total ₹${total.toLocaleString("en-IN")} collected on ${date}.`,
+      });
+      onDone();
+      onOpenChange(false);
+    } catch (err) {
+      toast({ variant: "destructive", title: "Error", description: err instanceof Error ? err.message : "Some payments failed. Please retry." });
+    } finally {
+      setIsPending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[440px]">
+        <DialogHeader>
+          <DialogTitle>Collect {items.length} Payment{items.length !== 1 ? "s" : ""}</DialogTitle>
+          <DialogDescription>
+            Records a payment for each selected EMI loan. Daily / weekly / bi-monthly use pay-partial; monthly advances to the next instalment month.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Date</label>
+            <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+          </div>
+          <div className="rounded-lg border bg-muted/30 divide-y max-h-48 overflow-y-auto">
+            {items.map(item => (
+              <div key={item.key} className="flex items-center justify-between px-3 py-2 text-sm">
+                <div className="min-w-0">
+                  <span className="font-medium truncate block">{item.name}</span>
+                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${FREQ_COLORS[item.frequency]}`}>
+                    {FREQ_LABELS[item.frequency]}
+                  </span>
+                </div>
+                <span className="font-numeric font-semibold shrink-0 ml-3">₹{item.amountDue.toLocaleString("en-IN")}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-between rounded-lg bg-primary/5 border border-primary/20 px-4 py-3">
+            <span className="font-semibold text-sm">Total</span>
+            <span className="font-bold font-numeric text-lg">₹{total.toLocaleString("en-IN")}</span>
+          </div>
+        </div>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>Cancel</Button>
+          <Button
+            className="bg-emerald-700 hover:bg-emerald-800 text-white"
+            onClick={handleConfirm}
+            disabled={isPending || !date || items.length === 0}
+          >
+            {isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Banknote className="mr-1.5 h-4 w-4" />}
+            Collect All
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AdminCollectionPopup({ items }: { items: AdminCollectionItem[] }) {
+  const [dismissed, setDismissed] = useState(() => adminPopupDismissedThisLoad);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [payItem, setPayItem] = useState<AdminCollectionItem | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+
+  if (dismissed || items.length === 0) return null;
+
+  const dismiss = () => { adminPopupDismissedThisLoad = true; setDismissed(true); };
+
+  const toggle = (key: string) =>
+    setSelected(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; });
+
+  const allSelected = items.length > 0 && items.every(i => selected.has(i.key));
+  const selectedItems = items.filter(i => selected.has(i.key));
+  const hasOverdue = items.some(i => i.urgency === "overdue");
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={dismiss} />
+
+      {/* Popup card */}
+      <div
+        className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[calc(100%-2rem)] max-w-sm rounded-2xl border border-border bg-background shadow-2xl overflow-hidden flex flex-col"
+        style={{ maxHeight: "85dvh" }}
+      >
+        {/* Header */}
+        <div className={`flex items-center justify-between px-4 py-3 border-b shrink-0 ${hasOverdue ? "bg-destructive/5" : "bg-amber-50"}`}>
+          <div className="flex items-center gap-2">
+            <CalendarClock className={`h-4 w-4 shrink-0 ${hasOverdue ? "text-destructive" : "text-amber-600"}`} />
+            <span className="font-semibold text-sm">Today's Collections</span>
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${hasOverdue ? "bg-destructive text-white" : "bg-amber-200 text-amber-800"}`}>
+              {items.length}
+            </span>
+          </div>
+          <button
+            onClick={dismiss}
+            className="rounded-full p-1.5 hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Dismiss"
+          >
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Section labels + items */}
+        <div className="overflow-y-auto flex-1 divide-y divide-border/40">
+          {(["overdue", "today", "upcoming"] as AdminItemUrgency[]).map(section => {
+            const sectionItems = items.filter(i => i.urgency === section);
+            if (sectionItems.length === 0) return null;
+            const sectionLabel = section === "overdue" ? "Overdue" : section === "today" ? "Due Today" : "Upcoming (7 days)";
+            const sectionColor = section === "overdue"
+              ? "bg-destructive/10 text-destructive"
+              : section === "today"
+              ? "bg-amber-100 text-amber-800"
+              : "bg-blue-50 text-blue-700";
+            return (
+              <div key={section}>
+                <div className={`px-3 py-1 text-[10px] font-bold uppercase tracking-wider ${sectionColor}`}>
+                  {sectionLabel}
+                </div>
+                {sectionItems.map(item => (
+                  <div
+                    key={item.key}
+                    className={`flex items-center gap-3 px-3 py-2.5 border-t border-border/30 ${
+                      section === "overdue" ? "bg-destructive/[0.03]" : section === "today" ? "bg-amber-50/30" : "bg-blue-50/10"
+                    }`}
+                  >
+                    <Checkbox
+                      checked={selected.has(item.key)}
+                      onCheckedChange={() => toggle(item.key)}
+                      className="shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        {section === "overdue"
+                          ? <AlertTriangle className="h-3 w-3 text-destructive shrink-0" />
+                          : section === "today"
+                          ? <Clock className="h-3 w-3 text-amber-600 shrink-0" />
+                          : <CalendarClock className="h-3 w-3 text-blue-500 shrink-0" />}
+                        <p className="text-xs font-semibold truncate">{item.name}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-0.5 pl-4">
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${FREQ_COLORS[item.frequency]}`}>
+                          {FREQ_LABELS[item.frequency]}
+                        </span>
+                        {section === "overdue" && (item.loan.lateDays ?? 0) > 0 && (
+                          <span className="text-[10px] text-destructive font-medium">{item.loan.lateDays}d late</span>
+                        )}
+                        {section === "upcoming" && item.dueDate && (
+                          <span className="text-[10px] text-blue-600">
+                            due {item.dueDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <span className={`font-bold text-sm font-numeric ${
+                        section === "overdue" ? "text-destructive" : section === "today" ? "text-amber-700" : "text-blue-700"
+                      }`}>
+                        {formatCurrency(item.amountDue)}
+                      </span>
+                      <Button
+                        size="sm"
+                        className="h-6 text-[11px] px-2 bg-emerald-700 hover:bg-emerald-800 text-white"
+                        onClick={() => setPayItem(item)}
+                      >
+                        <Banknote className="h-3 w-3 mr-1" />
+                        Collect
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center gap-2 px-3 py-2.5 border-t bg-muted/10 shrink-0">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs h-7 px-2"
+            onClick={() => setSelected(allSelected ? new Set() : new Set(items.map(i => i.key)))}
+          >
+            {allSelected ? "Deselect All" : "Select All"}
+          </Button>
+          <div className="flex-1" />
+          {selectedItems.length > 0 && (
+            <Button
+              size="sm"
+              className="h-7 text-xs bg-emerald-700 hover:bg-emerald-800 text-white"
+              onClick={() => setBulkOpen(true)}
+            >
+              <Banknote className="h-3 w-3 mr-1" />
+              Collect {selectedItems.length}
+            </Button>
+          )}
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={dismiss}>
+            Dismiss
+          </Button>
+        </div>
+      </div>
+
+      {payItem && (
+        <AdminPayDialog
+          item={payItem}
+          open={!!payItem}
+          onOpenChange={open => { if (!open) setPayItem(null); }}
+          onDone={() => {
+            setSelected(prev => { const s = new Set(prev); s.delete(payItem.key); return s; });
+            setPayItem(null);
+          }}
+        />
+      )}
+      <AdminBulkPayDialog
+        items={selectedItems}
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        onDone={() => setSelected(new Set())}
+      />
+    </>
+  );
+}
+
+// ─── Dashboard Page ───────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const { isLoaded, role } = useAppAuth();
@@ -81,6 +510,12 @@ export default function Dashboard() {
   });
 
   const now = useMemo(() => new Date(), []);
+
+  // ── Admin collection popup items ──────────────────────────────────────────
+  const adminItems = useMemo(
+    () => (emiLoans ? buildAdminCollectionItems(emiLoans) : []),
+    [emiLoans],
+  );
 
   const overdueLoans = useMemo(
     () =>
@@ -198,6 +633,9 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8">
+      {/* Collection popup — shown once per page load when there are EMI payments due */}
+      {!isLoadingEmi && <AdminCollectionPopup items={adminItems} />}
+
       <div>
         <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">
           Portfolio Overview
