@@ -1671,8 +1671,14 @@ function buildRepaymentItems(
       })();
 
       const wTotal = Math.round(e.tenureMonths * 4);
-      const wRemaining = e.remainingMonths != null ? Math.max(0, Math.round(e.remainingMonths * 4)) : null;
-      const wProgress = wRemaining != null ? ` · ${wRemaining}/${wTotal} instalments remaining` : "";
+      const wPaidCount = (e.paidDates ?? []).filter(entry => {
+        const t = entry.split(":")[2];
+        return t === "W" || t === "WM";
+      }).length;
+      const wRemaining = e.remainingMonths != null
+        ? Math.max(0, Math.round(e.remainingMonths * 4))
+        : Math.max(0, wTotal - wPaidCount);
+      const wProgress = ` · ${wRemaining}/${wTotal} instalments remaining`;
       if (overdueCount > 0) {
         // Use actual daysLate (calendar days since most recent due date) for the fee.
         const overdueTotal = calcOverdueTotal(weeklyAmt, overdueCount, 7, Math.max(daysLate, 1));
@@ -1746,8 +1752,14 @@ function buildRepaymentItems(
       })();
 
       const bmTotal = Math.round(e.tenureMonths * 2);
-      const bmRemaining = e.remainingMonths != null ? Math.max(0, Math.round(e.remainingMonths * 2)) : null;
-      const bmProgress = bmRemaining != null ? ` · ${bmRemaining}/${bmTotal} instalments remaining` : "";
+      const bmPaidCount = (e.paidDates ?? []).filter(entry => {
+        const t = entry.split(":")[2];
+        return t === "BM" || t === "BMM";
+      }).length;
+      const bmRemaining = e.remainingMonths != null
+        ? Math.max(0, Math.round(e.remainingMonths * 2))
+        : Math.max(0, bmTotal - bmPaidCount);
+      const bmProgress = ` · ${bmRemaining}/${bmTotal} instalments remaining`;
       if (overdueCountBi > 0) {
         const overdueTotal = calcOverdueTotal(biAmt, overdueCountBi, 15, Math.max(daysLateBi, 1));
         items.push({

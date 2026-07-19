@@ -477,10 +477,18 @@ export default function EmiLoanDetail() {
       : isWeeklyLoan
         ? Math.round(loan.tenureMonths * 4)
         : null;
-  // Remaining installments: remainingMonths × installments-per-month
+  // Remaining installments: prefer remainingMonths × rate; fall back to total − paid-entry count
+  const paidInstallmentCount = totalInstallments != null
+    ? (loan.paidDates ?? []).filter(entry => {
+        const t = entry.split(":")[2];
+        return isBimonthlyLoan ? (t === "BM" || t === "BMM") : (t === "W" || t === "WM");
+      }).length
+    : 0;
   const remainingInstallments =
-    totalInstallments != null && loan.remainingMonths != null
-      ? Math.max(0, Math.round(loan.remainingMonths * (isBimonthlyLoan ? 2 : 4)))
+    totalInstallments != null
+      ? (loan.remainingMonths != null
+          ? Math.max(0, Math.round(loan.remainingMonths * (isBimonthlyLoan ? 2 : 4)))
+          : Math.max(0, totalInstallments - paidInstallmentCount))
       : null;
 
   const stats: { label: string; value: string; highlight?: boolean }[] = [
@@ -579,7 +587,7 @@ export default function EmiLoanDetail() {
             {loan.status !== "Clear" && loan.monthlyPayment != null && (
               <div className="flex flex-col gap-1.5">
                 <div className="flex flex-wrap items-center gap-2">
-                  {!isWeeklyLoan && (
+                  {!isWeeklyLoan && !isBimonthlyLoan && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -594,6 +602,7 @@ export default function EmiLoanDetail() {
                     Daily {dailyAmount != null && <span className="font-numeric font-semibold">₹{dailyAmount.toLocaleString("en-IN")}</span>}
                   </Button>
                   )}
+                  {!isBimonthlyLoan && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -607,6 +616,7 @@ export default function EmiLoanDetail() {
                       : <CalendarRange className="h-3.5 w-3.5" />}
                     Weekly {weeklyAmount != null && <span className="font-numeric font-semibold">₹{weeklyAmount.toLocaleString("en-IN")}</span>}
                   </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="outline"

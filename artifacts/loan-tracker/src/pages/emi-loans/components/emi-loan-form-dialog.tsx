@@ -380,8 +380,7 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
                                 key={b.name}
                                 type="button"
                                 className="flex w-full items-center px-2 py-1.5 text-sm rounded-sm hover:bg-accent cursor-pointer"
-                                onPointerDown={(e) => {
-                                  e.preventDefault();
+                                onClick={() => {
                                   field.onChange(b.name);
                                   if (!form.getValues("whatsapp") && b.phone) {
                                     form.setValue("whatsapp", b.phone);
