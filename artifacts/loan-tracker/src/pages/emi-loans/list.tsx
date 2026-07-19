@@ -77,7 +77,7 @@ function BulkMarkPaidDialog({
   const handleConfirm = async () => {
     setIsPending(true);
     try {
-      await Promise.all(loans.map((l) => markEmiLoanMonthlyPaid(l.id, paidDate)));
+      await Promise.all(loans.map((l) => markEmiLoanMonthlyPaid(l.emiId ?? l.id, paidDate)));
       queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
       toast({
         title: `${loans.length} EMI payment${loans.length !== 1 ? "s" : ""} recorded`,
@@ -200,8 +200,9 @@ function RecordEmiPaymentInlineDialog({
     }
     setIsPending(true);
     try {
+      const emiKey = loan.emiId ?? loan.id;
       if (markClear) {
-        const res = await fetch(`/api/emi-loans/${loan.id}`, {
+        const res = await fetch(`/api/emi-loans/${emiKey}`, {
           method: "PATCH",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -209,7 +210,7 @@ function RecordEmiPaymentInlineDialog({
         });
         if (!res.ok) throw new Error((await res.json()).error || "Failed");
       } else {
-        const res = await fetch(`/api/emi-loans/${loan.id}/pay`, {
+        const res = await fetch(`/api/emi-loans/${emiKey}/pay`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -365,7 +366,7 @@ export default function EmiLoansList() {
 
   const toggleAll = () => {
     if (!filtered) return;
-    const ids = filtered.map((l) => l.id);
+    const ids = filtered.map((l) => l.emiId ?? l.id);
     const allSelected = ids.every((id) => selected.has(id));
     if (allSelected) {
       setSelected(new Set());
@@ -375,7 +376,7 @@ export default function EmiLoansList() {
   };
 
   const [, setLocation] = useLocation();
-  const selectedLoans = (filtered ?? []).filter((l) => selected.has(l.id));
+  const selectedLoans = (filtered ?? []).filter((l) => selected.has(l.emiId ?? l.id));
   const pendingSelected = selectedLoans.filter((l) => l.status !== "Clear" && l.status !== "Archived");
   const archivableSelected = selectedLoans.filter((l) => l.status !== "Clear" && l.status !== "Archived");
 
@@ -383,7 +384,7 @@ export default function EmiLoansList() {
     if (archivableSelected.length === 0) return;
     setBulkArchivePending(true);
     try {
-      await Promise.all(archivableSelected.map((l) => archiveEmiLoan(l.id)));
+      await Promise.all(archivableSelected.map((l) => archiveEmiLoan(l.emiId ?? l.id)));
       queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
       toast({
         title: `${archivableSelected.length} EMI loan${archivableSelected.length !== 1 ? "s" : ""} archived`,
@@ -526,7 +527,7 @@ export default function EmiLoansList() {
                 <TableRow>
                   <TableHead className="w-10">
                     <Checkbox
-                      checked={filtered.length > 0 && filtered.every((l) => selected.has(l.id))}
+                      checked={filtered.length > 0 && filtered.every((l) => selected.has(l.emiId ?? l.id))}
                       onCheckedChange={toggleAll}
                       aria-label="Select all"
                     />
@@ -549,13 +550,13 @@ export default function EmiLoansList() {
                   return (
                     <TableRow
                       key={loan.id}
-                      className={`group cursor-pointer ${selected.has(loan.id) ? "bg-primary/5" : ""}`}
-                      onClick={() => setLocation(`/emi-loans/${loan.id}`)}
+                      className={`group cursor-pointer ${selected.has(loan.emiId ?? loan.id) ? "bg-primary/5" : ""}`}
+                      onClick={() => setLocation(`/emi-loans/${loan.emiId ?? loan.id}`)}
                     >
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <Checkbox
-                          checked={selected.has(loan.id)}
-                          onCheckedChange={() => toggleRow(loan.id)}
+                          checked={selected.has(loan.emiId ?? loan.id)}
+                          onCheckedChange={() => toggleRow(loan.emiId ?? loan.id)}
                           aria-label={`Select ${loan.name}`}
                         />
                       </TableCell>
@@ -591,7 +592,7 @@ export default function EmiLoansList() {
                             </Button>
                           )}
                           <Button variant="ghost" size="icon" asChild>
-                            <Link href={`/emi-loans/${loan.id}`}>
+                            <Link href={`/emi-loans/${loan.emiId ?? loan.id}`}>
                               <ChevronRight className="h-4 w-4" />
                               <span className="sr-only">View Details</span>
                             </Link>

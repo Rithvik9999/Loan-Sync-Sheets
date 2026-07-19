@@ -114,7 +114,7 @@ function BulkMarkPaidDialog({
         loans.map((l) => {
           const paid = parseFloat(amounts[l.id] ?? "0");
           return updateLoan.mutateAsync({
-            id: l.id,
+            id: l.loanId ?? l.id,
             data: {
               status: "Clear",
               paid: isNaN(paid) ? (l.finalAmount ?? 0) : paid,
@@ -279,7 +279,7 @@ function LoansTable({
           <TableRow>
             <TableHead className="w-10">
               <Checkbox
-                checked={loans.length > 0 && loans.every((l) => selected.has(l.id))}
+                checked={loans.length > 0 && loans.every((l) => selected.has(l.loanId ?? l.id))}
                 onCheckedChange={onToggleAll}
                 aria-label="Select all"
               />
@@ -294,13 +294,13 @@ function LoansTable({
           {loans.map((loan) => (
             <TableRow
               key={loan.id}
-              className={`group cursor-pointer ${selected.has(loan.id) ? "bg-primary/5" : ""}`}
-              onClick={() => setLocation(`/loans/${loan.id}`)}
+              className={`group cursor-pointer ${selected.has(loan.loanId ?? loan.id) ? "bg-primary/5" : ""}`}
+              onClick={() => setLocation(`/loans/${loan.loanId ?? loan.id}`)}
             >
               <TableCell onClick={(e) => e.stopPropagation()}>
                 <Checkbox
-                  checked={selected.has(loan.id)}
-                  onCheckedChange={() => onToggle(loan.id)}
+                  checked={selected.has(loan.loanId ?? loan.id)}
+                  onCheckedChange={() => onToggle(loan.loanId ?? loan.id)}
                   aria-label={`Select ${loan.name}`}
                 />
               </TableCell>
@@ -354,7 +354,7 @@ function LoansTable({
                   asChild
                   className="opacity-0 group-hover:opacity-100 transition-opacity"
                 >
-                  <Link href={`/loans/${loan.id}`}>
+                  <Link href={`/loans/${loan.loanId ?? loan.id}`}>
                     <ChevronRight className="h-4 w-4" />
                     <span className="sr-only">View Details</span>
                   </Link>
@@ -373,9 +373,15 @@ function LoansTable({
 function EmiSection({
   emis,
   kind,
+  selectedEmis,
+  onToggleEmi,
+  onToggleAllEmis,
 }: {
   emis: EmiLoan[];
   kind: "overdue" | "coming-up";
+  selectedEmis: Set<string>;
+  onToggleEmi: (id: string) => void;
+  onToggleAllEmis: (emis: EmiLoan[]) => void;
 }) {
   const [, setLocation] = useLocation();
   if (emis.length === 0) return null;
@@ -393,6 +399,13 @@ function EmiSection({
         <Table>
           <TableHeader>
             <TableRow className="bg-violet-50/50">
+              <TableHead className="w-10">
+                <Checkbox
+                  checked={emis.length > 0 && emis.every((e) => selectedEmis.has(e.emiId ?? e.id))}
+                  onCheckedChange={() => onToggleAllEmis(emis)}
+                  aria-label="Select all EMI loans"
+                />
+              </TableHead>
               <TableHead>Borrower</TableHead>
               <TableHead>Monthly</TableHead>
               <TableHead>{kind === "overdue" ? "Overdue" : "Due In"}</TableHead>
@@ -402,6 +415,7 @@ function EmiSection({
           </TableHeader>
           <TableBody>
             {emis.map((e) => {
+              const emiKey = e.emiId ?? e.id;
               const daysLate = e.lateDays ?? 0;
               const diffDays =
                 kind === "coming-up" && e.nextPaymentDate
@@ -413,9 +427,16 @@ function EmiSection({
               return (
                 <TableRow
                   key={e.id}
-                  className="group cursor-pointer"
-                  onClick={() => setLocation(`/emi-loans/${e.id}`)}
+                  className={`group cursor-pointer ${selectedEmis.has(emiKey) ? "bg-violet-50" : ""}`}
+                  onClick={() => setLocation(`/emi-loans/${emiKey}`)}
                 >
+                  <TableCell onClick={(ev) => ev.stopPropagation()}>
+                    <Checkbox
+                      checked={selectedEmis.has(emiKey)}
+                      onCheckedChange={() => onToggleEmi(emiKey)}
+                      aria-label={`Select ${e.name}`}
+                    />
+                  </TableCell>
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-1.5">
                       <span className="truncate max-w-[90px] sm:max-w-none">
@@ -433,9 +454,7 @@ function EmiSection({
                     </div>
                     {e.nextPaymentDate && (
                       <div className="text-[10px] text-muted-foreground/70">
-                        {kind === "overdue"
-                          ? `Due ${formatDate(e.nextPaymentDate)}`
-                          : `Due ${formatDate(e.nextPaymentDate)}`}
+                        Due {formatDate(e.nextPaymentDate)}
                       </div>
                     )}
                   </TableCell>
@@ -480,7 +499,7 @@ function EmiSection({
                       asChild
                       className="opacity-0 group-hover:opacity-100 transition-opacity"
                     >
-                      <Link href={`/emi-loans/${e.id}`}>
+                      <Link href={`/emi-loans/${emiKey}`}>
                         <ChevronRight className="h-4 w-4" />
                         <span className="sr-only">View Details</span>
                       </Link>
@@ -504,6 +523,7 @@ export default function LoansList() {
   const [dateRange, setDateRange] = useState<[number, number] | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectedEmis, setSelectedEmis] = useState<Set<string>>(new Set());
   const [bulkPaidOpen, setBulkPaidOpen] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
   // Active tab is persisted in sessionStorage so back-navigation restores the tab
@@ -675,6 +695,20 @@ export default function LoansList() {
     });
   };
 
+  const toggleEmiRow = (id: string) => {
+    setSelectedEmis((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllEmis = (emis: EmiLoan[]) => {
+    const ids = emis.map((e) => e.emiId ?? e.id);
+    const allSel = ids.every((id) => selectedEmis.has(id));
+    setSelectedEmis(allSel ? new Set() : new Set(ids));
+  };
+
   const toggleAll = () => {
     const currentList =
       activeTab === "overdue"
@@ -684,16 +718,42 @@ export default function LoansList() {
           : activeTab === "archived"
             ? archivedLoans
             : filtered ?? [];
-    const ids = currentList.map((l) => l.id);
+    const ids = currentList.map((l) => l.loanId ?? l.id);
     const allSel = ids.every((id) => selected.has(id));
     setSelected(allSel ? new Set() : new Set(ids));
+  };
+
+  const handleArchiveEmis = async () => {
+    if (selectedEmis.size === 0) return;
+    setIsArchiving(true);
+    try {
+      await Promise.all(
+        [...selectedEmis].map((id) =>
+          fetch(`/api/emi-loans/${id}`, {
+            method: "PATCH",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "Archived" }),
+          }).then(async (r) => {
+            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Failed");
+          }),
+        ),
+      );
+      queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
+      toast({ title: `${selectedEmis.size} EMI loan${selectedEmis.size !== 1 ? "s" : ""} archived` });
+      setSelectedEmis(new Set());
+    } catch {
+      toast({ variant: "destructive", title: "Archive failed", description: "Could not archive EMI loans. Please retry." });
+    } finally {
+      setIsArchiving(false);
+    }
   };
 
   const handleArchive = async () => {
     // Only archive Pending/Temp loans; Clear loans must not be archived because
     // restore unconditionally resets to Pending, which would make a paid loan
     // appear outstanding again — a serious data integrity issue.
-    const ids = archivableSelected.map((l) => l.id);
+    const ids = archivableSelected.map((l) => l.loanId ?? l.id);
     if (ids.length === 0) return;
     setIsArchiving(true);
     try {
@@ -733,7 +793,7 @@ export default function LoansList() {
   };
 
   const selectedLoans = [...selected]
-    .map((id) => (allLoans ?? []).find((l) => l.id === id))
+    .map((key) => (allLoans ?? []).find((l) => (l.loanId ?? l.id) === key))
     .filter(Boolean) as Loan[];
 
   // Reminder helpers
@@ -809,11 +869,14 @@ export default function LoansList() {
       </div>
 
       {/* Bulk action bar */}
-      {selected.size > 0 && (
+      {(selected.size > 0 || selectedEmis.size > 0) && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
           <div className="flex items-center gap-2 text-sm">
             <CheckSquare className="h-4 w-4 text-primary" />
-            <span className="font-medium">{selected.size} selected</span>
+            <span className="font-medium">
+              {selected.size + selectedEmis.size} selected
+              {selectedEmis.size > 0 && ` (${selectedEmis.size} EMI)`}
+            </span>
           </div>
           <div className="flex flex-wrap gap-2">
             {canSendReminder && reminderPhone && (
@@ -838,9 +901,25 @@ export default function LoansList() {
                 Send Reminder
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={() => setSelected(new Set())}>
+            <Button variant="outline" size="sm" onClick={() => { setSelected(new Set()); setSelectedEmis(new Set()); }}>
               Clear
             </Button>
+            {selectedEmis.size > 0 && activeTab !== "archived" && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-violet-300 text-violet-700 hover:bg-violet-50"
+                onClick={handleArchiveEmis}
+                disabled={isArchiving}
+              >
+                {isArchiving ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Archive className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Archive {selectedEmis.size} EMI
+              </Button>
+            )}
             {activeTab === "archived" ? (
               <Button
                 size="sm"
@@ -891,6 +970,7 @@ export default function LoansList() {
         onValueChange={(v) => {
           setActiveTab(v);
           setSelected(new Set());
+          setSelectedEmis(new Set());
           try { sessionStorage.setItem(LOANS_TAB_SS, v); } catch {}
         }}
       >
@@ -948,7 +1028,7 @@ export default function LoansList() {
                       emptyDescription="Great — all loans are on schedule."
                     />
                   )}
-                  <EmiSection emis={overdueEmis} kind="overdue" />
+                  <EmiSection emis={overdueEmis} kind="overdue" selectedEmis={selectedEmis} onToggleEmi={toggleEmiRow} onToggleAllEmis={toggleAllEmis} />
                 </>
               )}
             </CardContent>
@@ -978,7 +1058,7 @@ export default function LoansList() {
                       emptyDescription="No loans due in the next 30 days."
                     />
                   )}
-                  <EmiSection emis={comingUpEmis} kind="coming-up" />
+                  <EmiSection emis={comingUpEmis} kind="coming-up" selectedEmis={selectedEmis} onToggleEmi={toggleEmiRow} onToggleAllEmis={toggleAllEmis} />
                 </>
               )}
             </CardContent>
