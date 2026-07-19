@@ -38,7 +38,7 @@ import { Badge } from "@/components/ui/badge";
 import { LoanStatusBadge } from "@/components/status-badges";
 import { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchEmiLoans, EmiLoan, markEmiLoanMonthlyPaid, EMI_LOANS_QUERY_KEY } from "./emi-loans/components/emi-loan-form-dialog";
+import { fetchEmiLoans, EmiLoan, markEmiLoanMonthlyPaid, EMI_LOANS_QUERY_KEY, parsePayAmountsFromNotes } from "./emi-loans/components/emi-loan-form-dialog";
 import {
   Table,
   TableBody,
@@ -66,7 +66,7 @@ import { useToast } from "@/hooks/use-toast";
 let adminPopupDismissedThisLoad = false;
 
 type AdminItemFrequency = "daily" | "weekly" | "bimonthly" | "monthly";
-type AdminItemUrgency = "overdue" | "today" | "upcoming";
+type AdminItemUrgency = "overdue" | "upcoming";
 
 interface AdminCollectionItem {
   key: string;
@@ -79,37 +79,41 @@ interface AdminCollectionItem {
 }
 
 function detectEmiFrequency(loan: EmiLoan): { frequency: AdminItemFrequency; amountDue: number } {
-  // Priority: dedicated sheet column → notes regex → paidDates tags (legacy fallback).
-  // Sheet columns win unconditionally — this prevents paidDates completion tags (DM, WM,
-  // BMM) from misidentifying a daily loan as weekly when accumulated payments closed a month.
-  const notesText = (loan.notes ?? "").toLowerCase();
+  // Priority for FREQUENCY: sheet column → notes regex → paidDates tags (legacy).
+  // Priority for AMOUNT: notes-explicit > column value > computed fallback.
+  //
+  // Notes-explicit amount wins over the column value because the column can be set to
+  // a sentinel "1" to mark the loan type without encoding the real instalment amount.
+  // parsePayAmountsFromNotes extracts the number from "pay daily NNN" / "pay weekly NNN".
   const paidDates = loan.paidDates ?? [];
+  const mp = loan.monthlyPayment ?? 0;
+  const notesAmts = parsePayAmountsFromNotes(loan.notes);
 
-  // 1. Column values (highest priority)
+  // 1. Column flags determine frequency; notes-extracted amount takes precedence for value.
   if (loan.dailyAmount != null && loan.dailyAmount > 0)
-    return { frequency: "daily", amountDue: loan.dailyAmount };
+    return { frequency: "daily", amountDue: notesAmts.daily ?? loan.dailyAmount };
   if (loan.weeklyAmount != null && loan.weeklyAmount > 0)
-    return { frequency: "weekly", amountDue: loan.weeklyAmount };
-  if (loan.bimonthlyAmount != null && loan.bimonthlyAmount > 0)
-    return { frequency: "bimonthly", amountDue: loan.bimonthlyAmount };
+    return { frequency: "weekly", amountDue: notesAmts.weekly ?? loan.weeklyAmount };
+  if (loan.bimonthlyAmount != null && loan.bimonthlyAmount > 0) {
+    const bm = (loan.notes ?? "").match(/pay\s+bi-?monthly\s+(\d+)/i);
+    return { frequency: "bimonthly", amountDue: bm ? Number(bm[1]) : loan.bimonthlyAmount };
+  }
 
-  // 2. Notes regex
-  if (/pay\s+daily\s+\d+/.test(notesText))
-    return { frequency: "daily", amountDue: Math.round((loan.monthlyPayment ?? 0) / 30) };
-  if (/pay\s+weekly\s+\d+/.test(notesText))
-    return { frequency: "weekly", amountDue: Math.round((loan.monthlyPayment ?? 0) / 4) };
-  if (/pay\s+bi-?monthly\s+\d+/.test(notesText))
-    return { frequency: "bimonthly", amountDue: Math.round((loan.monthlyPayment ?? 0) / 2) };
+  // 2. Notes with explicit amount (column is absent — amount comes entirely from text).
+  if (notesAmts.daily != null) return { frequency: "daily", amountDue: notesAmts.daily };
+  if (notesAmts.weekly != null) return { frequency: "weekly", amountDue: notesAmts.weekly };
+  const bmNotes = (loan.notes ?? "").match(/pay\s+bi-?monthly\s+(\d+)/i);
+  if (bmNotes) return { frequency: "bimonthly", amountDue: Number(bmNotes[1]) };
 
-  // 3. paidDates tags (legacy fallback, lowest priority)
+  // 3. paidDates tags (legacy fallback, lowest priority — no explicit amount available).
   if (paidDates.some(e => { const t = e.split(":")[2]; return t === "BM" || t === "BMM"; }))
-    return { frequency: "bimonthly", amountDue: Math.round((loan.monthlyPayment ?? 0) / 2) };
+    return { frequency: "bimonthly", amountDue: Math.round(mp / 2) };
   if (paidDates.some(e => { const t = e.split(":")[2]; return t === "W" || t === "WM"; }))
-    return { frequency: "weekly", amountDue: Math.round((loan.monthlyPayment ?? 0) / 4) };
+    return { frequency: "weekly", amountDue: Math.round(mp / 4) };
   if (paidDates.some(e => { const t = e.split(":")[2]; return t === "D" || t === "DM"; }))
-    return { frequency: "daily", amountDue: Math.round((loan.monthlyPayment ?? 0) / 30) };
+    return { frequency: "daily", amountDue: Math.round(mp / 30) };
 
-  return { frequency: "monthly", amountDue: loan.monthlyPayment ?? 0 };
+  return { frequency: "monthly", amountDue: mp };
 }
 
 function buildAdminCollectionItems(emiLoans: EmiLoan[]): AdminCollectionItem[] {
