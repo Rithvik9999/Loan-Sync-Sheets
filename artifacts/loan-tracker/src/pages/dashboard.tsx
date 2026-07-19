@@ -79,25 +79,36 @@ interface AdminCollectionItem {
 }
 
 function detectEmiFrequency(loan: EmiLoan): { frequency: AdminItemFrequency; amountDue: number } {
+  // Priority: dedicated sheet column → notes regex → paidDates tags (legacy fallback).
+  // Sheet columns win unconditionally — this prevents paidDates completion tags (DM, WM,
+  // BMM) from misidentifying a daily loan as weekly when accumulated payments closed a month.
   const notesText = (loan.notes ?? "").toLowerCase();
   const paidDates = loan.paidDates ?? [];
-  const isBimonthly = !!(
-    (loan.bimonthlyAmount != null && loan.bimonthlyAmount > 0) ||
-    /pay\s+bi-?monthly\s+\d+/.test(notesText) ||
-    paidDates.some(e => { const t = e.split(":")[2]; return t === "BM" || t === "BMM"; })
-  );
-  const isWeekly = !isBimonthly && !!(
-    (loan.weeklyAmount != null && loan.weeklyAmount > 0) ||
-    /pay\s+weekly\s+\d+/.test(notesText) ||
-    paidDates.some(e => { const t = e.split(":")[2]; return t === "W" || t === "WM"; })
-  );
-  const isDaily = !isWeekly && !isBimonthly && !!(
-    (loan.dailyAmount != null && loan.dailyAmount > 0) ||
-    /pay\s+daily\s+\d+/.test(notesText)
-  );
-  if (isDaily) return { frequency: "daily", amountDue: loan.dailyAmount ?? Math.round((loan.monthlyPayment ?? 0) / 30) };
-  if (isWeekly) return { frequency: "weekly", amountDue: loan.weeklyAmount ?? Math.round((loan.monthlyPayment ?? 0) / 4) };
-  if (isBimonthly) return { frequency: "bimonthly", amountDue: loan.bimonthlyAmount ?? Math.round((loan.monthlyPayment ?? 0) / 2) };
+
+  // 1. Column values (highest priority)
+  if (loan.dailyAmount != null && loan.dailyAmount > 0)
+    return { frequency: "daily", amountDue: loan.dailyAmount };
+  if (loan.weeklyAmount != null && loan.weeklyAmount > 0)
+    return { frequency: "weekly", amountDue: loan.weeklyAmount };
+  if (loan.bimonthlyAmount != null && loan.bimonthlyAmount > 0)
+    return { frequency: "bimonthly", amountDue: loan.bimonthlyAmount };
+
+  // 2. Notes regex
+  if (/pay\s+daily\s+\d+/.test(notesText))
+    return { frequency: "daily", amountDue: Math.round((loan.monthlyPayment ?? 0) / 30) };
+  if (/pay\s+weekly\s+\d+/.test(notesText))
+    return { frequency: "weekly", amountDue: Math.round((loan.monthlyPayment ?? 0) / 4) };
+  if (/pay\s+bi-?monthly\s+\d+/.test(notesText))
+    return { frequency: "bimonthly", amountDue: Math.round((loan.monthlyPayment ?? 0) / 2) };
+
+  // 3. paidDates tags (legacy fallback, lowest priority)
+  if (paidDates.some(e => { const t = e.split(":")[2]; return t === "BM" || t === "BMM"; }))
+    return { frequency: "bimonthly", amountDue: Math.round((loan.monthlyPayment ?? 0) / 2) };
+  if (paidDates.some(e => { const t = e.split(":")[2]; return t === "W" || t === "WM"; }))
+    return { frequency: "weekly", amountDue: Math.round((loan.monthlyPayment ?? 0) / 4) };
+  if (paidDates.some(e => { const t = e.split(":")[2]; return t === "D" || t === "DM"; }))
+    return { frequency: "daily", amountDue: Math.round((loan.monthlyPayment ?? 0) / 30) };
+
   return { frequency: "monthly", amountDue: loan.monthlyPayment ?? 0 };
 }
 
@@ -110,9 +121,15 @@ function buildAdminCollectionItems(emiLoans: EmiLoan[]): AdminCollectionItem[] {
     if (loan.status !== "Pending") continue;
     const { frequency, amountDue } = detectEmiFrequency(loan);
 
-    // Daily: skip if today's instalment is already in paidDates
+    // Daily: skip only if a "D" or "DM" type instalment was already recorded today.
+    // A monthly "M" entry from today (e.g. first-payment date) must NOT suppress the
+    // daily loan — that would be a false "already collected" signal.
     if (frequency === "daily") {
-      const alreadyPaidToday = (loan.paidDates ?? []).some(e => e.startsWith(todayStr + ":"));
+      const alreadyPaidToday = (loan.paidDates ?? []).some(e => {
+        if (!e.startsWith(todayStr + ":")) return false;
+        const type = e.split(":")[2] ?? "M";
+        return type === "D" || type === "DM";
+      });
       if (alreadyPaidToday) continue;
     }
 
@@ -123,14 +140,16 @@ function buildAdminCollectionItems(emiLoans: EmiLoan[]): AdminCollectionItem[] {
     if (isOverdue) {
       urgency = "overdue";
     } else if (frequency === "daily") {
+      // Daily loans always need collection today (if not already paid above).
       urgency = "today";
     } else if (nextDate) {
       const daysUntil = differenceInCalendarDays(nextDate, now);
-      if (daysUntil <= 0) urgency = "today";
-      else if (daysUntil <= 7) urgency = "upcoming";
-      else continue;
+      // Show due-today as "today", everything future as "upcoming" — no upper limit.
+      // Removing the 7-day cap ensures loans due later in the month still appear.
+      urgency = daysUntil <= 0 ? "today" : "upcoming";
     } else {
-      continue;
+      // No nextPaymentDate and not overdue → still include as upcoming so it's visible.
+      urgency = "upcoming";
     }
 
     items.push({ key: loan.emiId ?? loan.id, loan, name: loan.name, frequency, amountDue, urgency, dueDate: nextDate });
