@@ -24,10 +24,11 @@ router.get("/emi-loans", async (req, res): Promise<void> => {
       const rowPhone = extractPhoneFromWhatsapp(r.whatsapp);
       const phoneMatch = !!(rowPhone && myPhone && rowPhone === myPhone);
       const nameMatch = normalizeName(r.name) === myName;
-      // Accept if phone matches OR name matches — a phone format mismatch
-      // between the sheet's WhatsApp column and the Borrowers tab should not
-      // silently hide loans that clearly belong to this borrower by name.
-      return phoneMatch || nameMatch;
+      // Only fall back to name matching when the row has no extractable phone
+      // (data gap). Rows with a phone must match by phone — name-only fallback
+      // across rows that have phones risks cross-user data exposure when two
+      // borrowers share the same normalized name.
+      return rowPhone ? phoneMatch : nameMatch;
     });
   }
 
@@ -96,7 +97,7 @@ router.get("/emi-loans/:id", async (req, res): Promise<void> => {
     const allowed =
       rowPhone && myPhone
         ? rowPhone === myPhone
-        : row.name.trim().toLowerCase() === info.name.trim().toLowerCase();
+        : normalizeName(row.name) === normalizeName(info.name);
     if (!allowed) {
       res.status(403).json({ error: "Forbidden" });
       return;
@@ -187,7 +188,7 @@ router.get("/emi-loans/:id/payments", async (req, res): Promise<void> => {
     if (!row) { res.status(404).json({ error: "EMI loan not found" }); return; }
     const myPhone = normalizePhone(info.phone ?? "");
     const rowPhone = extractPhoneFromWhatsapp(row.whatsapp);
-    const allowed = rowPhone && myPhone ? rowPhone === myPhone : row.name.trim().toLowerCase() === info.name.trim().toLowerCase();
+    const allowed = rowPhone && myPhone ? rowPhone === myPhone : normalizeName(row.name) === normalizeName(info.name);
     if (!allowed) { res.status(403).json({ error: "Forbidden" }); return; }
   }
   const payments = await emiPaymentsRepo.listEmiPayments(id);

@@ -14,3 +14,5 @@
 - [Credit limit utilisation vs Total Due](credit-limit-vs-total-due.md) — two separate values: totalDue = financial obligation (finalAmount-paid / monthlyPayment×rem), creditUsed = deployed principal (regular: original principal; EMI: principalPerMonth×remainingMonths).
 - [Loan UUID lookup resilience](loan-uuid-lookup.md) — getLoanRow/getEmiLoanRow must fall back to loanId/emiId if UUID not found; trim id in parseRow to handle whitespace in sheet cells.
 - [EMI Archived status](emi-archived-status.md) — EmiLoanStatus now includes "Archived"; backend PATCH /emi-loans/:id passes body straight to updateEmiLoanRow with no enum validation, so no Zod schema change needed.
+- [Session cache cross-user leak pattern](session-cache-leak.md) — React Query cache must be cleared explicitly inside login() and logout(); effect-based clear misses same-user→user transitions where isSignedIn stays true.
+- [Borrower row filter — phone-first rule](borrower-phone-filter.md) — list endpoints must use `rowPhone ? phoneMatch : nameMatch`; never `phoneMatch || nameMatch` or name collisions expose another user's loans.
