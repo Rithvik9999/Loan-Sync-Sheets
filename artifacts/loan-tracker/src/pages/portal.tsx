@@ -201,14 +201,14 @@ function notifyAdminPaymentMade(params: {
 // ─── Loan Amount Rounding ─────────────────────────────────────────────────────
 
 /**
- * Round loan amount down to the nearest:
- *  - multiple of 5    when amount < 1000
- *  - multiple of 1000 when amount ≥ 1000
- * Returns the rounded value (always ≤ the input).
+ * Round repayment amount down to the nearest:
+ *  - multiple of 5   when repayment < 1000
+ *  - multiple of 10  when repayment ≥ 1000  (ends in 0)
+ * Discount = repayment − rounded. Always applied to the final repayment value.
  */
-function floorLoanAmount(amount: number): number {
+function floorRepaymentAmount(amount: number): number {
   if (amount < 1000) return Math.floor(amount / 5) * 5;
-  return Math.floor(amount / 1000) * 1000;
+  return Math.floor(amount / 10) * 10;
 }
 
 // ─── Loan Request Dialog ──────────────────────────────────────────────────────
@@ -267,13 +267,17 @@ function LoanRequestDialog({
   const watchedAmount = form.watch("amount");
   const watchedTenure = form.watch("tenureDays");
   const watchedIsDiscount = form.watch("isDiscount");
+  const watchedDiscountAbs = form.watch("discountOrChargesAbs");
 
-  // Auto-populate discount from rounding when amount changes
+  // Auto-populate discount from rounding when amount or tenure changes
+  // Discount is calculated on the repayment (final) value, not the principal.
   useEffect(() => {
     const amt = Number(watchedAmount);
-    if (!amt || amt <= 0) return;
-    const rounded = floorLoanAmount(amt);
-    const diff = amt - rounded;
+    const t = Number(watchedTenure);
+    if (!amt || amt <= 0 || !t || t <= 0) return;
+    const { finalAmount } = estimateFinalAmount({ principal: amt, tenureDays: t });
+    const rounded = floorRepaymentAmount(finalAmount);
+    const diff = finalAmount - rounded;
     if (diff > 0) {
       form.setValue("discountOrChargesAbs", diff, { shouldDirty: false });
       form.setValue("isDiscount", true, { shouldDirty: false });
@@ -281,16 +285,19 @@ function LoanRequestDialog({
       form.setValue("discountOrChargesAbs", 0, { shouldDirty: false });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchedAmount]);
+  }, [watchedAmount, watchedTenure]);
 
   const loanPreview = useMemo(() => {
     const p = Number(watchedAmount);
     const t = Number(watchedTenure);
     if (!p || !t || p <= 0 || t <= 0) return null;
-    const base = estimateFinalAmount({ principal: p, tenureDays: t });
+    const discountAbs = Number(watchedDiscountAbs ?? 0);
+    // discount > 0 reduces final amount; charge increases it
+    const discountValue = watchedIsDiscount ? discountAbs : -discountAbs;
+    const base = estimateFinalAmount({ principal: p, tenureDays: t, discount: discountValue });
     const typeDiscountAmt = Math.round(base.finalAmount * typeDiscountPct);
     return { ...base, typeDiscountAmt, discountedFinalAmount: base.finalAmount - typeDiscountAmt };
-  }, [watchedAmount, watchedTenure, typeDiscountPct]);
+  }, [watchedAmount, watchedTenure, typeDiscountPct, watchedDiscountAbs, watchedIsDiscount]);
 
   // Credit limit validation
   const creditLimitError = useMemo(() => {

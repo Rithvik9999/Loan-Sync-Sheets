@@ -107,7 +107,7 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
     return {
       name: loan?.name || defaultName || "",
       transactionDate: loan?.transactionDate || format(new Date(), "yyyy-MM-dd"),
-      principal: loan?.principal || 0,
+      principal: loan?.principal ?? (undefined as unknown as number),
       tenureDays: loan?.tenureDays || 30,
       returnDate: loan?.returnDate || "",
       whatsapp: loan?.whatsapp || "",
@@ -133,19 +133,26 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
   const watchedReturnDate = form.watch("returnDate");
   const watchedPrincipal = form.watch("principal");
 
-  /** Round loan amount down: nearest 5 if < 1000, nearest 1000 otherwise */
-  function floorLoanAmount(amount: number): number {
+  /**
+   * Round repayment amount down to nearest:
+   *  - multiple of 5   when repayment < 1000
+   *  - multiple of 10  when repayment ≥ 1000
+   * Discount = repayment − rounded (always applied to the final repayment value).
+   */
+  function floorRepaymentAmount(amount: number): number {
     if (amount < 1000) return Math.floor(amount / 5) * 5;
-    return Math.floor(amount / 1000) * 1000;
+    return Math.floor(amount / 10) * 10;
   }
 
-  // Auto-populate discount from rounding when principal changes (new loans only)
+  // Auto-populate discount from rounding when principal or tenure changes (new loans only)
   useEffect(() => {
     if (isEditing) return;
     const amt = Number(watchedPrincipal);
-    if (!amt || amt <= 0) return;
-    const rounded = floorLoanAmount(amt);
-    const diff = amt - rounded;
+    const t = Number(watchedTenureDays);
+    if (!amt || amt <= 0 || !t || t <= 0) return;
+    const { finalAmount } = estimateFinalAmount({ principal: amt, tenureDays: t });
+    const rounded = floorRepaymentAmount(finalAmount);
+    const diff = finalAmount - rounded;
     if (diff > 0) {
       form.setValue("discountOrChargesAbs", diff, { shouldDirty: false });
       form.setValue("isDiscount", true, { shouldDirty: false });
@@ -153,7 +160,7 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
       form.setValue("discountOrChargesAbs", 0, { shouldDirty: false });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchedPrincipal]);
+  }, [watchedPrincipal, watchedTenureDays]);
 
   // When tenureDays changes, update returnDate
   const handleTenureChange = (value: string) => {
@@ -266,14 +273,18 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
     b.name.toLowerCase().includes(nameSearch.toLowerCase()),
   );
 
+  const isDiscountChecked = form.watch("isDiscount");
+  const watchedDiscountAbs = form.watch("discountOrChargesAbs");
+
   const calcPreview = useMemo(() => {
     const p = Number(watchedPrincipal);
     const t = Number(watchedTenureDays);
     if (!p || !t || p <= 0 || t <= 0) return null;
-    return estimateFinalAmount({ principal: p, tenureDays: t });
-  }, [watchedPrincipal, watchedTenureDays]);
-
-  const isDiscountChecked = form.watch("isDiscount");
+    const discountAbs = Number(watchedDiscountAbs ?? 0);
+    // discount > 0 reduces final; charge (not discount) increases final
+    const discountValue = isDiscountChecked ? discountAbs : -discountAbs;
+    return estimateFinalAmount({ principal: p, tenureDays: t, discount: discountValue });
+  }, [watchedPrincipal, watchedTenureDays, watchedDiscountAbs, isDiscountChecked]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -331,37 +342,39 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                           <CommandEmpty className="py-3 text-center text-sm text-muted-foreground">
                             {nameSearch ? `Record as new borrower: "${nameSearch}"` : "No borrowers found."}
                           </CommandEmpty>
-                          <CommandGroup className="max-h-52 overflow-y-auto">
-                            {filteredNames.map((b) => (
-                              <CommandItem
-                                key={b.name}
-                                value={b.name}
-                                onSelect={(val) => {
-                                  field.onChange(val);
-                                  if (!form.getValues("whatsapp") && b.phone) {
-                                    form.setValue("whatsapp", b.phone);
-                                  }
-                                  setNameSearch("");
-                                  setNamePopoverOpen(false);
-                                }}
-                              >
-                                <Check
-                                  className={cn(
-                                    "mr-2 h-4 w-4",
-                                    currentName?.toLowerCase() === b.name.toLowerCase()
-                                      ? "opacity-100"
-                                      : "opacity-0",
+                          <div className="max-h-52 overflow-y-auto">
+                            <CommandGroup>
+                              {filteredNames.map((b) => (
+                                <CommandItem
+                                  key={b.name}
+                                  value={b.name}
+                                  onSelect={(val) => {
+                                    field.onChange(val);
+                                    if (!form.getValues("whatsapp") && b.phone) {
+                                      form.setValue("whatsapp", b.phone);
+                                    }
+                                    setNameSearch("");
+                                    setNamePopoverOpen(false);
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      currentName?.toLowerCase() === b.name.toLowerCase()
+                                        ? "opacity-100"
+                                        : "opacity-0",
+                                    )}
+                                  />
+                                  <span>{b.name}</span>
+                                  {b.phone && (
+                                    <span className="ml-auto text-xs text-muted-foreground">
+                                      {b.phone}
+                                    </span>
                                   )}
-                                />
-                                <span>{b.name}</span>
-                                {b.phone && (
-                                  <span className="ml-auto text-xs text-muted-foreground">
-                                    {b.phone}
-                                  </span>
-                                )}
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </div>
                         </Command>
                       </PopoverContent>
                     </Popover>
@@ -379,7 +392,7 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                   <FormItem>
                     <FormLabel>Principal (₹)</FormLabel>
                     <FormControl>
-                      <Input type="number" step="0.01" min="0" placeholder="5000" {...field} />
+                      <Input type="number" step="0.01" min="0" placeholder="5000" {...field} value={field.value ?? ""} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
