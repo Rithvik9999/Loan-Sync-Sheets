@@ -1,5 +1,5 @@
 import { useParams } from "wouter";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   useListLoanRequests,
   useUpdateLoanRequest,
@@ -48,6 +48,17 @@ import {
 } from "@/components/ui/alert-dialog";
 
 const ADMIN_WHATSAPP = "8917656405";
+
+/**
+ * Rounds the repayment amount down to the nearest ₹10 (≥₹1000) or ₹5 (<₹1000).
+ * The difference between the raw computed final amount and this floor is the
+ * "rounding discount" that makes the repayment a clean number.
+ * Must stay in sync with the copy in portal.tsx and loan-form-dialog.tsx.
+ */
+function floorRepaymentAmount(amount: number): number {
+  if (amount < 1000) return Math.floor(amount / 5) * 5;
+  return Math.floor(amount / 10) * 10;
+}
 
 /** Digits only, strips a leading 91/+91 country code, capped at 10 digits. */
 function sanitizePhoneForWa(raw: string): string {
@@ -117,6 +128,21 @@ export default function LoanRequestDetail() {
   const [transactionDate, setTransactionDate] = useState(
     new Date().toISOString().slice(0, 10),
   );
+
+  // Auto-populate the discount field with the rounding discount when the request loads.
+  // Uses the same formula as the "Record Loan" dialog so the admin sees a pre-filled
+  // clean value and only has to override it if they want a different discount.
+  useEffect(() => {
+    if (!req || req.status !== "Pending") return;
+    const p = req.amount ?? 0;
+    const t = req.tenureDays ?? 0;
+    if (!p || !t) return;
+    const { finalAmount } = estimateFinalAmount({ principal: p, tenureDays: t });
+    const rounded = floorRepaymentAmount(finalAmount);
+    const diff = finalAmount - rounded;
+    setDiscount(diff > 0 ? String(diff) : "0");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [req?.id]);
   const [isPaying, setIsPaying] = useState(false);
   const [isDeclining, setIsDeclining] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);

@@ -10,3 +10,5 @@
 - [Sheets column rename is positional](sheets-column-rename.md) — sheetsClient maps by header array order, not sheet header text; renaming a field in code needs no data migration.
 - [wa.me link country code](wa-me-links.md) — always prepend 91 to sanitized 10-digit phone before building a wa.me link, or WhatsApp fails to open the chat.
 - [Borrower directory merge key](borrower-directory-merge.md) — merge loan-sheet and Borrowers-tab records by normalized phone first, name only as fallback.
+- [EMI frequency detection and button logic](emi-frequency-detection.md) — check `field > 0` not `field != null`; show only the matching quick-pay button; normal monthly EMI gets no sub-frequency buttons.
+- [Credit limit utilisation vs Total Due](credit-limit-vs-total-due.md) — two separate values: totalDue = financial obligation (finalAmount-paid / monthlyPayment×rem), creditUsed = deployed principal (regular: original principal; EMI: principalPerMonth×remainingMonths).

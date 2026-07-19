@@ -338,8 +338,10 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                           </div>
                         )}
                         <div
-                          className="max-h-52 overflow-y-auto overscroll-contain py-1"
+                          className="max-h-52 overflow-y-scroll overscroll-contain py-1"
                           style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+                          onTouchStart={(e) => e.stopPropagation()}
+                          onTouchMove={(e) => e.stopPropagation()}
                         >
                           {filteredNames.length === 0 ? (
                             <div className="py-3 text-center text-sm text-muted-foreground">

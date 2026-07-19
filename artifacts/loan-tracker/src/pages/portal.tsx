@@ -3379,18 +3379,28 @@ export default function Portal() {
     [activeLoans, activeEmi],
   );
 
-  // Credit limit utilisation: principal-based — how much of the lender's capital is deployed.
-  // Uses original loan principal (not outstanding dues) so the limit isn't "used up" by
-  // accrued interest, and stays consistent with the server-side credit-limit check.
+  // Credit limit utilisation: uses remaining principal for EMI (accounts for paid months)
+  // and original principal for regular loans (no principal/interest split in payments).
+  // This way paying off EMI months reduces credit used, which is fair.
+  // NOTE: server-side new-loan check uses original e.principal to block over-limit requests —
+  // that's intentional (conservative underwriting); display here shows remaining exposure.
   const usedPrincipal = useMemo(
     () =>
       activeLoans.reduce((sum, l) => sum + (l.principal ?? 0), 0) +
-      activeEmi.reduce((sum, e) => sum + (e.principal ?? 0), 0),
+      activeEmi.reduce((sum, e) => {
+        const rem = e.remainingMonths != null ? Math.max(e.remainingMonths, 0) : null;
+        if (rem != null && e.principalPerMonth != null) {
+          return sum + e.principalPerMonth * rem;
+        }
+        if (rem != null && e.tenureMonths > 0) {
+          return sum + Math.round((e.principal ?? 0) * rem / e.tenureMonths);
+        }
+        return sum + (e.principal ?? 0);
+      }, 0),
     [activeLoans, activeEmi],
   );
   const availableCredit =
     creditLimit != null ? Math.max(creditLimit - usedPrincipal, 0) : null;
-  // Not capped at 100 so we can show ">100%" when over limit
   const usedPct =
     creditLimit && creditLimit > 0
       ? Math.round((usedPrincipal / creditLimit) * 100)
@@ -3472,12 +3482,15 @@ export default function Portal() {
               {/* Donut 64×64 — embed fill in data for reliable Recharts colors */}
               <div className="relative shrink-0" style={{ width: 64, height: 64 }}>
                 {(() => {
+                  // Over-limit: show full circle in red; normal: show used/available split
                   const pieData =
                     creditLimit != null && creditLimit > 0
-                      ? [
-                          { name: "Used",      value: Math.min(usedPrincipal, creditLimit), fill: pctToHex(usedPct ?? 0) },
-                          { name: "Available", value: Math.max(creditLimit - usedPrincipal, 0), fill: "#e2e8f0" },
-                        ]
+                      ? isOverLimit
+                        ? [{ name: "Over", value: 1, fill: "#ef4444" }]
+                        : [
+                            { name: "Used",      value: usedPrincipal, fill: pctToHex(usedPct ?? 0) },
+                            { name: "Available", value: Math.max(creditLimit - usedPrincipal, 0), fill: "#e2e8f0" },
+                          ]
                       : [{ name: "Empty", value: 1, fill: "#e2e8f0" }];
                   return (
                     <PieChart width={64} height={64} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
@@ -3501,7 +3514,7 @@ export default function Portal() {
                   <span
                     className={`text-[9px] font-bold font-numeric leading-none ${isOverLimit ? "text-destructive" : "text-foreground"}`}
                   >
-                    {usedPct != null ? (isOverLimit ? "100%" : `${usedPct}%`) : "—"}
+                    {usedPct != null ? `${usedPct}%` : "—"}
                   </span>
                 </div>
               </div>

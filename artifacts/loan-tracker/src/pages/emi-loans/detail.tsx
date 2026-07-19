@@ -459,18 +459,32 @@ export default function EmiLoanDetail() {
   // Detect frequency from dedicated sheet columns (U/V/W), notes/whatsapp text,
   // OR from the type tags already present in paidDates entries ("BM"/"BMM" / "W"/"WM").
   const _notesText = `${loan.notes ?? ""} ${loan.whatsapp ?? ""}`.toLowerCase();
+  // ─── Frequency Detection ────────────────────────────────────────────────────
+  // Rules (in priority order):
+  //  1. Dedicated sheet column (bimonthlyAmount / weeklyAmount / dailyAmount) with a
+  //     value GREATER THAN ZERO.  Null or 0 means "not set" — the UI falls back to
+  //     computing those values from monthlyPayment (see dailyAmount/weeklyAmount/
+  //     bimonthlyAmount locals below), but that doesn't make the loan a daily/weekly loan.
+  //  2. Notes / WhatsApp text contains a frequency marker.
+  //  3. Existing paidDates entries carry frequency type tags (BM/BMM, W/WM).
+  //
+  // Only ONE of isDailyLoan / isWeeklyLoan / isBimonthlyLoan should be true at a time.
+  // Normal monthly EMI loans have all three false → no sub-frequency quick-pay buttons.
   const isBimonthlyLoan = !!(
-    loan.bimonthlyAmount != null ||
+    (loan.bimonthlyAmount != null && loan.bimonthlyAmount > 0) ||
     _notesText.includes("bimonthly") ||
     (loan.paidDates ?? []).some((e) => { const t = e.split(":")[2]; return t === "BM" || t === "BMM"; })
   );
   const isWeeklyLoan = !!(
-    loan.weeklyAmount != null ||
+    (loan.weeklyAmount != null && loan.weeklyAmount > 0) ||
     _notesText.includes("pay weekly") ||
     (loan.paidDates ?? []).some((e) => { const t = e.split(":")[2]; return t === "W" || t === "WM"; })
   );
+  // isDailyLoan: sheet dailyAmount column > 0 OR explicit "pay daily" in notes.
+  // NOTE: dailyAmount is ALSO computed below as a fallback (monthly ÷ 30) for display,
+  // but a computed value doesn't make this a daily-frequency loan.
   const isDailyLoan = !!(
-    loan.dailyAmount != null ||
+    (loan.dailyAmount != null && loan.dailyAmount > 0) ||
     _notesText.includes("pay daily")
   );
 
@@ -503,7 +517,12 @@ export default function EmiLoanDetail() {
           label: isBimonthlyLoan ? "Bimonthly Instalments" : "Weekly Instalments",
           value: `${remainingInstallments} / ${totalInstallments} remaining`,
         }]
-      : []),
+      : loan.remainingMonths != null
+        ? [{
+            label: "Monthly Instalments",
+            value: `${loan.remainingMonths} / ${loan.tenureMonths} months remaining`,
+          }]
+        : []),
     { label: "Transaction Date", value: formatDate(loan.transactionDate) },
     {
       label: "Next Payment",
@@ -590,7 +609,10 @@ export default function EmiLoanDetail() {
             {loan.status !== "Clear" && loan.monthlyPayment != null && (
               <div className="flex flex-col gap-1.5">
                 <div className="flex flex-wrap items-center gap-2">
-                  {!isWeeklyLoan && !isBimonthlyLoan && (
+                  {/* Quick-pay buttons: show ONLY the button matching this loan's frequency.
+                      Normal monthly EMI loans have isDailyLoan=isWeeklyLoan=isBimonthlyLoan=false
+                      → no quick-pay buttons (use the Monthly Payment button instead). */}
+                  {isDailyLoan && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -605,7 +627,7 @@ export default function EmiLoanDetail() {
                     Daily {dailyAmount != null && <span className="font-numeric font-semibold">₹{dailyAmount.toLocaleString("en-IN")}</span>}
                   </Button>
                   )}
-                  {!isBimonthlyLoan && !isDailyLoan && (
+                  {isWeeklyLoan && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -620,7 +642,7 @@ export default function EmiLoanDetail() {
                     Weekly {weeklyAmount != null && <span className="font-numeric font-semibold">₹{weeklyAmount.toLocaleString("en-IN")}</span>}
                   </Button>
                   )}
-                  {!isWeeklyLoan && !isDailyLoan && (
+                  {isBimonthlyLoan && (
                   <Button
                     size="sm"
                     variant="outline"
