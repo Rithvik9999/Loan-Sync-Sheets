@@ -72,7 +72,7 @@ const COL = {
   BIMONTHLY_AMOUNT: 22,
 } as const;
 
-export type EmiLoanStatus = "Pending" | "Clear";
+export type EmiLoanStatus = "Pending" | "Clear" | "Archived";
 
 export interface EmiLoanRow {
   id: string;
@@ -333,7 +333,7 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
       : 0;
 
   return {
-    id: toText(get(COL.ID)),
+    id: toText(get(COL.ID)).trim(),
     emiId: makeEmiId(rowNumber),
     rowNumber,
     name: toText(get(COL.NAME)),
@@ -448,7 +448,9 @@ export async function listEmiLoanRows(): Promise<EmiLoanRow[]> {
 
 export async function getEmiLoanRow(id: string): Promise<EmiLoanRow | null> {
   const rows = await listEmiLoanRows();
-  return rows.find((r) => r.id === id) ?? null;
+  // Primary: match by UUID. Fallback: match by human-readable emiId (e.g. "E-0012")
+  // so that bookmark-style links and UUID write-back failures don't leave a loan inaccessible.
+  return rows.find((r) => r.id === id || r.emiId === id) ?? null;
 }
 
 async function getEmiLoanRowAtRowNumber(rowNumber: number): Promise<EmiLoanRow | null> {

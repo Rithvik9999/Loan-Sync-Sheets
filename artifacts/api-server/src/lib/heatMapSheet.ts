@@ -242,7 +242,7 @@ function parseRow(raw: unknown[], rowNumber: number): LoanRow {
       : null;
 
   return {
-    id: toText(get(COL.ID)),
+    id: toText(get(COL.ID)).trim(),
     loanId: makeLoanId(rowNumber),
     rowNumber,
     name: toText(get(COL.NAME)),
@@ -323,7 +323,10 @@ export async function listLoanRows(): Promise<LoanRow[]> {
 
 export async function getLoanRow(id: string): Promise<LoanRow | null> {
   const rows = await listLoanRows();
-  return rows.find((r) => r.id === id) ?? null;
+  // Primary: match by UUID. Fallback: match by human-readable loanId (e.g. "L-0065")
+  // so that (a) direct bookmark-style links work and (b) if a UUID write-back to the
+  // sheet ever fails the row is still reachable by its stable display ID.
+  return rows.find((r) => r.id === id || r.loanId === id) ?? null;
 }
 
 async function findNextRowNumber(): Promise<number> {

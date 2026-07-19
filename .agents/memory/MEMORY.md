@@ -12,3 +12,5 @@
 - [Borrower directory merge key](borrower-directory-merge.md) — merge loan-sheet and Borrowers-tab records by normalized phone first, name only as fallback.
 - [EMI frequency detection and button logic](emi-frequency-detection.md) — check `field > 0` not `field != null`; show only the matching quick-pay button; normal monthly EMI gets no sub-frequency buttons.
 - [Credit limit utilisation vs Total Due](credit-limit-vs-total-due.md) — two separate values: totalDue = financial obligation (finalAmount-paid / monthlyPayment×rem), creditUsed = deployed principal (regular: original principal; EMI: principalPerMonth×remainingMonths).
+- [Loan UUID lookup resilience](loan-uuid-lookup.md) — getLoanRow/getEmiLoanRow must fall back to loanId/emiId if UUID not found; trim id in parseRow to handle whitespace in sheet cells.
+- [EMI Archived status](emi-archived-status.md) — EmiLoanStatus now includes "Archived"; backend PATCH /emi-loans/:id passes body straight to updateEmiLoanRow with no enum validation, so no Zod schema change needed.

@@ -16,7 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus, Search, ChevronRight, CalendarClock, CheckSquare, CheckCircle2, Loader2, CalendarRange, Banknote } from "lucide-react";
+import { Plus, Search, ChevronRight, CalendarClock, CheckSquare, CheckCircle2, Loader2, CalendarRange, Banknote, Archive } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
@@ -34,8 +34,23 @@ function EmiStatusBadge({ status }: { status: string }) {
       return <Badge variant="success">Clear</Badge>;
     case "Temp":
       return <Badge variant="outline" className="border-amber-200 text-amber-800 bg-amber-50">Temp</Badge>;
+    case "Archived":
+      return <Badge variant="outline" className="border-slate-300 text-slate-500 bg-slate-50">Archived</Badge>;
     default:
       return <Badge variant="outline">{status}</Badge>;
+  }
+}
+
+async function archiveEmiLoan(id: string): Promise<void> {
+  const res = await fetch(`/api/emi-loans/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status: "Archived" }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to archive EMI loan");
   }
 }
 
@@ -283,7 +298,10 @@ export default function EmiLoansList() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkPaidOpen, setBulkPaidOpen] = useState(false);
+  const [bulkArchivePending, setBulkArchivePending] = useState(false);
   const [payLoan, setPayLoan] = useState<EmiLoan | null>(null);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const { data: loans, isLoading } = useQuery<EmiLoan[]>({
     queryKey: EMI_LOANS_QUERY_KEY,
@@ -318,7 +336,9 @@ export default function EmiLoansList() {
         .filter((l) => {
           const nameMatch = l.name.toLowerCase().includes(search.toLowerCase());
           const statusMatch =
-            statusFilter === "all" ? l.status !== "Clear" : l.status === statusFilter;
+            statusFilter === "all"
+              ? l.status !== "Clear" && l.status !== "Archived"
+              : l.status === statusFilter;
           return nameMatch && statusMatch;
         })
         .filter((l) => {
@@ -356,7 +376,26 @@ export default function EmiLoansList() {
 
   const [, setLocation] = useLocation();
   const selectedLoans = (filtered ?? []).filter((l) => selected.has(l.id));
-  const pendingSelected = selectedLoans.filter((l) => l.status !== "Clear");
+  const pendingSelected = selectedLoans.filter((l) => l.status !== "Clear" && l.status !== "Archived");
+  const archivableSelected = selectedLoans.filter((l) => l.status !== "Clear" && l.status !== "Archived");
+
+  const handleBulkArchive = async () => {
+    if (archivableSelected.length === 0) return;
+    setBulkArchivePending(true);
+    try {
+      await Promise.all(archivableSelected.map((l) => archiveEmiLoan(l.id)));
+      queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
+      toast({
+        title: `${archivableSelected.length} EMI loan${archivableSelected.length !== 1 ? "s" : ""} archived`,
+        description: "Archived loans are hidden from the active list. Use the Archived filter to view them.",
+      });
+      setSelected(new Set());
+    } catch {
+      toast({ variant: "destructive", title: "Error", description: "Some loans could not be archived. Please retry." });
+    } finally {
+      setBulkArchivePending(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -383,6 +422,20 @@ export default function EmiLoansList() {
             <Button variant="outline" size="sm" onClick={() => setSelected(new Set())}>
               Clear
             </Button>
+            {archivableSelected.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-slate-400 text-slate-700 hover:bg-slate-50"
+                onClick={handleBulkArchive}
+                disabled={bulkArchivePending}
+              >
+                {bulkArchivePending
+                  ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  : <Archive className="mr-1.5 h-3.5 w-3.5" />}
+                Archive {archivableSelected.length}
+              </Button>
+            )}
             {pendingSelected.length > 0 && (
               <Button
                 size="sm"
@@ -420,6 +473,7 @@ export default function EmiLoansList() {
                 <SelectItem value="Pending">Pending</SelectItem>
                 <SelectItem value="Temp">Temp</SelectItem>
                 <SelectItem value="Clear">Clear</SelectItem>
+                <SelectItem value="Archived">Archived</SelectItem>
               </SelectContent>
             </Select>
           </div>

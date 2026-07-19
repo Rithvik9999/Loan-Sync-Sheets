@@ -18,7 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "@/components/ui/link";
-import { ArrowLeft, Edit, Trash2, Calendar, FileText, Plus, TrendingUp, CalendarDays, CalendarRange, Loader2, RotateCcw, Pencil } from "lucide-react";
+import { ArrowLeft, Edit, Trash2, Calendar, FileText, Plus, TrendingUp, CalendarDays, CalendarRange, Loader2, RotateCcw, Pencil, Share2 } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { LoanStatusBadge } from "@/components/status-badges";
 
@@ -35,6 +35,26 @@ import {
 
 import LoanFormDialog from "./components/loan-form-dialog";
 import RecordPaymentDialog from "./components/record-payment-dialog";
+
+// ─── WhatsApp Share Helpers ──────────────────────────────────────────────────
+
+const ADMIN_WA = "8917656405";
+
+function sanitizePhoneNumber(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  const stripped = digits.length > 10 && digits.startsWith("91") ? digits.slice(2) : digits;
+  return stripped.slice(-10);
+}
+
+function openWaLink(url: string) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
 
 export default function LoanDetail() {
   const { id } = useParams<{ id: string }>();
@@ -97,6 +117,33 @@ export default function LoanDetail() {
 
   const isOverdue = (loan.lateDays ?? 0) > 0 && loan.status !== "Clear";
 
+  const handleShare = () => {
+    const outstanding = Math.max((loan.finalAmount ?? 0) - (loan.paid ?? 0), 0);
+    const lines = [
+      `📋 Loan Summary`,
+      `👤 Name: ${loan.name}`,
+      `🔖 Loan ID: ${loan.loanId}`,
+      `💰 Principal: ${formatCurrency(loan.principal)}`,
+      ...(loan.transactionDate ? [`📅 Transaction Date: ${formatDate(loan.transactionDate)}`] : []),
+      ...(loan.returnDate ? [`📆 Return Date: ${formatDate(loan.returnDate)}`] : []),
+      `💵 Amount to Collect: ${loan.finalAmount != null ? formatCurrency(loan.finalAmount) : "—"}`,
+      `✅ Collected: ${formatCurrency(loan.paid ?? 0)}`,
+      ...(outstanding > 0 ? [`🔴 Outstanding: ${formatCurrency(outstanding)}`] : []),
+      `📊 Status: ${loan.status}`,
+      ...(isOverdue && (loan.lateDays ?? 0) > 0 ? [`⚠️ Late by: ${loan.lateDays} days`] : []),
+    ];
+    const msg = lines.join("\n");
+    let phone: string;
+    if (isStaff) {
+      const raw = (loan.whatsapp ?? "").split("\n")[0].trim();
+      const digits = sanitizePhoneNumber(raw);
+      phone = digits.length === 10 ? `91${digits}` : ADMIN_WA;
+    } else {
+      phone = ADMIN_WA;
+    }
+    openWaLink(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`);
+  };
+
   // Compute perDayAddition locally as a fallback in case the API field is absent
   const perDayAddition: number | null =
     (loan as any).perDayAddition ??
@@ -145,16 +192,21 @@ export default function LoanDetail() {
           </div>
         </div>
 
-        {isStaff && (
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setIsEditOpen(true)}>
-              <Edit className="h-4 w-4 mr-2" /> Edit
-            </Button>
-            <Button variant="destructive" onClick={() => setIsDeleteStep1Open(true)}>
-              <Trash2 className="h-4 w-4 mr-2" /> Delete
-            </Button>
-          </div>
-        )}
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={handleShare}>
+            <Share2 className="h-4 w-4 mr-2" /> Share
+          </Button>
+          {isStaff && (
+            <>
+              <Button variant="outline" onClick={() => setIsEditOpen(true)}>
+                <Edit className="h-4 w-4 mr-2" /> Edit
+              </Button>
+              <Button variant="destructive" onClick={() => setIsDeleteStep1Open(true)}>
+                <Trash2 className="h-4 w-4 mr-2" /> Delete
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="grid md:grid-cols-3 gap-6">
