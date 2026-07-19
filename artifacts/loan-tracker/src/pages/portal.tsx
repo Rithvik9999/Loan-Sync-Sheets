@@ -3561,18 +3561,20 @@ export default function Portal() {
                   <span
                     className={`text-[9px] font-bold font-numeric leading-none ${isOverLimit ? "text-destructive" : "text-foreground"}`}
                   >
-                    {usedPct != null ? `${usedPct}%` : "—"}
+                    {usedPct != null ? (isOverLimit ? "100%" : `${usedPct}%`) : "—"}
                   </span>
                 </div>
               </div>
               <p className="text-[9px] text-muted-foreground leading-tight">Credit Limit</p>
               {creditLimit != null && (
                 <div className="flex flex-col items-center gap-0">
-                  <p
-                    className={`text-[9px] font-numeric leading-tight ${isOverLimit ? "text-destructive font-semibold" : "text-muted-foreground"}`}
-                  >
-                    {formatCurrency(availableCredit ?? 0)} free
-                  </p>
+                  {isOverLimit ? (
+                    <p className="text-[9px] font-semibold text-destructive leading-tight">Over limit</p>
+                  ) : (
+                    <p className="text-[9px] font-numeric leading-tight text-muted-foreground">
+                      {formatCurrency(availableCredit ?? 0)} free
+                    </p>
+                  )}
                   <p className="text-[8px] text-muted-foreground/60 font-numeric leading-tight">
                     of {formatCurrency(creditLimit)}
                   </p>

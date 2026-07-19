@@ -342,7 +342,10 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                           <CommandEmpty className="py-3 text-center text-sm text-muted-foreground">
                             {nameSearch ? `Record as new borrower: "${nameSearch}"` : "No borrowers found."}
                           </CommandEmpty>
-                          <div className="max-h-52 overflow-y-auto">
+                          <div
+                            className="max-h-52 overflow-y-auto overscroll-contain"
+                            style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
+                          >
                             <CommandGroup>
                               {filteredNames.map((b) => (
                                 <CommandItem
