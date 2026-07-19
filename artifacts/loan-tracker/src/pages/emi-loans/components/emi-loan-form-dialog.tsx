@@ -35,6 +35,7 @@ import {
   CommandGroup,
   CommandInput,
   CommandItem,
+  CommandList,
 } from "@/components/ui/command";
 import {
   Popover,
@@ -371,7 +372,8 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
                           <CommandEmpty className="py-3 text-center text-sm text-muted-foreground">
                             {nameSearch ? `Record as new borrower: "${nameSearch}"` : "No borrowers found."}
                           </CommandEmpty>
-                          <CommandGroup className="max-h-52 overflow-y-auto">
+                          <CommandList className="max-h-52">
+                          <CommandGroup>
                             {filteredNames.map((b) => (
                               <CommandItem
                                 key={b.name}
@@ -402,6 +404,7 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
                               </CommandItem>
                             ))}
                           </CommandGroup>
+                          </CommandList>
                         </Command>
                       </PopoverContent>
                     </Popover>

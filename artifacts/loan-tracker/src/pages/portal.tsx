@@ -3435,19 +3435,11 @@ export default function Portal() {
     [activeLoans, activeEmi],
   );
 
-  // Credit limit utilisation — for regular loans, use outstanding balance (principal − paid);
-  // for EMI loans use remaining principal (principalPerMonth × remainingMonths).
-  const usedPrincipal = useMemo(
-    () =>
-      activeLoans.reduce((s, l) => s + Math.max((l.principal ?? 0) - (l.paid ?? 0), 0), 0) +
-      activeEmi.reduce((s, e) => {
-        if (e.principalPerMonth != null && e.remainingMonths != null) {
-          return s + e.principalPerMonth * Math.max(e.remainingMonths, 0);
-        }
-        return s + (e.principal ?? 0); // legacy fallback
-      }, 0),
-    [activeLoans, activeEmi],
-  );
+  // Credit limit utilisation — use the same formula as totalOutstanding so the
+  // percentage always agrees with "Total Due". The old per-field approach (principal - paid
+  // for loans, full e.principal fallback for EMI) caused the % to exceed 100% even when
+  // the actual amount owed was under the limit.
+  const usedPrincipal = totalOutstanding;
   const availableCredit =
     creditLimit != null ? Math.max(creditLimit - usedPrincipal, 0) : null;
   // Not capped at 100 so we can show ">100%" when over limit

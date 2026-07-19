@@ -43,6 +43,7 @@ import {
   CommandGroup,
   CommandInput,
   CommandItem,
+  CommandList,
 } from "@/components/ui/command";
 import {
   Popover,
@@ -342,10 +343,7 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                           <CommandEmpty className="py-3 text-center text-sm text-muted-foreground">
                             {nameSearch ? `Record as new borrower: "${nameSearch}"` : "No borrowers found."}
                           </CommandEmpty>
-                          <div
-                            className="max-h-52 overflow-y-auto overscroll-contain"
-                            style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
-                          >
+                          <CommandList className="max-h-52">
                             <CommandGroup>
                               {filteredNames.map((b) => (
                                 <CommandItem
@@ -377,7 +375,7 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                                 </CommandItem>
                               ))}
                             </CommandGroup>
-                          </div>
+                          </CommandList>
                         </Command>
                       </PopoverContent>
                     </Popover>
