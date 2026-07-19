@@ -2466,6 +2466,38 @@ function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
           /pay\s+bi-?monthly\s+\d+/.test(_loanNotesText) ||
           (loan.paidDates ?? []).some((e: string) => { const t = e.split(":")[2]; return t === "BM" || t === "BMM"; })
         );
+
+        // Resolve per-instalment display amount — notes-detected loans may have null sheet column.
+        // Use parsePaymentFrequency (the same function as the payment-items section) since it
+        // returns { type, amount } and understands bimonthly/weekly/daily frequency text.
+        const _emiFreq = parsePaymentFrequency((loan as any).notes, (loan as any).whatsapp);
+        const weeklyDisplayAmt = (loan.weeklyAmount ?? 0) > 0
+          ? loan.weeklyAmount!
+          : (isWeekly && _emiFreq.type === "weekly" && (_emiFreq.amount ?? 0) > 0 ? _emiFreq.amount! : 0);
+        const bimonthlyDisplayAmt = (loan.bimonthlyAmount ?? 0) > 0
+          ? loan.bimonthlyAmount!
+          : (isBimonthly && _emiFreq.type === "bimonthly" && (_emiFreq.amount ?? 0) > 0 ? _emiFreq.amount! : 0);
+
+        // Compute instalment remaining/total count for the right column.
+        let remainingDisplay: string;
+        if (isWeekly) {
+          const wTotal = Math.round((loan.tenureMonths ?? 0) * 4);
+          const wPaidCount = (loan.paidDates ?? []).filter((e: string) => {
+            const t = e.split(":")[2]; return t === "W" || t === "WM";
+          }).length;
+          remainingDisplay = `${Math.max(0, wTotal - wPaidCount)}/${wTotal}`;
+        } else if (isBimonthly) {
+          const bmTotal = Math.round((loan.tenureMonths ?? 0) * 2);
+          const bmPaidCount = (loan.paidDates ?? []).filter((e: string) => {
+            const t = e.split(":")[2]; return t === "BM" || t === "BMM";
+          }).length;
+          remainingDisplay = `${Math.max(0, bmTotal - bmPaidCount)}/${bmTotal}`;
+        } else {
+          remainingDisplay = loan.remainingMonths != null
+            ? `${loan.remainingMonths}/${loan.tenureMonths ?? "?"}`
+            : "—";
+        }
+
         let displayNextDate: string | null = loan.nextPaymentDate ?? null;
         if (isWeekly) {
           const paidDateStrs = (loan.paidDates ?? [])
@@ -2532,9 +2564,9 @@ function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
                   </div>
                   <div className="text-lg font-bold font-numeric">
                     {isWeekly
-                      ? formatCurrency(loan.weeklyAmount ?? 0)
+                      ? formatCurrency(weeklyDisplayAmt)
                       : isBimonthly
-                        ? formatCurrency(loan.bimonthlyAmount ?? 0)
+                        ? formatCurrency(bimonthlyDisplayAmt)
                         : loan.monthlyPayment != null
                           ? formatCurrency(loan.monthlyPayment)
                           : "—"}
@@ -2558,11 +2590,9 @@ function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
                   </div>
                 </div>
                 <div className="p-4 space-y-0.5">
-                  <div className="text-xs text-muted-foreground">Remaining</div>
+                  <div className="text-xs text-muted-foreground">Instalments</div>
                   <div className="text-base font-semibold">
-                    {loan.remainingMonths != null
-                      ? `${loan.remainingMonths} mo`
-                      : "—"}
+                    {remainingDisplay}
                   </div>
                 </div>
               </div>

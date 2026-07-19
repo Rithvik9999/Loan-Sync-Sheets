@@ -129,6 +129,47 @@ function colLetter(idx: number): string {
   return String.fromCharCode(65 + idx);
 }
 
+// ── One-time formula migration: ROUND → CEILING in financial columns ──────────
+// Replaces ROUND( with CEILING( in the sheet's formula row for flat fee, interest,
+// late fees, and final amount columns so monetary amounts always round up to the
+// nearest rupee, consistent with JS-side rounding.
+let ceilingFormulaMigrationDone = false;
+
+function applyRoundToCeiling(formula: string): string {
+  if (!formula || !formula.startsWith("=")) return formula;
+  let result = formula.replace(/\bROUND\(/g, "CEILING(");
+  // CEILING(expr, 0) is a Sheets error; fix any ", 0)" left by the ROUND second arg.
+  result = result.replace(/,\s*0\s*\)/g, ", 1)");
+  return result;
+}
+
+async function ensureHeatMapCeilingFormulas(): Promise<void> {
+  if (ceilingFormulaMigrationDone) return;
+  try {
+    const formulaRowRange = `${TAB}!A${FORMULA_ROW}:V${FORMULA_ROW}`;
+    const rows = await getRawValues(formulaRowRange, "FORMULA");
+    const cells: unknown[] = rows[0] ?? [];
+    const colsToMigrate = [COL.FLAT_FEE, COL.INTEREST, COL.LATE_FEES, COL.FINAL_AMOUNT];
+    const updates: { range: string; values: (string | number)[][] }[] = [];
+    for (const colIdx of colsToMigrate) {
+      const raw = cells[colIdx];
+      const formula = typeof raw === "string" ? raw : "";
+      if (!formula.includes("ROUND(")) continue;
+      const updated = applyRoundToCeiling(formula);
+      if (updated !== formula) {
+        updates.push({ range: `${TAB}!${colLetter(colIdx)}${FORMULA_ROW}`, values: [[updated]] });
+      }
+    }
+    if (updates.length > 0) {
+      await batchUpdateCells(updates);
+      console.info(`[heatMapSheet] Migrated ${updates.length} formula(s): ROUND → CEILING.`);
+    }
+    ceilingFormulaMigrationDone = true;
+  } catch (err) {
+    console.warn("[heatMapSheet] CEILING migration failed (will retry):", err);
+  }
+}
+
 /** Google Sheets/Excel serial date (days since 1899-12-30) -> "YYYY-MM-DD". */
 function serialToISODate(value: unknown): string | null {
   if (typeof value !== "number") return null;
@@ -249,6 +290,8 @@ export interface LoanRowUpdate {
 
 /** Reads every real data row (skips the header/formula rows and blanks), backfilling any missing id. */
 export async function listLoanRows(): Promise<LoanRow[]> {
+  // Kick off the one-time ROUND→CEILING migration non-blockingly.
+  ensureHeatMapCeilingFormulas().catch(() => {});
   const raw = await getRawValues(`${TAB}!A${DATA_START_ROW}:V`);
   const rows: LoanRow[] = [];
   const idBackfills: { range: string; values: (string | number)[][] }[] = [];

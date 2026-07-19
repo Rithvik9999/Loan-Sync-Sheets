@@ -397,13 +397,13 @@ async function ensureEmiLateFeesFormula(): Promise<void> {
     //   C6:C < TODAY()         → payment was due in the past (overdue)
     //   ISNUMBER(R6:R)         → remainingMonths is computed
     //   R6:R > 0               → loan not fully repaid
-    // Value: FLOOR(TODAY()-C) = integer overdue days, ×K/30×1.5 = daily interest accrual (+50% late fee)
+    // Value: overdue days × (K/30) × 1.5, wrapped in CEILING so result is always a whole rupee.
     const formula =
       `=ARRAYFORMULA(IF(` +
       `(D${DATA_START_ROW}:D<>"")*(O${DATA_START_ROW}:O="Pending")` +
       `*(ISNUMBER(C${DATA_START_ROW}:C))*(C${DATA_START_ROW}:C<TODAY())` +
       `*(ISNUMBER(R${DATA_START_ROW}:R))*(R${DATA_START_ROW}:R>0),` +
-      `FLOOR(TODAY()-C${DATA_START_ROW}:C)*IFERROR(K${DATA_START_ROW}:K,0)/30*1.5,` +
+      `CEILING(FLOOR(TODAY()-C${DATA_START_ROW}:C)*IFERROR(K${DATA_START_ROW}:K,0)/30*1.5,1),` +
       `0))`;
     await batchUpdateCellsInSheet(sheetId, [{ range: targetCell, values: [[formula]] }]);
     lateFeesFormulaWritten = true;
