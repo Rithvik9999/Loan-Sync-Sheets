@@ -2590,7 +2590,7 @@ function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
                   </div>
                 </div>
                 <div className="p-4 space-y-0.5">
-                  <div className="text-xs text-muted-foreground">Instalments</div>
+                  <div className="text-xs text-muted-foreground">Instalments Remaining</div>
                   <div className="text-base font-semibold">
                     {remainingDisplay}
                   </div>
