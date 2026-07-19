@@ -360,10 +360,10 @@ export default function EmiLoanDetail() {
     }
   };
 
-  /** One-click: record weekly instalment — uses dedicated sheet column V if set, else monthlyPayment × 7 ÷ 30 */
+  /** One-click: record weekly instalment — uses dedicated sheet column V if set, else monthlyPayment ÷ 4 (4 weekly instalments = 1 month) */
   const handleWeeklyPayment = async () => {
     if (!loan || !loan.monthlyPayment) return;
-    const amount = loan.weeklyAmount ?? Math.round((loan.monthlyPayment * 7) / 30);
+    const amount = loan.weeklyAmount ?? Math.round(loan.monthlyPayment / 4);
     const date = quickPayDate;
     // Guard: reject duplicate entry for same date
     if ((loan.paidDates ?? []).some((e) => e.startsWith(date + ":"))) {
@@ -452,7 +452,8 @@ export default function EmiLoanDetail() {
 
   // Computed quick-pay amounts — prefer dedicated sheet columns U/V/W, fall back to formula
   const dailyAmount = loan.dailyAmount ?? (loan.monthlyPayment != null ? Math.round(loan.monthlyPayment / 30) : null);
-  const weeklyAmount = loan.weeklyAmount ?? (loan.monthlyPayment != null ? Math.round((loan.monthlyPayment * 7) / 30) : null);
+  // 4 weekly instalments = 1 month (matching tenureMonths × 4 = total weekly installments)
+  const weeklyAmount = loan.weeklyAmount ?? (loan.monthlyPayment != null ? Math.round(loan.monthlyPayment / 4) : null);
   const bimonthlyAmount = loan.bimonthlyAmount ?? (loan.monthlyPayment != null ? Math.round(loan.monthlyPayment / 2) : null);
   const hasCustomAmounts = !!(loan.dailyAmount || loan.weeklyAmount || loan.bimonthlyAmount);
   // Weekly-only loan: has a weeklyAmount column set OR notes/whatsapp says "pay weekly".
@@ -462,10 +463,29 @@ export default function EmiLoanDetail() {
     `${loan.notes ?? ""} ${loan.whatsapp ?? ""}`.toLowerCase().includes("pay weekly")
   );
 
+  // Total installments by frequency: bimonthly = tenureMonths × 2, weekly = tenureMonths × 4
+  const totalInstallments =
+    loan.bimonthlyAmount != null
+      ? Math.round(loan.tenureMonths * 2)
+      : loan.weeklyAmount != null
+        ? Math.round(loan.tenureMonths * 4)
+        : null;
+  // Remaining installments: remainingMonths × installments-per-month
+  const remainingInstallments =
+    totalInstallments != null && loan.remainingMonths != null
+      ? Math.round(loan.remainingMonths * (loan.bimonthlyAmount != null ? 2 : 4))
+      : null;
+
   const stats: { label: string; value: string; highlight?: boolean }[] = [
     { label: "EMI ID", value: loan.emiId ?? "—" },
     { label: "Principal", value: formatCurrency(loan.principal) },
     { label: "Tenure", value: `${loan.tenureMonths} months` },
+    ...(totalInstallments != null
+      ? [{
+          label: loan.bimonthlyAmount != null ? "Total Bimonthly Instalments" : "Total Weekly Instalments",
+          value: `${totalInstallments} instalments`,
+        }]
+      : []),
     { label: "Transaction Date", value: formatDate(loan.transactionDate) },
     {
       label: "Next Payment",
@@ -573,7 +593,7 @@ export default function EmiLoanDetail() {
                     className="border-violet-500 text-violet-700 hover:bg-violet-50 gap-1.5"
                     onClick={handleWeeklyPayment}
                     disabled={weeklyPending}
-                    title={`Record weekly instalment (₹${weeklyAmount?.toLocaleString("en-IN")}${hasCustomAmounts ? " — custom amount" : " = monthly × 7 ÷ 30"})`}
+                    title={`Record weekly instalment (₹${weeklyAmount?.toLocaleString("en-IN")}${hasCustomAmounts ? " — custom amount" : " = monthly ÷ 4"})`}
                   >
                     {weeklyPending
                       ? <Loader2 className="h-3.5 w-3.5 animate-spin" />

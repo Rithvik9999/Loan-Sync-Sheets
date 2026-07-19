@@ -73,7 +73,7 @@ export interface EmiLoan {
   paidDates?: string[];
   /** Custom daily instalment override stored in sheet column U. null = use monthlyPayment ÷ 30. */
   dailyAmount?: number | null;
-  /** Custom weekly instalment override stored in sheet column V. null = use monthlyPayment × 7 ÷ 30. */
+  /** Custom weekly instalment override stored in sheet column V. null = use monthlyPayment ÷ 4 (4 weekly instalments = 1 month). */
   weeklyAmount?: number | null;
   /** Custom bimonthly instalment override stored in sheet column W. null = use monthlyPayment ÷ 2. */
   bimonthlyAmount?: number | null;
@@ -533,7 +533,7 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
                           min="0"
                           placeholder={
                             form.watch("principal") && form.watch("tenureMonths")
-                              ? String(Math.round(((Number(form.watch("principal")) * 0.02 + Number(form.watch("principal")) / Number(form.watch("tenureMonths"))) / 30) * 7))
+                              ? String(Math.round((Number(form.watch("principal")) * 0.02 + Number(form.watch("principal")) / Number(form.watch("tenureMonths"))) / 4))
                               : "e.g. 1750"
                           }
                           {...field}
