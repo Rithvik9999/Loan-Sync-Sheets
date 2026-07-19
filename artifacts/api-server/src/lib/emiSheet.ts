@@ -352,7 +352,11 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
     status,
     whatsapp: toText(get(COL.WHATSAPP)),
     lateFees,
-    remainingMonths,
+    // Return effectiveRemaining (corrected for accumulated partial payments and
+    // calendar-based safety cap) rather than the raw sheet value so that every
+    // consumer — portal Total Due, admin borrower list, detail pages — sees the
+    // same consistent month count that the lateDays / nextPaymentDate logic uses.
+    remainingMonths: effectiveRemaining,
     notes: toText(get(COL.NOTES)),
     lateDays,
     paidDates: toText(get(COL.PAID_DATES))

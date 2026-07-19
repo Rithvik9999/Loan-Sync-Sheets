@@ -139,10 +139,16 @@ export default function Dashboard() {
       const row = getOrCreate(key);
       row.count++;
       row.expected += (loan.interest ?? 0) + (loan.flatFee ?? 0);
-      // Gained = interest+fees actually collected (paid − principal), floored at 0
-      if ((loan.paid ?? 0) > 0) {
+      // Gained = profit actually collected.
+      // Prefer the sheet-computed profit field (authoritative, accounts for discounts).
+      // For cleared loans without a profit field, fall back to paid − principal.
+      // For pending loans with partial payments, the fallback gives a rough estimate.
+      if (loan.profit != null && loan.profit > 0) {
+        row.gained += loan.profit;
+      } else if (loan.status === "Clear" && (loan.paid ?? 0) > 0) {
         row.gained += Math.max((loan.paid ?? 0) - loan.principal, 0);
       }
+      // Pending loans with no sheet profit: don't count as gained yet.
     }
 
     // EMI loans

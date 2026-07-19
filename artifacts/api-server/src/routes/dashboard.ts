@@ -6,6 +6,7 @@ import {
 import { attachRole, requireStaff } from "../middlewares/auth";
 import * as loansRepo from "../lib/repositories/loans";
 import * as borrowersRepo from "../lib/repositories/borrowers";
+import * as emiSheet from "../lib/emiSheet";
 
 const router: IRouter = Router();
 
@@ -14,9 +15,10 @@ router.use("/dashboard", attachRole, requireStaff);
 const DUE_SOON_DAYS = 7;
 
 router.get("/dashboard/summary", async (_req, res): Promise<void> => {
-  const [loans, borrowers] = await Promise.all([
+  const [loans, borrowers, emiLoans] = await Promise.all([
     loansRepo.listLoans(),
     borrowersRepo.listBorrowers(),
+    emiSheet.listEmiLoanRows(),
   ]);
 
   const now = Date.now();
@@ -30,17 +32,45 @@ router.get("/dashboard/summary", async (_req, res): Promise<void> => {
   let totalCollected = 0;
 
   for (const loan of loans) {
+    // Collected = total amount actually received across all loans (including cleared)
     totalCollected += loan.paid ?? 0;
     if (loan.status !== "Pending") continue;
 
     activeLoansCount += 1;
-    totalOutstanding += loan.finalAmount ?? 0;
+    // Outstanding = what's still owed (finalAmount minus what's already been paid)
+    totalOutstanding += Math.max((loan.finalAmount ?? 0) - (loan.paid ?? 0), 0);
 
     if (loan.lateDays && loan.lateDays > 0) {
       overdueLoansCount += 1;
       overdueAmount += loan.lateFees ?? 0;
     } else if (loan.returnDate) {
       const dueTime = new Date(loan.returnDate).getTime();
+      if (!Number.isNaN(dueTime) && dueTime <= dueSoonCutoff) {
+        dueSoonCount += 1;
+      }
+    }
+  }
+
+  // Include active EMI loans in the outstanding total
+  for (const emi of emiLoans) {
+    if (emi.status !== "Pending") {
+      // Collected = months paid × monthlyPayment (approximation from paid months)
+      const paidMonths = Math.max((emi.tenureMonths ?? 0) - (emi.remainingMonths ?? emi.tenureMonths ?? 0), 0);
+      totalCollected += paidMonths * (emi.monthlyPayment ?? 0);
+      continue;
+    }
+    activeLoansCount += 1;
+    // EMI outstanding = monthlyPayment × remaining months
+    const rem = Math.max(emi.remainingMonths ?? 0, 0);
+    totalOutstanding += emi.monthlyPayment != null
+      ? emi.monthlyPayment * rem
+      : (emi.principal ?? 0);
+
+    if (emi.lateDays && emi.lateDays > 0) {
+      overdueLoansCount += 1;
+      overdueAmount += emi.lateFees ?? 0;
+    } else if (emi.nextPaymentDate) {
+      const dueTime = new Date(emi.nextPaymentDate).getTime();
       if (!Number.isNaN(dueTime) && dueTime <= dueSoonCutoff) {
         dueSoonCount += 1;
       }

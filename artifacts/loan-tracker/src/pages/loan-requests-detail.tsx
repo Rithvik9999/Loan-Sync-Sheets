@@ -128,15 +128,18 @@ export default function LoanRequestDetail() {
   const req = requests?.find((r) => r.id === id);
 
   const [discount, setDiscount] = useState("0");
+  const [overrideAmount, setOverrideAmount] = useState("");
   const [transactionDate, setTransactionDate] = useState(
     new Date().toISOString().slice(0, 10),
   );
 
-  // Auto-populate the discount field:
-  //  - Pending: use the rounding-discount formula so admin only needs to override.
-  //  - Approved: pre-fill with the discount that was stored at approval time.
+  // Auto-populate the discount and amount fields when the request loads.
+  //  - Pending: amount = requested amount; discount = rounding formula
+  //  - Approved: amount = linked loan's principal (or requested); discount = stored discount
   useEffect(() => {
     if (!req) return;
+    // Always seed the override amount from the request
+    setOverrideAmount(String(req.amount ?? 0));
     if (req.status === "Pending") {
       const p = req.amount ?? 0;
       const t = req.tenureDays ?? 0;
@@ -169,7 +172,11 @@ export default function LoanRequestDetail() {
   );
 
   const discountNum = Number(discount) || 0;
-  const principal = req?.amount ?? 0;
+  const requestedAmount = req?.amount ?? 0;
+  // Admin may have entered a different actual amount to disburse.
+  const overrideAmountNum = Number(overrideAmount) || requestedAmount;
+  // Use the override amount for all fee estimates — the sheet formulas base fees on principal.
+  const principal = overrideAmountNum;
   const tenureDays = req?.tenureDays ?? 0;
   // NOTE: discount is stored as a negative discountOrCharges in the sheet.
   // The sheet's array formula computes: finalAmount = principal + flatFee + interest + discountOrCharges + lateFees.
@@ -196,11 +203,16 @@ export default function LoanRequestDetail() {
     }
     setIsPaying(true);
     try {
+      const payBody: Record<string, unknown> = { discount: discountNum, transactionDate };
+      // Only send overrideAmount if it differs from the requested amount
+      if (overrideAmountNum !== requestedAmount) {
+        payBody.overrideAmount = overrideAmountNum;
+      }
       const res = await fetch(`/api/loan-requests/${req.id}/pay`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ discount: discountNum, transactionDate }),
+        body: JSON.stringify(payBody),
         // discount is written as -discountNum into sheet's discountOrCharges column,
         // which applies to the sheet-computed finalAmount (principal + fees + interest).
       });
@@ -305,11 +317,16 @@ export default function LoanRequestDetail() {
     }
     setIsUpdating(true);
     try {
+      const updateBody: Record<string, unknown> = { discount: discountNum };
+      // Only send amount if it differs from the originally requested amount
+      if (overrideAmountNum !== requestedAmount) {
+        updateBody.amount = overrideAmountNum;
+      }
       const res = await fetch(`/api/loan-requests/${req.id}/update-approval`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ discount: discountNum }),
+        body: JSON.stringify(updateBody),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Failed to update." }));
@@ -464,17 +481,19 @@ export default function LoanRequestDetail() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">
-                  Discount (₹) <span className="text-destructive">*</span>
+                  Principal (₹) <span className="text-destructive">*</span>
                 </label>
                 <Input
                   type="number"
-                  min="0"
-                  placeholder="0"
-                  value={discount}
-                  onChange={(e) => setDiscount(e.target.value)}
+                  min="1"
+                  placeholder={String(requestedAmount)}
+                  value={overrideAmount}
+                  onChange={(e) => setOverrideAmount(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Enter 0 if no discount applies.
+                  {overrideAmountNum !== requestedAmount
+                    ? `Requested: ${formatCurrency(requestedAmount)}`
+                    : "Matches borrower's request."}
                 </p>
               </div>
               <div className="space-y-1.5">
@@ -485,6 +504,22 @@ export default function LoanRequestDetail() {
                   onChange={(e) => setTransactionDate(e.target.value)}
                 />
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">
+                Discount (₹)
+              </label>
+              <Input
+                type="number"
+                min="0"
+                placeholder="0"
+                value={discount}
+                onChange={(e) => setDiscount(e.target.value)}
+                className="max-w-[200px]"
+              />
+              <p className="text-xs text-muted-foreground">
+                Enter 0 if no discount applies.
+              </p>
             </div>
 
             {/* Live breakdown */}

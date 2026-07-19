@@ -43,7 +43,13 @@ function validateCreateLoanRequest(body: unknown): { ok: true; data: CreateLoanR
   return { ok: true, data: { amount, tenureDays, tenureMonths, type, purpose, upiId } };
 }
 
-interface PayLoanRequestData { discount: number; transactionDate?: string; notes?: string | null; }
+interface PayLoanRequestData {
+  discount: number;
+  transactionDate?: string;
+  notes?: string | null;
+  /** Optional principal override — admin can disburse a different amount than what was requested. */
+  overrideAmount?: number;
+}
 
 function validatePayLoanRequest(body: unknown): { ok: true; data: PayLoanRequestData } | { ok: false; error: string } {
   if (!body || typeof body !== "object") return { ok: true, data: { discount: 0 } };
@@ -51,7 +57,11 @@ function validatePayLoanRequest(body: unknown): { ok: true; data: PayLoanRequest
   const discount = Math.max(0, Number(b.discount) || 0);
   const transactionDate = typeof b.transactionDate === "string" ? b.transactionDate : undefined;
   const notes = typeof b.notes === "string" ? b.notes : null;
-  return { ok: true, data: { discount, transactionDate, notes } };
+  const overrideAmount = b.overrideAmount != null ? Number(b.overrideAmount) : undefined;
+  if (overrideAmount !== undefined && (!Number.isFinite(overrideAmount) || overrideAmount < 0.01)) {
+    return { ok: false, error: "overrideAmount must be a positive number" };
+  }
+  return { ok: true, data: { discount, transactionDate, notes, overrideAmount } };
 }
 
 router.get("/loan-requests", async (req, res): Promise<void> => {
@@ -176,8 +186,9 @@ router.post(
       return;
     }
 
-    const { discount, transactionDate, notes } = parsed.data;
-    const principal = loanRequest.amount;
+    const { discount, transactionDate, notes, overrideAmount } = parsed.data;
+    // Admin may specify a different principal than what was originally requested.
+    const principal = overrideAmount ?? loanRequest.amount;
 
     // Create the loan row in the Heat Map sheet with Pending status.
     // The borrower still owes this loan — marking the request as "paid" means
@@ -205,13 +216,18 @@ router.post(
   },
 );
 
-// Update discount on an already-approved loan request and patch the linked loan.
+// Update discount (and optionally principal) on an already-approved loan request.
 router.patch(
   "/loan-requests/:id/update-approval",
   requireStaff,
   async (req, res): Promise<void> => {
     const id = String(req.params.id);
     const discount = Math.max(0, Number(req.body?.discount) || 0);
+    // Optional: admin can change the principal on the linked loan after approval.
+    const rawAmount = req.body?.amount != null ? Number(req.body.amount) : null;
+    const newPrincipal = rawAmount != null && Number.isFinite(rawAmount) && rawAmount >= 0.01
+      ? rawAmount
+      : null;
 
     const all = await loanRequestsRepo.listLoanRequests();
     const loanRequest = all.find((r) => r.id === id);
@@ -224,10 +240,11 @@ router.patch(
       return;
     }
 
-    // Patch the linked loan's discountOrCharges so the sheet re-computes finalAmount.
+    // Patch the linked loan — discountOrCharges always, principal when provided.
     if (loanRequest.loanId) {
       await loansRepo.updateLoan(loanRequest.loanId, {
         discountOrCharges: discount > 0 ? -discount : 0,
+        ...(newPrincipal != null ? { principal: newPrincipal } : {}),
       });
     }
 
