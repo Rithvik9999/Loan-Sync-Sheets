@@ -108,7 +108,9 @@ router.post("/loan-requests", async (req, res): Promise<void> => {
               l.status !== "Clear" &&
               matchBorrower(extractPhoneFromWhatsapp(l.whatsapp), l.name),
           )
-          .reduce((sum, l) => sum + Math.max((l.principal ?? 0) - (l.paid ?? 0), 0), 0);
+          // Use original principal only — credit limit measures how much has been lent,
+          // not the outstanding dues (which include fees/interest the borrower hasn't paid yet).
+          .reduce((sum, l) => sum + (l.principal ?? 0), 0);
 
         const activeEmiTotal = emiLoans
           .filter(
@@ -119,13 +121,9 @@ router.post("/loan-requests", async (req, res): Promise<void> => {
                 e.name,
               ),
           )
-          .reduce((sum, e) => {
-            // Use remaining principal (principalPerMonth × remainingMonths) when tracking is initialised
-            if (e.principalPerMonth != null && e.remainingMonths != null) {
-              return sum + e.principalPerMonth * Math.max(e.remainingMonths, 0);
-            }
-            return sum + (e.principal ?? 0);
-          }, 0);
+          // Same principal-based approach for EMI — avoids floating-point drift from
+          // principalPerMonth × remainingMonths and correctly represents lent capital.
+          .reduce((sum, e) => sum + (e.principal ?? 0), 0);
 
         const currentTotal = activeLoansTotal + activeEmiTotal;
         if (currentTotal + amount > borrower.creditLimit) {

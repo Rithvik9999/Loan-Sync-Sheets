@@ -19,8 +19,9 @@ import { EmptyState } from "@/components/empty-state";
 import { useState } from "react";
 import { formatCurrency } from "@/lib/utils";
 import BorrowerFormDialog from "./components/borrower-form-dialog";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { EmiLoan, EMI_LOANS_QUERY_KEY, fetchEmiLoans } from "@/pages/emi-loans/components/emi-loan-form-dialog";
 
 interface BorrowerEntry {
   id: string | null;
@@ -29,6 +30,8 @@ interface BorrowerEntry {
   hasPin: boolean;
   creditLimit: number | null;
   loanCount: number;
+  creditUsed: number;   // sum of active loan principals
+  totalDue: number;     // sum of actual outstanding amounts (finalAmount - paid, plus EMI)
 }
 
 // ── Change PIN Dialog ─────────────────────────────────────────────────────────
@@ -221,7 +224,12 @@ export default function BorrowersList() {
     query: { queryKey: getListLoansQueryKey() },
   });
 
-  const isLoading = isLoadingBorrowers || isLoadingLoans;
+  const { data: emiLoans, isLoading: isLoadingEmi } = useQuery<EmiLoan[]>({
+    queryKey: EMI_LOANS_QUERY_KEY,
+    queryFn: fetchEmiLoans,
+  });
+
+  const isLoading = isLoadingBorrowers || isLoadingLoans || isLoadingEmi;
 
   // Build unified borrower list. Loan-sheet rows and Borrowers-tab records are
   // matched primarily by normalized phone number (more reliable than name,
@@ -259,6 +267,11 @@ export default function BorrowersList() {
           existing.phone = phone;
           index(existing);
         }
+        // Accumulate active loan principal and outstanding dues
+        if (loan.status !== "Clear") {
+          existing.creditUsed += (loan.principal ?? 0);
+          existing.totalDue += Math.max((loan.finalAmount ?? 0) - (loan.paid ?? 0), 0);
+        }
       } else {
         const entry: BorrowerEntry = {
           id: null,
@@ -267,6 +280,8 @@ export default function BorrowersList() {
           hasPin: false,
           creditLimit: null,
           loanCount: 1,
+          creditUsed: loan.status !== "Clear" ? (loan.principal ?? 0) : 0,
+          totalDue: loan.status !== "Clear" ? Math.max((loan.finalAmount ?? 0) - (loan.paid ?? 0), 0) : 0,
         };
         entries.push(entry);
         index(entry);
@@ -296,9 +311,30 @@ export default function BorrowersList() {
           hasPin: b.hasPin ?? false,
           creditLimit: b.creditLimit ?? null,
           loanCount: 0,
+          creditUsed: 0,
+          totalDue: 0,
         };
         entries.push(entry);
         index(entry);
+      }
+    }
+
+    // Add active EMI loan principals and outstanding dues per borrower
+    for (const emi of emiLoans ?? []) {
+      if (emi.status === "Clear") continue;
+      const phone = ((emi as unknown as { whatsapp?: string }).whatsapp ?? "").split("\n")[0].trim();
+      const existing = findExisting(phone, emi.name);
+      if (existing) {
+        existing.creditUsed += (emi.principal ?? 0);
+        // Total due from EMI: monthlyPayment × remainingMonths
+        const rem = emi.remainingMonths != null ? Math.max(emi.remainingMonths, 0) : null;
+        if (rem != null) {
+          existing.totalDue += emi.monthlyPayment != null
+            ? emi.monthlyPayment * rem
+            : (emi.principal ?? 0);
+        } else {
+          existing.totalDue += (emi.principal ?? 0);
+        }
       }
     }
 
@@ -340,6 +376,8 @@ export default function BorrowersList() {
                   <TableHead>Phone</TableHead>
                   <TableHead>Loans</TableHead>
                   <TableHead>Credit Limit</TableHead>
+                  <TableHead>Credit Used</TableHead>
+                  <TableHead>Total Due</TableHead>
                   <TableHead>Portal Access</TableHead>
                   <TableHead className="w-[160px]"></TableHead>
                 </TableRow>
@@ -361,6 +399,24 @@ export default function BorrowersList() {
                         <span className="font-numeric text-sm font-medium">{formatCurrency(b.creditLimit)}</span>
                       ) : (
                         <span className="text-muted-foreground/50 text-sm">No limit</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {b.creditUsed > 0 ? (
+                        <span className={`font-numeric text-sm font-medium ${b.creditLimit != null && b.creditUsed > b.creditLimit ? "text-destructive" : "text-foreground"}`}>
+                          {formatCurrency(b.creditUsed)}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground/50 text-sm">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {b.totalDue > 0 ? (
+                        <span className="font-numeric text-sm font-medium text-destructive">
+                          {formatCurrency(b.totalDue)}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground/50 text-sm">—</span>
                       )}
                     </TableCell>
                     <TableCell>

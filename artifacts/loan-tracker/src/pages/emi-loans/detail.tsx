@@ -469,6 +469,10 @@ export default function EmiLoanDetail() {
     _notesText.includes("pay weekly") ||
     (loan.paidDates ?? []).some((e) => { const t = e.split(":")[2]; return t === "W" || t === "WM"; })
   );
+  const isDailyLoan = !!(
+    loan.dailyAmount != null ||
+    _notesText.includes("pay daily")
+  );
 
   // Total installments by frequency: bimonthly = tenureMonths × 2, weekly = tenureMonths × 4
   const totalInstallments =
@@ -477,7 +481,8 @@ export default function EmiLoanDetail() {
       : isWeeklyLoan
         ? Math.round(loan.tenureMonths * 4)
         : null;
-  // Remaining installments: prefer remainingMonths × rate; fall back to total − paid-entry count
+  // Remaining installments: always count from actual paid entries, not from remainingMonths × multiplier
+  // (remainingMonths tracks calendar months and diverges from paid installment count for bi-weekly loans)
   const paidInstallmentCount = totalInstallments != null
     ? (loan.paidDates ?? []).filter(entry => {
         const t = entry.split(":")[2];
@@ -486,9 +491,7 @@ export default function EmiLoanDetail() {
     : 0;
   const remainingInstallments =
     totalInstallments != null
-      ? (loan.remainingMonths != null
-          ? Math.max(0, Math.round(loan.remainingMonths * (isBimonthlyLoan ? 2 : 4)))
-          : Math.max(0, totalInstallments - paidInstallmentCount))
+      ? Math.max(0, totalInstallments - paidInstallmentCount)
       : null;
 
   const stats: { label: string; value: string; highlight?: boolean }[] = [
@@ -602,7 +605,7 @@ export default function EmiLoanDetail() {
                     Daily {dailyAmount != null && <span className="font-numeric font-semibold">₹{dailyAmount.toLocaleString("en-IN")}</span>}
                   </Button>
                   )}
-                  {!isBimonthlyLoan && (
+                  {!isBimonthlyLoan && !isDailyLoan && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -617,6 +620,7 @@ export default function EmiLoanDetail() {
                     Weekly {weeklyAmount != null && <span className="font-numeric font-semibold">₹{weeklyAmount.toLocaleString("en-IN")}</span>}
                   </Button>
                   )}
+                  {!isWeeklyLoan && !isDailyLoan && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -630,6 +634,7 @@ export default function EmiLoanDetail() {
                       : <CalendarRange className="h-3.5 w-3.5" />}
                     Bimonthly {bimonthlyAmount != null && <span className="font-numeric font-semibold">₹{bimonthlyAmount.toLocaleString("en-IN")}</span>}
                   </Button>
+                  )}
                   {/* Date picker for quick-pay */}
                   <input
                     type="date"

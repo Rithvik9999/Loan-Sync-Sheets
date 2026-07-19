@@ -281,7 +281,7 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto" style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}>
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Loan" : "Record Loan"}</DialogTitle>
           <DialogDescription>

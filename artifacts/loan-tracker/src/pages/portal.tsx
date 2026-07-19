@@ -155,6 +155,18 @@ function openUpi(amount: number, note = "Loan Repayment") {
   window.location.href = link;
 }
 
+function openWaUrl(url: string) {
+  // iOS Safari blocks window.open("_blank") when called from async callbacks (popup blocker).
+  // Programmatically clicking an anchor element works reliably on all platforms including iOS.
+  const a = document.createElement("a");
+  a.href = url;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 function openWhatsApp(params: {
   type: "loan" | "emi";
   name: string;
@@ -176,7 +188,7 @@ function openWhatsApp(params: {
   lines.push(`🗓 Date: ${new Date().toLocaleDateString("en-IN")}`);
   lines.push(SITE_NAME);
   const msg = lines.join("\n");
-  window.open(`https://wa.me/91${WA_ADMIN}?text=${encodeURIComponent(msg)}`, "_blank");
+  openWaUrl(`https://wa.me/91${WA_ADMIN}?text=${encodeURIComponent(msg)}`);
 }
 
 /** Opens WhatsApp to notify the admin that a payment was just made and needs verification. */
@@ -195,7 +207,7 @@ function notifyAdminPaymentMade(params: {
     `Please verify and mark as paid. 🙏`,
     SITE_NAME,
   ].filter(Boolean) as string[];
-  window.open(`https://wa.me/91${WA_ADMIN}?text=${encodeURIComponent(lines.join("\n"))}`, "_blank");
+  openWaUrl(`https://wa.me/91${WA_ADMIN}?text=${encodeURIComponent(lines.join("\n"))}`);
 }
 
 // ─── Loan Amount Rounding ─────────────────────────────────────────────────────
@@ -224,8 +236,6 @@ const loanRequestSchema = z.object({
   returnDate: z.string().optional(),
   purpose: z.string().optional(),
   upiId: z.string().optional(),
-  discountOrChargesAbs: z.coerce.number().min(0).optional(),
-  isDiscount: z.boolean().optional(),
 });
 
 type LoanRequestValues = z.infer<typeof loanRequestSchema>;
@@ -259,45 +269,20 @@ function LoanRequestDialog({
       tenureDays: 30,
       returnDate: dateFnsFormat(addDays(new Date(), 30), "yyyy-MM-dd"),
       purpose: "",
-      discountOrChargesAbs: 0,
-      isDiscount: true,
     },
   });
 
   const watchedAmount = form.watch("amount");
   const watchedTenure = form.watch("tenureDays");
-  const watchedIsDiscount = form.watch("isDiscount");
-  const watchedDiscountAbs = form.watch("discountOrChargesAbs");
-
-  // Auto-populate discount from rounding when amount or tenure changes
-  // Discount is calculated on the repayment (final) value, not the principal.
-  useEffect(() => {
-    const amt = Number(watchedAmount);
-    const t = Number(watchedTenure);
-    if (!amt || amt <= 0 || !t || t <= 0) return;
-    const { finalAmount } = estimateFinalAmount({ principal: amt, tenureDays: t });
-    const rounded = floorRepaymentAmount(finalAmount);
-    const diff = finalAmount - rounded;
-    if (diff > 0) {
-      form.setValue("discountOrChargesAbs", diff, { shouldDirty: false });
-      form.setValue("isDiscount", true, { shouldDirty: false });
-    } else {
-      form.setValue("discountOrChargesAbs", 0, { shouldDirty: false });
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchedAmount, watchedTenure]);
 
   const loanPreview = useMemo(() => {
     const p = Number(watchedAmount);
     const t = Number(watchedTenure);
     if (!p || !t || p <= 0 || t <= 0) return null;
-    const discountAbs = Number(watchedDiscountAbs ?? 0);
-    // discount > 0 reduces final amount; charge increases it
-    const discountValue = watchedIsDiscount ? discountAbs : -discountAbs;
-    const base = estimateFinalAmount({ principal: p, tenureDays: t, discount: discountValue });
+    const base = estimateFinalAmount({ principal: p, tenureDays: t });
     const typeDiscountAmt = Math.round(base.finalAmount * typeDiscountPct);
     return { ...base, typeDiscountAmt, discountedFinalAmount: base.finalAmount - typeDiscountAmt };
-  }, [watchedAmount, watchedTenure, typeDiscountPct, watchedDiscountAbs, watchedIsDiscount]);
+  }, [watchedAmount, watchedTenure, typeDiscountPct]);
 
   // Credit limit validation
   const creditLimitError = useMemo(() => {
@@ -334,15 +319,12 @@ function LoanRequestDialog({
       toast({ variant: "destructive", title: "Credit limit exceeded", description: creditLimitError });
       return;
     }
-    const discountNote = data.discountOrChargesAbs && data.discountOrChargesAbs > 0
-      ? ` [${data.isDiscount ? "Discount" : "Charge"}: ${data.isDiscount ? "-" : "+"}₹${data.discountOrChargesAbs}]`
-      : "";
     createLoanRequest.mutate(
       {
         data: {
           amount: data.amount,
           tenureDays: data.tenureDays,
-          purpose: (data.purpose || "") + discountNote || null,
+          purpose: data.purpose || null,
           upiId: data.upiId || null,
         },
       },
@@ -452,60 +434,6 @@ function LoanRequestDialog({
                 </FormItem>
               )}
             />
-
-            {/* Discount / Charges with checkbox */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Discount / Charges (₹)</label>
-              <div className="flex items-center gap-3">
-                <FormField
-                  control={form.control}
-                  name="discountOrChargesAbs"
-                  render={({ field }) => (
-                    <FormItem className="flex-1 space-y-0">
-                      <FormControl>
-                        <div className="relative">
-                          {watchedIsDiscount && (
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-emerald-600 font-medium pointer-events-none">−</span>
-                          )}
-                          <Input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            placeholder="0"
-                            className={watchedIsDiscount ? "pl-6" : ""}
-                            {...field}
-                            value={field.value ?? ""}
-                          />
-                        </div>
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="isDiscount"
-                  render={({ field }) => (
-                    <FormItem className="flex items-center gap-2 space-y-0 shrink-0">
-                      <FormControl>
-                        <Checkbox
-                          checked={!!field.value}
-                          onCheckedChange={field.onChange}
-                        />
-                      </FormControl>
-                      <label className="text-sm font-normal cursor-pointer flex items-center gap-1 mb-0">
-                        Is Discount
-                      </label>
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <p className="text-[10px] text-muted-foreground">
-                {watchedIsDiscount
-                  ? "Auto-filled from rounding. Negative value = discount on final amount."
-                  : "Positive value = extra charge on final amount."}
-              </p>
-            </div>
 
             {/* Tenure + Return Date — linked pair */}
             <div className="grid grid-cols-2 gap-3">
@@ -3426,6 +3354,9 @@ export default function Portal() {
     () => (emiLoans ?? []).filter((e) => e.status !== "Clear"),
     [emiLoans],
   );
+  // Total Due: actual financial obligation the borrower must pay
+  // — loans: finalAmount (principal + fees + interest) minus cash already paid
+  // — EMI: monthlyPayment × remaining months (what the borrower still owes)
   const totalOutstanding = useMemo(
     () =>
       activeLoans.reduce(
@@ -3434,17 +3365,12 @@ export default function Portal() {
       ) +
       activeEmi.reduce(
         (sum, e) => {
-          // Use remaining PRINCIPAL (not total future payments which include interest).
-          // principalPerMonth × remainingMonths is the most accurate when both are set.
-          // Proportional fallback: principal × remainingMonths / tenureMonths.
           const rem = e.remainingMonths;
-          if (rem == null) return sum; // uninitialized — skip rather than overstate
+          if (rem == null) return sum;
           const remClamped = Math.max(rem, 0);
-          if (e.principalPerMonth != null) {
-            return sum + e.principalPerMonth * remClamped;
-          }
-          if (e.tenureMonths > 0) {
-            return sum + Math.round((e.principal ?? 0) * remClamped / e.tenureMonths);
+          // monthlyPayment × remaining months = actual total still owed (includes interest)
+          if (e.monthlyPayment != null) {
+            return sum + e.monthlyPayment * remClamped;
           }
           return sum + (e.principal ?? 0);
         },
@@ -3453,11 +3379,15 @@ export default function Portal() {
     [activeLoans, activeEmi],
   );
 
-  // Credit limit utilisation — use the same formula as totalOutstanding so the
-  // percentage always agrees with "Total Due". The old per-field approach (principal - paid
-  // for loans, full e.principal fallback for EMI) caused the % to exceed 100% even when
-  // the actual amount owed was under the limit.
-  const usedPrincipal = totalOutstanding;
+  // Credit limit utilisation: principal-based — how much of the lender's capital is deployed.
+  // Uses original loan principal (not outstanding dues) so the limit isn't "used up" by
+  // accrued interest, and stays consistent with the server-side credit-limit check.
+  const usedPrincipal = useMemo(
+    () =>
+      activeLoans.reduce((sum, l) => sum + (l.principal ?? 0), 0) +
+      activeEmi.reduce((sum, e) => sum + (e.principal ?? 0), 0),
+    [activeLoans, activeEmi],
+  );
   const availableCredit =
     creditLimit != null ? Math.max(creditLimit - usedPrincipal, 0) : null;
   // Not capped at 100 so we can show ">100%" when over limit
