@@ -5,6 +5,9 @@ import {
   useUpdateLoanRequest,
   useDeleteLoanRequest,
   getListLoanRequestsQueryKey,
+  useGetLoan,
+  useUpdateLoan,
+  getGetLoanQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -129,27 +132,41 @@ export default function LoanRequestDetail() {
     new Date().toISOString().slice(0, 10),
   );
 
-  // Auto-populate the discount field with the rounding discount when the request loads.
-  // Uses the same formula as the "Record Loan" dialog so the admin sees a pre-filled
-  // clean value and only has to override it if they want a different discount.
+  // Auto-populate the discount field:
+  //  - Pending: use the rounding-discount formula so admin only needs to override.
+  //  - Approved: pre-fill with the discount that was stored at approval time.
   useEffect(() => {
-    if (!req || req.status !== "Pending") return;
-    const p = req.amount ?? 0;
-    const t = req.tenureDays ?? 0;
-    if (!p || !t) return;
-    const { finalAmount } = estimateFinalAmount({ principal: p, tenureDays: t });
-    const rounded = floorRepaymentAmount(finalAmount);
-    const diff = finalAmount - rounded;
-    setDiscount(diff > 0 ? String(diff) : "0");
+    if (!req) return;
+    if (req.status === "Pending") {
+      const p = req.amount ?? 0;
+      const t = req.tenureDays ?? 0;
+      if (!p || !t) return;
+      const { finalAmount } = estimateFinalAmount({ principal: p, tenureDays: t });
+      const rounded = floorRepaymentAmount(finalAmount);
+      const diff = finalAmount - rounded;
+      setDiscount(diff > 0 ? String(diff) : "0");
+    } else if (req.status === "Approved") {
+      setDiscount(String((req as any).discount ?? 0));
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [req?.id]);
   const [isPaying, setIsPaying] = useState(false);
   const [isDeclining, setIsDeclining] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const updateReq = useUpdateLoanRequest();
   const deleteReq = useDeleteLoanRequest();
+  const updateLoan = useUpdateLoan();
+
+  // For approved requests: fetch the actual loan so we can show its authoritative finalAmount
+  // and allow the admin to update the discount.
+  const reqLoanId = (req as any)?.loanId as string | null | undefined;
+  const { data: approvedLoan, refetch: refetchApprovedLoan } = useGetLoan(
+    reqLoanId ?? "",
+    { query: { queryKey: getGetLoanQueryKey(reqLoanId ?? ""), enabled: !!reqLoanId && req?.status === "Approved" } },
+  );
 
   const discountNum = Number(discount) || 0;
   const principal = req?.amount ?? 0;
@@ -278,6 +295,36 @@ export default function LoanRequestDetail() {
     );
   };
 
+  /** Update the discount on an already-approved loan request (patches both the
+   *  loan row in the sheet and the stored discount on the request record). */
+  const handleUpdate = async () => {
+    if (!req || req.status !== "Approved") return;
+    if (discountNum < 0) {
+      toast({ variant: "destructive", title: "Invalid discount", description: "Discount cannot be negative." });
+      return;
+    }
+    setIsUpdating(true);
+    try {
+      const res = await fetch(`/api/loan-requests/${req.id}/update-approval`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ discount: discountNum }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Failed to update." }));
+        throw new Error(err.error ?? "Failed to update.");
+      }
+      queryClient.invalidateQueries({ queryKey: getListLoanRequestsQueryKey() });
+      if (reqLoanId) refetchApprovedLoan();
+      toast({ title: "Loan updated", description: "Discount patched — the sheet will recompute the final amount." });
+    } catch (err) {
+      toast({ variant: "destructive", title: "Error", description: err instanceof Error ? err.message : "Failed." });
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="space-y-4 max-w-2xl mx-auto">
@@ -400,15 +447,17 @@ export default function LoanRequestDetail() {
         </CardContent>
       </Card>
 
-      {/* Approval / Discount section — only for pending requests */}
-      {isPending && (
+      {/* Approval / Discount section — shown for pending AND approved requests */}
+      {(isPending || req.status === "Approved") && (
         <Card className="shadow-sm border-primary/20 bg-primary/[0.03]">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Approve & Record Payment</CardTitle>
+            <CardTitle className="text-base">
+              {isPending ? "Approve & Record Payment" : "Edit Loan Details"}
+            </CardTitle>
             <CardDescription>
-              Enter a discount (₹0 if none) and confirm the transaction date.
-              Clicking "Mark as Paid" will create a Pending loan entry in your
-              sheet.
+              {isPending
+                ? "Enter a discount (₹0 if none) and confirm the transaction date. Clicking \"Mark as Paid\" will create a Pending loan entry in your sheet."
+                : "Update the discount applied to this approved loan. The sheet will recompute the final amount automatically."}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -475,70 +524,72 @@ export default function LoanRequestDetail() {
             </div>
 
             <div className="flex gap-3">
-              <Button
-                className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white"
-                onClick={handlePay}
-                disabled={
-                  isPaying ||
-                  isDeclining ||
-                  discount.trim() === "" ||
-                  !transactionDate
-                }
-              >
-                {isPaying ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="mr-2 h-4 w-4" />
-                )}
-                Mark as Paid
-              </Button>
-              <Button
-                variant="destructive"
-                className="flex-1"
-                onClick={handleDecline}
-                disabled={isPaying || isDeclining}
-              >
-                {isDeclining ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <XCircle className="mr-2 h-4 w-4" />
-                )}
-                Decline
-              </Button>
+              {isPending ? (
+                <>
+                  <Button
+                    className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white"
+                    onClick={handlePay}
+                    disabled={isPaying || isDeclining || discount.trim() === "" || !transactionDate}
+                  >
+                    {isPaying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                    Mark as Paid
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    className="flex-1"
+                    onClick={handleDecline}
+                    disabled={isPaying || isDeclining}
+                  >
+                    {isDeclining ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <XCircle className="mr-2 h-4 w-4" />}
+                    Decline
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white"
+                  onClick={handleUpdate}
+                  disabled={isUpdating || discount.trim() === ""}
+                >
+                  {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                  Update Loan
+                </Button>
+              )}
             </div>
 
-            {/* Delete permanently */}
-            <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-              <AlertDialogTrigger asChild>
-                <Button
-                  variant="outline"
-                  className="w-full text-destructive border-destructive/30 hover:bg-destructive/5"
-                  disabled={isPaying || isDeclining || isDeleting}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete Request
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete this request?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will permanently remove the loan request from your sheet. This cannot be undone.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={handleDelete}
-                    disabled={isDeleting}
-                    className="bg-destructive hover:bg-destructive/90"
+            {/* Delete permanently — only for pending */}
+            {isPending && (
+              <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="w-full text-destructive border-destructive/30 hover:bg-destructive/5"
+                    disabled={isPaying || isDeclining || isDeleting}
                   >
-                    {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    Yes, delete permanently
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete Request
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete this request?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently remove the loan request from your sheet. This cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={handleDelete}
+                      disabled={isDeleting}
+                      className="bg-destructive hover:bg-destructive/90"
+                    >
+                      {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Yes, delete permanently
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
           </CardContent>
         </Card>
       )}
@@ -573,27 +624,28 @@ export default function LoanRequestDetail() {
                 {!isEmi && tenureDays > 0 && (
                   <>
                     <div className="flex justify-between text-xs">
-                      <span className="text-emerald-700">Est. flat fee</span>
-                      <span className="font-numeric">+ {formatCurrency(estimatedFlatFee)}</span>
-                    </div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-emerald-700">Est. interest</span>
-                      <span className="font-numeric">+ {formatCurrency(estimatedInterest)}</span>
-                    </div>
-                    <div className="flex justify-between text-xs">
                       <span className="text-emerald-700">Discount / Charges</span>
                       <span className={`font-numeric font-semibold ${(req.discount ?? 0) > 0 ? "text-emerald-800" : "text-muted-foreground"}`}>
                         {(req.discount ?? 0) > 0 ? `− ${formatCurrency(req.discount)}` : "None"}
                       </span>
                     </div>
                     <div className="flex justify-between text-xs border-t border-emerald-200 pt-1.5">
-                      <span className="text-emerald-700 font-semibold">Est. total to repay</span>
-                      <span className="font-bold font-numeric">{formatCurrency(estimatedFinalAmount - (req.discount ?? 0))}</span>
+                      <span className="text-emerald-700 font-semibold">Total to repay</span>
+                      {approvedLoan?.finalAmount != null ? (
+                        <span className="font-bold font-numeric">{formatCurrency(approvedLoan.finalAmount)}</span>
+                      ) : (
+                        <span className="font-bold font-numeric">
+                          {formatCurrency(estimatedFinalAmount - (req.discount ?? 0))}
+                          <span className="ml-1 text-[10px] font-normal text-muted-foreground">(est.)</span>
+                        </span>
+                      )}
                     </div>
                   </>
                 )}
                 <p className="text-[10px] text-emerald-600">
-                  See the Loans page for the exact final amount after sheet formula recalculation.
+                  {approvedLoan?.finalAmount != null
+                    ? "Sheet-computed final amount — authoritative."
+                    : "Exact final amount will appear once the linked loan loads."}
                 </p>
               </div>
             )}

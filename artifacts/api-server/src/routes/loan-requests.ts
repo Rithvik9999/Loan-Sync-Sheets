@@ -195,11 +195,53 @@ router.post(
       notes: notes ?? loanRequest.purpose ?? undefined,
     });
 
-    // Mark the request as Approved and record the discount applied by the admin
-    await approveLoanRequest(loanRequest.id, discount);
+    // Mark the request as Approved and record the discount + the UUID of the created loan.
+    // Storing the loanId lets admin edit approval details later and lets the UI show the
+    // authoritative finalAmount from the sheet instead of re-estimating.
+    await approveLoanRequest(loanRequest.id, discount, loan.id);
 
     const borrowers = await borrowersRepo.listBorrowers();
     res.status(201).json({ loan: attachBorrowerId(loan, borrowers) });
+  },
+);
+
+// Update discount on an already-approved loan request and patch the linked loan.
+router.patch(
+  "/loan-requests/:id/update-approval",
+  requireStaff,
+  async (req, res): Promise<void> => {
+    const id = String(req.params.id);
+    const discount = Math.max(0, Number(req.body?.discount) || 0);
+
+    const all = await loanRequestsRepo.listLoanRequests();
+    const loanRequest = all.find((r) => r.id === id);
+    if (!loanRequest) {
+      res.status(404).json({ error: "Loan request not found" });
+      return;
+    }
+    if (loanRequest.status !== "Approved") {
+      res.status(400).json({ error: "Only approved requests can be updated via this endpoint" });
+      return;
+    }
+
+    // Patch the linked loan's discountOrCharges so the sheet re-computes finalAmount.
+    if (loanRequest.loanId) {
+      await loansRepo.updateLoan(loanRequest.loanId, {
+        discountOrCharges: discount > 0 ? -discount : 0,
+      });
+    }
+
+    // Update the stored discount on the request row.
+    const updated = await loanRequestsRepo.approveLoanRequest(
+      id,
+      discount,
+      loanRequest.loanId ?? undefined,
+    );
+    if (!updated) {
+      res.status(404).json({ error: "Could not update loan request" });
+      return;
+    }
+    res.json(updated);
   },
 );
 

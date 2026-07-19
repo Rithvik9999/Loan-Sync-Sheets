@@ -2456,6 +2456,7 @@ function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
         // For weekly-pay EMI loans, derive the next WEEKLY installment date from
         // the most recent paidDates entry rather than the monthly milestone.
         const isWeekly = (loan.weeklyAmount ?? 0) > 0;
+        const isBimonthly = !isWeekly && (loan.bimonthlyAmount ?? 0) > 0;
         let displayNextDate: string | null = loan.nextPaymentDate ?? null;
         if (isWeekly) {
           const paidDateStrs = (loan.paidDates ?? [])
@@ -2466,6 +2467,17 @@ function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
           if (lastPaid) {
             const nextWeekly = computeNextWeeklyDue(lastPaid);
             if (nextWeekly) displayNextDate = nextWeekly;
+          }
+        } else if (isBimonthly) {
+          // Compute the next 15th/30th payment date from the transaction start date.
+          const txDate = loan.transactionDate
+            ? new Date(loan.transactionDate + "T00:00:00Z")
+            : null;
+          if (txDate) {
+            const nextBi = getNextBimonthlyPaymentDate(txDate, now);
+            if (nextBi) {
+              displayNextDate = `${nextBi.getFullYear()}-${String(nextBi.getMonth() + 1).padStart(2, "0")}-${String(nextBi.getDate()).padStart(2, "0")}`;
+            }
           }
         }
 
@@ -2497,21 +2509,23 @@ function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
               <div className="grid grid-cols-3 divide-x text-center">
                 <div className="p-4 space-y-0.5">
                   <div className="text-xs text-muted-foreground">
-                    {isWeekly ? "Weekly" : "Monthly"}
+                    {isWeekly ? "Weekly" : isBimonthly ? "Bimonthly" : "Monthly"}
                   </div>
                   <div className="text-lg font-bold font-numeric">
                     {isWeekly
                       ? formatCurrency(loan.weeklyAmount ?? 0)
-                      : loan.monthlyPayment != null
-                        ? formatCurrency(loan.monthlyPayment)
-                        : "—"}
+                      : isBimonthly
+                        ? formatCurrency(loan.bimonthlyAmount ?? 0)
+                        : loan.monthlyPayment != null
+                          ? formatCurrency(loan.monthlyPayment)
+                          : "—"}
                   </div>
                 </div>
                 <div
                   className={`p-4 space-y-0.5 ${isOverdue ? "bg-destructive/5" : "bg-muted/10"}`}
                 >
                   <div className="text-xs text-muted-foreground">
-                    {isWeekly ? "Next Weekly" : "Next Payment"}
+                    {isWeekly ? "Next Weekly" : isBimonthly ? "Next 15th/30th" : "Next Payment"}
                   </div>
                   <div
                     className={`text-sm font-semibold ${isOverdue ? "text-destructive" : "text-amber-600"}`}

@@ -16,6 +16,7 @@ const HEADERS = [
   "status",
   "createdAt",
   "discount",
+  "loanId",
 ];
 
 export type LoanRequestStatus = "Pending" | "Approved" | "Rejected";
@@ -35,6 +36,8 @@ export interface LoanRequest {
   createdAt: string;
   /** Discount applied by admin at approval time (₹). 0 if none. */
   discount: number;
+  /** UUID of the loan row created when this request was approved. Null if not yet approved or pre-dates this field. */
+  loanId: string | null;
 }
 
 export interface LoanRequestInput {
@@ -70,6 +73,7 @@ function fromRow(row: Record<string, string>): LoanRequest {
     status,
     createdAt: row.createdAt,
     discount: Number(row.discount) || 0,
+    loanId: row.loanId || null,
   };
 }
 
@@ -84,6 +88,7 @@ function toRow(request: LoanRequest): Record<string, string> {
     tenureMonths: request.tenureMonths != null ? String(request.tenureMonths) : "",
     type: request.type,
     discount: String(request.discount ?? 0),
+    loanId: request.loanId ?? "",
   };
 }
 
@@ -133,6 +138,7 @@ export async function createLoanRequest(
     status: "Pending",
     createdAt: new Date().toISOString(),
     discount: 0,
+    loanId: null,
   };
   await appendRow(TAB, HEADERS, toRow(request));
   return request;
@@ -150,15 +156,21 @@ export async function updateLoanRequestStatus(
   return updated;
 }
 
-/** Approve a loan request and record the discount applied by the admin. */
+/** Approve a loan request and record the discount + created loan UUID. */
 export async function approveLoanRequest(
   id: string,
   discount: number,
+  loanId?: string,
 ): Promise<LoanRequest | null> {
   const { rows, rowNumbers } = await readTabWithIds();
   const idx = rows.findIndex((r) => r.id === id);
   if (idx === -1) return null;
-  const updated: LoanRequest = { ...fromRow(rows[idx]), status: "Approved", discount: discount ?? 0 };
+  const updated: LoanRequest = {
+    ...fromRow(rows[idx]),
+    status: "Approved",
+    discount: discount ?? 0,
+    ...(loanId != null ? { loanId } : {}),
+  };
   await updateRowAt(TAB, rowNumbers[idx], HEADERS, toRow(updated));
   return updated;
 }
