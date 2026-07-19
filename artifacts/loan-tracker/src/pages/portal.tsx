@@ -1603,9 +1603,10 @@ function buildRepaymentItems(
         const t = entry.split(":")[2];
         return t === "W" || t === "WM";
       }).length;
-      const wRemaining = e.remainingMonths != null
-        ? Math.max(0, Math.round(e.remainingMonths * 4))
-        : Math.max(0, wTotal - wPaidCount);
+      // Always derive remaining from actual paid count, not calendar-based remainingMonths.
+      // remainingMonths drifts when borrowers skip/delay payments and does not reflect
+      // how many instalments have actually been received.
+      const wRemaining = Math.max(0, wTotal - wPaidCount);
       const wProgress = ` · ${wRemaining}/${wTotal} instalments remaining`;
       if (overdueCount > 0) {
         // Use actual daysLate (calendar days since most recent due date) for the fee.
@@ -1684,9 +1685,7 @@ function buildRepaymentItems(
         const t = entry.split(":")[2];
         return t === "BM" || t === "BMM";
       }).length;
-      const bmRemaining = e.remainingMonths != null
-        ? Math.max(0, Math.round(e.remainingMonths * 2))
-        : Math.max(0, bmTotal - bmPaidCount);
+      const bmRemaining = Math.max(0, bmTotal - bmPaidCount);
       const bmProgress = ` · ${bmRemaining}/${bmTotal} instalments remaining`;
       if (overdueCountBi > 0) {
         const overdueTotal = calcOverdueTotal(biAmt, overdueCountBi, 15, Math.max(daysLateBi, 1));
@@ -2254,19 +2253,17 @@ function RequestDetailDialog({
                   <span className="text-emerald-700">Interest (est.)</span>
                   <span className="font-semibold font-numeric">{formatCurrency(est.interest)}</span>
                 </div>
-                {adminDiscount != null && adminDiscount > 0 && (
-                  <div className="flex justify-between text-xs">
-                    <span className="text-emerald-700">Admin Discount</span>
-                    <span className="font-semibold font-numeric text-emerald-800">−{formatCurrency(adminDiscount)}</span>
-                  </div>
-                )}
+                <div className="flex justify-between text-xs">
+                  <span className="text-emerald-700">Discount / Charges</span>
+                  <span className={`font-semibold font-numeric ${adminDiscount && adminDiscount > 0 ? "text-emerald-800" : "text-muted-foreground"}`}>
+                    {adminDiscount && adminDiscount > 0 ? `−${formatCurrency(adminDiscount)}` : "None"}
+                  </span>
+                </div>
                 <div className="flex justify-between text-xs border-t border-emerald-200 pt-1.5">
                   <span className="text-emerald-700 font-semibold">Total to repay (est.)</span>
                   <span className="font-bold font-numeric text-emerald-900">{formatCurrency(adminDiscount && adminDiscount > 0 ? est.finalAmount - adminDiscount : est.finalAmount)}</span>
                 </div>
-                {!(adminDiscount && adminDiscount > 0) && (
-                  <p className="text-[10px] text-emerald-600">Estimate only — admin will confirm the exact amount and any discount when disbursed.</p>
-                )}
+                <p className="text-[10px] text-emerald-600">Estimate only — admin will confirm the exact final amount when disbursed.</p>
               </div>
             );
           })()}
@@ -2285,19 +2282,17 @@ function RequestDetailDialog({
                   <span className="text-emerald-700">Tenure</span>
                   <span className="font-semibold">{request.tenureMonths} months</span>
                 </div>
-                {adminDiscount != null && adminDiscount > 0 && (
-                  <div className="flex justify-between text-xs">
-                    <span className="text-emerald-700">Admin Discount</span>
-                    <span className="font-semibold font-numeric text-emerald-800">−{formatCurrency(adminDiscount)}</span>
-                  </div>
-                )}
+                <div className="flex justify-between text-xs">
+                  <span className="text-emerald-700">Discount / Charges</span>
+                  <span className={`font-semibold font-numeric ${adminDiscount && adminDiscount > 0 ? "text-emerald-800" : "text-muted-foreground"}`}>
+                    {adminDiscount && adminDiscount > 0 ? `−${formatCurrency(adminDiscount)}` : "None"}
+                  </span>
+                </div>
                 <div className="flex justify-between text-xs border-t border-emerald-200 pt-1.5">
                   <span className="text-emerald-700 font-semibold">Monthly payment (est.)</span>
                   <span className="font-bold font-numeric text-emerald-900">≈ {formatCurrency(estMonthly)}</span>
                 </div>
-                {!(adminDiscount && adminDiscount > 0) && (
-                  <p className="text-[10px] text-emerald-600">Estimate only — admin will confirm the exact monthly amount and fees when disbursed.</p>
-                )}
+                <p className="text-[10px] text-emerald-600">Estimate only — admin will confirm the exact monthly amount and fees when disbursed.</p>
               </div>
             );
           })()}

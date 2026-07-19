@@ -470,25 +470,26 @@ export default function EmiLoanDetail() {
   //
   // Only ONE of isDailyLoan / isWeeklyLoan / isBimonthlyLoan should be true at a time.
   // Normal monthly EMI loans have all three false → no sub-frequency quick-pay buttons.
+  // Use the same regex patterns as parsePaymentFrequency in portal.tsx so frequency
+  // detection stays in sync even if notes have irregular spacing (e.g. "pay  weekly 5000").
   const isBimonthlyLoan = !!(
     (loan.bimonthlyAmount != null && loan.bimonthlyAmount > 0) ||
-    _notesText.includes("bimonthly") ||
+    /pay\s+bi-?monthly\s+\d+/.test(_notesText) ||
     (loan.paidDates ?? []).some((e) => { const t = e.split(":")[2]; return t === "BM" || t === "BMM"; })
   );
   const isWeeklyLoan = !!(
     (loan.weeklyAmount != null && loan.weeklyAmount > 0) ||
-    _notesText.includes("pay weekly") ||
+    /pay\s+weekly\s+\d+/.test(_notesText) ||
     (loan.paidDates ?? []).some((e) => { const t = e.split(":")[2]; return t === "W" || t === "WM"; })
   );
-  // isDailyLoan: sheet dailyAmount column > 0 OR explicit "pay daily" in notes.
-  // NOTE: dailyAmount is ALSO computed below as a fallback (monthly ÷ 30) for display,
-  // but a computed value doesn't make this a daily-frequency loan.
+  // isDailyLoan: sheet dailyAmount column > 0 OR explicit "pay daily NNN" in notes.
+  // NOTE: dailyAmount is ALSO computed as a fallback (monthly ÷ 30) for display on all
+  // rows — that computed value alone must NOT make this a daily-frequency loan.
   // Mutually exclusive with isWeeklyLoan / isBimonthlyLoan — if a higher-frequency
-  // type is already detected, the daily column is ignored (it may be present on all
-  // rows as a sheet-computed fallback).
+  // type is already detected, the daily column is ignored.
   const isDailyLoan = !isWeeklyLoan && !isBimonthlyLoan && !!(
     (loan.dailyAmount != null && loan.dailyAmount > 0) ||
-    _notesText.includes("pay daily")
+    /pay\s+daily\s+\d+/.test(_notesText)
   );
 
   // Total installments by frequency.

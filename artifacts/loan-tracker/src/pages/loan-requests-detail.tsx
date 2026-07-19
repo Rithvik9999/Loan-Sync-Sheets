@@ -580,12 +580,12 @@ export default function LoanRequestDetail() {
                       <span className="text-emerald-700">Est. interest</span>
                       <span className="font-numeric">+ {formatCurrency(estimatedInterest)}</span>
                     </div>
-                    {req.discount > 0 && (
-                      <div className="flex justify-between text-xs">
-                        <span className="text-emerald-700">Discount applied</span>
-                        <span className="font-numeric text-emerald-800">− {formatCurrency(req.discount)}</span>
-                      </div>
-                    )}
+                    <div className="flex justify-between text-xs">
+                      <span className="text-emerald-700">Discount / Charges</span>
+                      <span className={`font-numeric font-semibold ${(req.discount ?? 0) > 0 ? "text-emerald-800" : "text-muted-foreground"}`}>
+                        {(req.discount ?? 0) > 0 ? `− ${formatCurrency(req.discount)}` : "None"}
+                      </span>
+                    </div>
                     <div className="flex justify-between text-xs border-t border-emerald-200 pt-1.5">
                       <span className="text-emerald-700 font-semibold">Est. total to repay</span>
                       <span className="font-bold font-numeric">{formatCurrency(estimatedFinalAmount - (req.discount ?? 0))}</span>
