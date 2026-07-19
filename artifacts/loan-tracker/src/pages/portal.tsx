@@ -1670,6 +1670,9 @@ function buildRepaymentItems(
         return Math.max(elapsed - Math.floor(totalPaidFromDates / weeklyAmt), 0);
       })();
 
+      const wTotal = Math.round(e.tenureMonths * 4);
+      const wRemaining = e.remainingMonths != null ? Math.max(0, Math.round(e.remainingMonths * 4)) : null;
+      const wProgress = wRemaining != null ? ` · ${wRemaining}/${wTotal} instalments remaining` : "";
       if (overdueCount > 0) {
         // Use actual daysLate (calendar days since most recent due date) for the fee.
         const overdueTotal = calcOverdueTotal(weeklyAmt, overdueCount, 7, Math.max(daysLate, 1));
@@ -1677,7 +1680,7 @@ function buildRepaymentItems(
           key: `emi-weekly-${e.id}`,
           id: e.id, loanId: (e as any).emiId, type: "emi",
           label: `${formatCurrency(e.principal)} EMI (₹${weeklyAmt.toLocaleString("en-IN")}/week)`,
-          subLabel: `${overdueCount} missed payment${overdueCount > 1 ? "s" : ""} · ${daysLate} day${daysLate !== 1 ? "s" : ""} overdue`,
+          subLabel: `${overdueCount} missed payment${overdueCount > 1 ? "s" : ""} · ${daysLate} day${daysLate !== 1 ? "s" : ""} overdue${wProgress}`,
           outstanding: overdueTotal,
           dueDate: currentWeekDue,
           isOverdue: true,
@@ -1692,11 +1695,11 @@ function buildRepaymentItems(
           key: `emi-weekly-${e.id}`,
           id: e.id, loanId: (e as any).emiId, type: "emi",
           label: `${formatCurrency(e.principal)} EMI (₹${weeklyAmt.toLocaleString("en-IN")}/week)`,
-          subLabel: isDueToday
+          subLabel: (isDueToday
             ? "Due today"
             : upcomingDue
               ? `Next payment ${formatDate(upcomingDue.toISOString())}`
-              : "No upcoming payment",
+              : "No upcoming payment") + wProgress,
           outstanding: weeklyAmt,
           dueDate: upcomingDue,
           isOverdue: false,
@@ -1742,13 +1745,16 @@ function buildRepaymentItems(
         return Math.max(elapsed - Math.floor(totalPaidFromDates / biAmt), 0);
       })();
 
+      const bmTotal = Math.round(e.tenureMonths * 2);
+      const bmRemaining = e.remainingMonths != null ? Math.max(0, Math.round(e.remainingMonths * 2)) : null;
+      const bmProgress = bmRemaining != null ? ` · ${bmRemaining}/${bmTotal} instalments remaining` : "";
       if (overdueCountBi > 0) {
         const overdueTotal = calcOverdueTotal(biAmt, overdueCountBi, 15, Math.max(daysLateBi, 1));
         items.push({
           key: `emi-bimonthly-${e.id}`,
           id: e.id, loanId: (e as any).emiId, type: "emi",
           label: `${formatCurrency(e.principal)} EMI (₹${biAmt.toLocaleString("en-IN")}/15th & 30th)`,
-          subLabel: `${overdueCountBi} missed payment${overdueCountBi > 1 ? "s" : ""} · ${daysLateBi} day${daysLateBi !== 1 ? "s" : ""} overdue`,
+          subLabel: `${overdueCountBi} missed payment${overdueCountBi > 1 ? "s" : ""} · ${daysLateBi} day${daysLateBi !== 1 ? "s" : ""} overdue${bmProgress}`,
           outstanding: overdueTotal,
           dueDate: currentBiDue,
           isOverdue: true,
@@ -1763,11 +1769,11 @@ function buildRepaymentItems(
           key: `emi-bimonthly-${e.id}`,
           id: e.id, loanId: (e as any).emiId, type: "emi",
           label: `${formatCurrency(e.principal)} EMI (₹${biAmt.toLocaleString("en-IN")}/15th & 30th)`,
-          subLabel: isDueTodayBi
+          subLabel: (isDueTodayBi
             ? "Due today"
             : upcomingBiDue
               ? `Next payment ${formatDate(upcomingBiDue.toISOString())}`
-              : "No upcoming payment",
+              : "No upcoming payment") + bmProgress,
           outstanding: biAmt,
           dueDate: upcomingBiDue,
           isOverdue: false,

@@ -456,34 +456,41 @@ export default function EmiLoanDetail() {
   const weeklyAmount = loan.weeklyAmount ?? (loan.monthlyPayment != null ? Math.round(loan.monthlyPayment / 4) : null);
   const bimonthlyAmount = loan.bimonthlyAmount ?? (loan.monthlyPayment != null ? Math.round(loan.monthlyPayment / 2) : null);
   const hasCustomAmounts = !!(loan.dailyAmount || loan.weeklyAmount || loan.bimonthlyAmount);
-  // Weekly-only loan: has a weeklyAmount column set OR notes/whatsapp says "pay weekly".
-  // For these loans we hide the Daily quick-pay button and daily-equivalent text.
+  // Detect frequency from dedicated sheet columns (U/V/W), notes/whatsapp text,
+  // OR from the type tags already present in paidDates entries ("BM"/"BMM" / "W"/"WM").
+  const _notesText = `${loan.notes ?? ""} ${loan.whatsapp ?? ""}`.toLowerCase();
+  const isBimonthlyLoan = !!(
+    loan.bimonthlyAmount != null ||
+    _notesText.includes("bimonthly") ||
+    (loan.paidDates ?? []).some((e) => { const t = e.split(":")[2]; return t === "BM" || t === "BMM"; })
+  );
   const isWeeklyLoan = !!(
     loan.weeklyAmount != null ||
-    `${loan.notes ?? ""} ${loan.whatsapp ?? ""}`.toLowerCase().includes("pay weekly")
+    _notesText.includes("pay weekly") ||
+    (loan.paidDates ?? []).some((e) => { const t = e.split(":")[2]; return t === "W" || t === "WM"; })
   );
 
   // Total installments by frequency: bimonthly = tenureMonths × 2, weekly = tenureMonths × 4
   const totalInstallments =
-    loan.bimonthlyAmount != null
+    isBimonthlyLoan
       ? Math.round(loan.tenureMonths * 2)
-      : loan.weeklyAmount != null
+      : isWeeklyLoan
         ? Math.round(loan.tenureMonths * 4)
         : null;
   // Remaining installments: remainingMonths × installments-per-month
   const remainingInstallments =
     totalInstallments != null && loan.remainingMonths != null
-      ? Math.round(loan.remainingMonths * (loan.bimonthlyAmount != null ? 2 : 4))
+      ? Math.max(0, Math.round(loan.remainingMonths * (isBimonthlyLoan ? 2 : 4)))
       : null;
 
   const stats: { label: string; value: string; highlight?: boolean }[] = [
     { label: "EMI ID", value: loan.emiId ?? "—" },
     { label: "Principal", value: formatCurrency(loan.principal) },
     { label: "Tenure", value: `${loan.tenureMonths} months` },
-    ...(totalInstallments != null
+    ...(totalInstallments != null && remainingInstallments != null
       ? [{
-          label: loan.bimonthlyAmount != null ? "Total Bimonthly Instalments" : "Total Weekly Instalments",
-          value: `${totalInstallments} instalments`,
+          label: isBimonthlyLoan ? "Bimonthly Instalments" : "Weekly Instalments",
+          value: `${remainingInstallments} / ${totalInstallments} remaining`,
         }]
       : []),
     { label: "Transaction Date", value: formatDate(loan.transactionDate) },

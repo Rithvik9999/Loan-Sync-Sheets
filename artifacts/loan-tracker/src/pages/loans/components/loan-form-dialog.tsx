@@ -35,16 +35,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, ChevronsUpDown, Check, Calculator, Tag } from "lucide-react";
+import { Loader2, ChevronsUpDown, Check, Calculator, Tag, Search } from "lucide-react";
 import { useLocation } from "wouter";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
 import {
   Popover,
   PopoverContent,
@@ -324,59 +316,69 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent className="p-0 w-[--radix-popover-trigger-width]" align="start">
-                        <Command>
-                          <CommandInput
+                        {/* Native implementation — avoids cmdk capturing touch events and blocking scroll */}
+                        <div className="flex items-center border-b px-3">
+                          <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+                          <input
+                            className="flex h-10 w-full bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
                             placeholder="Search or type a new name…"
                             value={nameSearch}
-                            onValueChange={(v) => {
-                              setNameSearch(v);
-                              field.onChange(v);
+                            autoFocus
+                            onChange={(e) => {
+                              setNameSearch(e.target.value);
+                              field.onChange(e.target.value);
                             }}
                           />
-                          {nameSearch && !uniqueNames.some(
-                            (b) => b.name.toLowerCase() === nameSearch.toLowerCase(),
-                          ) && (
-                            <div className="px-3 py-2 text-xs text-muted-foreground border-b">
-                              Press Enter or select below to add as new borrower
+                        </div>
+                        {nameSearch && !uniqueNames.some(
+                          (b) => b.name.toLowerCase() === nameSearch.toLowerCase(),
+                        ) && (
+                          <div className="px-3 py-2 text-xs text-muted-foreground border-b">
+                            Press Enter or select below to add as new borrower
+                          </div>
+                        )}
+                        <div
+                          className="max-h-52 overflow-y-auto overscroll-contain py-1"
+                          style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+                        >
+                          {filteredNames.length === 0 ? (
+                            <div className="py-3 text-center text-sm text-muted-foreground">
+                              {nameSearch ? `Record as new borrower: "${nameSearch}"` : "No borrowers found."}
                             </div>
-                          )}
-                          <CommandEmpty className="py-3 text-center text-sm text-muted-foreground">
-                            {nameSearch ? `Record as new borrower: "${nameSearch}"` : "No borrowers found."}
-                          </CommandEmpty>
-                          <CommandList className="max-h-52">
-                            <CommandGroup>
-                              {filteredNames.map((b) => (
-                                <CommandItem
-                                  key={b.name}
-                                  value={b.name}
-                                  onSelect={(val) => {
-                                    field.onChange(val);
-                                    if (!form.getValues("whatsapp") && b.phone) {
-                                      form.setValue("whatsapp", b.phone);
-                                    }
-                                    setNameSearch("");
-                                    setNamePopoverOpen(false);
-                                  }}
-                                >
-                                  <Check
-                                    className={cn(
-                                      "mr-2 h-4 w-4",
-                                      currentName?.toLowerCase() === b.name.toLowerCase()
-                                        ? "opacity-100"
-                                        : "opacity-0",
-                                    )}
-                                  />
-                                  <span>{b.name}</span>
-                                  {b.phone && (
-                                    <span className="ml-auto text-xs text-muted-foreground">
-                                      {b.phone}
-                                    </span>
+                          ) : (
+                            filteredNames.map((b) => (
+                              <button
+                                key={b.name}
+                                type="button"
+                                className="flex w-full items-center px-2 py-1.5 text-sm rounded-sm hover:bg-accent cursor-pointer"
+                                onPointerDown={(e) => {
+                                  e.preventDefault();
+                                  field.onChange(b.name);
+                                  if (!form.getValues("whatsapp") && b.phone) {
+                                    form.setValue("whatsapp", b.phone);
+                                  }
+                                  setNameSearch("");
+                                  setNamePopoverOpen(false);
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    currentName?.toLowerCase() === b.name.toLowerCase()
+                                      ? "opacity-100"
+                                      : "opacity-0",
                                   )}
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
+                                />
+                                <span>{b.name}</span>
+                                {b.phone && (
+                                  <span className="ml-auto text-xs text-muted-foreground">
+                                    {b.phone}
+                                  </span>
+                                )}
+                              </button>
+                            ))
+                          )}
+                        </div>
                       </PopoverContent>
                     </Popover>
                   </FormControl>
