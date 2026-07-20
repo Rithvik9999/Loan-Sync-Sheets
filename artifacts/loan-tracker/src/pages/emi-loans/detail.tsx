@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "@/components/ui/link";
 import {
   ArrowLeft, Edit, Trash2, Calendar, FileText, Loader2,
-  CircleDollarSign, CalendarDays, CalendarRange, Undo2, Share2,
+  CircleDollarSign, CalendarDays, CalendarRange, Undo2, Share2, Clock,
 } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -985,6 +985,54 @@ export default function EmiLoanDetail() {
           </CardContent>
         </Card>
       )}
+
+      {/* Activity Log */}
+      {(() => {
+        const activityLog = ((loan as any).activityLog as string[] | undefined) ?? [];
+        if (activityLog.length === 0) return null;
+        const entries = activityLog
+          .map(e => {
+            const i = e.indexOf("~");
+            if (i === -1) return null;
+            const date = new Date(e.slice(0, i));
+            if (isNaN(date.getTime())) return null;
+            return { label: e.slice(i + 1), date };
+          })
+          .filter((e): e is { label: string; date: Date } => e !== null)
+          .sort((a, b) => b.date.getTime() - a.date.getTime());
+        if (entries.length === 0) return null;
+        return (
+          <Card className="shadow-sm border-border/60">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                Activity Log
+              </CardTitle>
+              <CardDescription>All recorded actions on this EMI loan, newest first.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="relative pl-6">
+                <div className="absolute left-2 top-1 bottom-1 w-px bg-border" />
+                <div className="space-y-4">
+                  {entries.map((entry, i) => (
+                    <div key={i} className="relative">
+                      <div className="absolute -left-[22px] top-1 h-3 w-3 rounded-full border-2 border-primary/50 bg-background" />
+                      <p className="text-sm font-medium leading-snug">{entry.label}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {entry.date.toLocaleString("en-IN", {
+                          day: "2-digit", month: "short", year: "numeric",
+                          hour: "2-digit", minute: "2-digit", hour12: true,
+                          timeZone: "Asia/Kolkata",
+                        })}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {isStaff && (
         <>

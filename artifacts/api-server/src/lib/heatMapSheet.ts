@@ -45,7 +45,7 @@ const TAB = "Heat Map";
 const HEADER_ROW = 5;
 const FORMULA_ROW = 6;
 const DATA_START_ROW = 7;
-const LAST_COL_INDEX = 23; // X
+const LAST_COL_INDEX = 24; // Y
 
 const COL = {
   ID: 0,
@@ -71,6 +71,7 @@ const COL = {
   NOTES: 21,
   CREATED_AT: 22,             // col W — ISO datetime of loan creation
   PART_PAYMENT_TIMESTAMPS: 23, // col X — pipe-separated ISO datetimes for each part-payment
+  ACTIVITY_LOG: 24,            // col Y — pipe-separated activity entries (ISO_timestamp~label)
 } as const;
 
 export type LoanStatus = "Pending" | "Clear" | "Temp" | "Archived";
@@ -118,6 +119,8 @@ export interface LoanRow {
   createdAt: string | null;
   /** ISO datetime strings for each part-payment entry (same order as partPayments). */
   partPaymentTimestamps: string[];
+  /** Pipe-separated activity log entries (ISO_timestamp~label). Appended on every write action. */
+  activityLog: string[];
 }
 
 export interface LoanRowInput {
@@ -280,6 +283,10 @@ function parseRow(raw: unknown[], rowNumber: number): LoanRow {
       .split("|")
       .map(s => s.trim())
       .filter(Boolean),
+    activityLog: toText(get(COL.ACTIVITY_LOG))
+      .split("|")
+      .map(s => s.trim())
+      .filter(Boolean),
   };
 }
 
@@ -303,7 +310,7 @@ export interface LoanRowUpdate {
 export async function listLoanRows(): Promise<LoanRow[]> {
   // Kick off the one-time ROUND→CEILING migration non-blockingly.
   ensureHeatMapCeilingFormulas().catch(() => {});
-  const raw = await getRawValues(`${TAB}!A${DATA_START_ROW}:V`);
+  const raw = await getRawValues(`${TAB}!A${DATA_START_ROW}:Y`);
   const rows: LoanRow[] = [];
   const idBackfills: { range: string; values: (string | number)[][] }[] = [];
 
@@ -393,6 +400,7 @@ export async function createLoanRow(input: LoanRowInput): Promise<LoanRow> {
   const updates = [
     { range: `${TAB}!${colLetter(COL.ID)}${rowNumber}`, values: [[id]] },
     { range: `${TAB}!${colLetter(COL.CREATED_AT)}${rowNumber}`, values: [[createdAt]] },
+    { range: `${TAB}!${colLetter(COL.ACTIVITY_LOG)}${rowNumber}`, values: [[`${createdAt}~Loan created`]] },
     ...inputCellUpdates(rowNumber, { ...input, status: input.status ?? "Pending" }),
   ];
   await batchUpdateCells(updates);
@@ -420,7 +428,7 @@ export async function createLoanRow(input: LoanRowInput): Promise<LoanRow> {
 }
 
 async function getLoanRowAtRowNumber(rowNumber: number): Promise<LoanRow | null> {
-  const raw = await getRawValues(`${TAB}!A${rowNumber}:V${rowNumber}`);
+  const raw = await getRawValues(`${TAB}!A${rowNumber}:Y${rowNumber}`);
   if (raw.length === 0) return null;
   return parseRow(raw[0], rowNumber);
 }
@@ -496,4 +504,25 @@ export async function deleteLoanRow(id: string): Promise<LoanRow | null> {
   if (!existing) return null;
   await deleteRowAt(TAB, existing.rowNumber);
   return existing;
+}
+
+/**
+ * Appends a timestamped activity entry to the ACTIVITY_LOG column (col Y) for a loan row.
+ * Non-fatal: any error is swallowed so activity logging never disrupts core operations.
+ */
+export async function appendLoanActivity(rowNumber: number, label: string): Promise<void> {
+  try {
+    const col = colLetter(COL.ACTIVITY_LOG);
+    const raw = await getRawValues(`${TAB}!${col}${rowNumber}:${col}${rowNumber}`);
+    const existing = typeof raw?.[0]?.[0] === "string" ? (raw[0][0] as string) : "";
+    const ts = new Date().toISOString();
+    const entry = `${ts}~${label}`;
+    const newLog = existing ? `${existing}|${entry}` : entry;
+    await batchUpdateCells([{
+      range: `${TAB}!${col}${rowNumber}`,
+      values: [[newLog]],
+    }]);
+  } catch {
+    // Non-fatal — activity logging must never break core operations
+  }
 }

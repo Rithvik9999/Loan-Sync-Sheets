@@ -125,6 +125,8 @@ router.post("/emi-loans/:id/pay", requireStaff, async (req, res): Promise<void> 
       return;
     }
     res.json(updated);
+    const amtLabel = paidAmount != null ? ` ₹${Number(paidAmount).toLocaleString("en-IN")}` : "";
+    emiSheet.appendEmiActivity(updated.rowNumber, `Monthly payment${amtLabel} on ${paidDate}`).catch(() => {});
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -147,6 +149,8 @@ router.post("/emi-loans/:id/pay-partial", requireStaff, async (req, res): Promis
     );
     if (!updated) { res.status(404).json({ error: "EMI loan not found" }); return; }
     res.json(updated);
+    const freqLabel = frequency === "D" ? "Daily" : frequency === "W" ? "Weekly" : "Bimonthly";
+    emiSheet.appendEmiActivity(updated.rowNumber, `${freqLabel} payment ₹${Number(amount).toLocaleString("en-IN")} on ${date}`).catch(() => {});
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -159,6 +163,7 @@ router.post("/emi-loans/:id/undo", requireStaff, async (req, res): Promise<void>
     const updated = await emiSheet.undoLastEmiPayment(id);
     if (!updated) { res.status(404).json({ error: "EMI loan not found" }); return; }
     res.json(updated);
+    emiSheet.appendEmiActivity(updated.rowNumber, "Last payment undone").catch(() => {});
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -220,6 +225,9 @@ router.patch("/emi-loans/:id", requireStaff, async (req, res): Promise<void> => 
     return;
   }
   res.json(updated);
+  const body = req.body as Record<string, unknown>;
+  const emiActLabel = body.status ? `Status → ${body.status}` : "Loan details updated";
+  emiSheet.appendEmiActivity(updated.rowNumber, emiActLabel).catch(() => {});
 });
 
 // DELETE /api/emi-loans/:id — delete (staff only)

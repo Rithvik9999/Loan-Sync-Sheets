@@ -12,6 +12,7 @@ import * as borrowersRepo from "../lib/repositories/borrowers";
 import * as loansRepo from "../lib/repositories/loans";
 import { attachBorrowerId } from "../lib/repositories/loans";
 import * as emiSheet from "../lib/emiSheet";
+import { appendLoanActivity } from "../lib/heatMapSheet";
 import { extractPhoneFromWhatsapp, normalizePhone, normalizeName } from "../lib/authTokens";
 
 const router: IRouter = Router();
@@ -213,6 +214,9 @@ router.post(
 
     const borrowers = await borrowersRepo.listBorrowers();
     res.status(201).json({ loan: attachBorrowerId(loan, borrowers) });
+
+    // Append a second activity entry noting this loan originated from a request approval.
+    appendLoanActivity(loan.rowNumber, `Disbursed via request approval ₹${principal.toLocaleString("en-IN")}`).catch(() => {});
   },
 );
 

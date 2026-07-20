@@ -15,6 +15,7 @@ import * as loansRepo from "../lib/repositories/loans";
 import * as borrowersRepo from "../lib/repositories/borrowers";
 import { attachBorrowerId } from "../lib/repositories/loans";
 import { extractPhoneFromWhatsapp, normalizePhone, normalizeName } from "../lib/authTokens";
+import { appendLoanActivity } from "../lib/heatMapSheet";
 
 const router: IRouter = Router();
 
@@ -148,6 +149,18 @@ router.patch(
     }
     const borrowers = await borrowersRepo.listBorrowers();
     res.json(UpdateLoanResponse.parse(attachBorrowerId(loan, borrowers)));
+
+    // Fire-and-forget: append an activity entry based on what was patched
+    const pd = parsed.data;
+    let actLabel: string;
+    if (pd.paid != null && Object.keys(pd).filter(k => k !== "paid").length === 0) {
+      actLabel = `Payment updated — total ₹${pd.paid.toLocaleString("en-IN")}`;
+    } else if (pd.status) {
+      actLabel = `Status → ${pd.status}`;
+    } else {
+      actLabel = "Loan details updated";
+    }
+    appendLoanActivity(loan.rowNumber, actLabel).catch(() => {});
   },
 );
 
@@ -175,6 +188,7 @@ router.post(
     if (!loan) { res.status(404).json({ error: "Loan not found" }); return; }
     const borrowers = await borrowersRepo.listBorrowers();
     res.json(attachBorrowerId(loan, borrowers));
+    appendLoanActivity(loan.rowNumber, `Part payment ₹${amount.toLocaleString("en-IN")} on ${date}`).catch(() => {});
   },
 );
 

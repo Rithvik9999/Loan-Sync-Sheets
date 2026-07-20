@@ -37,6 +37,7 @@ import {
   Info,
   MessageCircle,
   Trash2,
+  Clock,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -687,6 +688,52 @@ export default function LoanRequestDetail() {
           </CardContent>
         </Card>
       )}
+
+      {/* Activity Log — request lifecycle timestamps */}
+      {(() => {
+        const entries: { label: string; date: Date }[] = [];
+        if (req.createdAt) {
+          const d = new Date(req.createdAt);
+          if (!isNaN(d.getTime())) entries.push({ label: "Request submitted", date: d });
+        }
+        if ((req as any).approvedAt) {
+          const d = new Date((req as any).approvedAt as string);
+          if (!isNaN(d.getTime())) entries.push({ label: "Request approved & loan disbursed", date: d });
+        }
+        if (entries.length === 0) return null;
+        entries.sort((a, b) => b.date.getTime() - a.date.getTime());
+        return (
+          <Card className="shadow-sm border-border/60">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                Activity Log
+              </CardTitle>
+              <CardDescription>Timeline of this loan request.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="relative pl-6">
+                <div className="absolute left-2 top-1 bottom-1 w-px bg-border" />
+                <div className="space-y-4">
+                  {entries.map((entry, i) => (
+                    <div key={i} className="relative">
+                      <div className="absolute -left-[22px] top-1 h-3 w-3 rounded-full border-2 border-primary/50 bg-background" />
+                      <p className="text-sm font-medium leading-snug">{entry.label}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {entry.date.toLocaleString("en-IN", {
+                          day: "2-digit", month: "short", year: "numeric",
+                          hour: "2-digit", minute: "2-digit", hour12: true,
+                          timeZone: "Asia/Kolkata",
+                        })}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
     </div>
   );
 }

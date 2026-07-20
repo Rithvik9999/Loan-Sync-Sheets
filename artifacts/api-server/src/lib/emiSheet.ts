@@ -44,7 +44,7 @@ import {
 
 const TAB = "Heat Map";
 const DATA_START_ROW = 6; // Row 6 is the first real data row (also has array formulas)
-const LAST_COL = "Y";     // Column Y = index 24
+const LAST_COL = "Z";     // Column Z = index 25
 
 const COL = {
   ID: 0,
@@ -72,6 +72,7 @@ const COL = {
   BIMONTHLY_AMOUNT: 22,
   CREATED_AT: 23,       // col X — ISO datetime of EMI loan creation
   PAID_TIMESTAMPS: 24,  // col Y — pipe-separated ISO datetimes for each paidDates entry
+  ACTIVITY_LOG: 25,     // col Z — pipe-separated activity entries (ISO_timestamp~label)
 } as const;
 
 export type EmiLoanStatus = "Pending" | "Clear" | "Archived";
@@ -117,6 +118,8 @@ export interface EmiLoanRow {
   createdAt: string | null;
   /** ISO datetime strings for each paidDates entry (same order). Null/empty for legacy rows. */
   paidTimestamps: string[];
+  /** Pipe-separated activity log entries (ISO_timestamp~label). Appended on every write action. */
+  activityLog: string[];
 }
 
 export interface EmiLoanInput {
@@ -377,6 +380,10 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
       .split("|")
       .map((s) => s.trim())
       .filter(Boolean),
+    activityLog: toText(get(COL.ACTIVITY_LOG))
+      .split("|")
+      .map((s) => s.trim())
+      .filter(Boolean),
   };
 }
 
@@ -538,6 +545,7 @@ export async function createEmiLoanRow(input: EmiLoanInput): Promise<EmiLoanRow>
   const updates = [
     { range: `${TAB}!${colLetter(COL.ID)}${rowNumber}`, values: [[id]] },
     { range: `${TAB}!${colLetter(COL.CREATED_AT)}${rowNumber}`, values: [[createdAt]] },
+    { range: `${TAB}!${colLetter(COL.ACTIVITY_LOG)}${rowNumber}`, values: [[`${createdAt}~EMI loan created`]] },
     ...emiInputCellUpdates(rowNumber, { ...input, status: input.status ?? "Pending" }),
   ];
   // Write initial server-managed tracking columns.
@@ -849,4 +857,26 @@ export async function deleteEmiLoanRow(id: string): Promise<EmiLoanRow | null> {
   const sheetId = getEmiSpreadsheetId();
   await deleteRowAtInSheet(sheetId, TAB, existing.rowNumber);
   return existing;
+}
+
+/**
+ * Appends a timestamped activity entry to the ACTIVITY_LOG column (col Z) for an EMI loan row.
+ * Non-fatal: any error is swallowed so activity logging never disrupts core operations.
+ */
+export async function appendEmiActivity(rowNumber: number, label: string): Promise<void> {
+  try {
+    const sheetId = getEmiSpreadsheetId();
+    const col = colLetter(COL.ACTIVITY_LOG);
+    const raw = await getRawValuesFromSheet(sheetId, `${TAB}!${col}${rowNumber}:${col}${rowNumber}`);
+    const existing = typeof raw?.[0]?.[0] === "string" ? (raw[0][0] as string) : "";
+    const ts = new Date().toISOString();
+    const entry = `${ts}~${label}`;
+    const newLog = existing ? `${existing}|${entry}` : entry;
+    await batchUpdateCellsInSheet(sheetId, [{
+      range: `${TAB}!${col}${rowNumber}`,
+      values: [[newLog]],
+    }]);
+  } catch {
+    // Non-fatal — activity logging must never break core operations
+  }
 }
