@@ -1,3 +1,4 @@
+import { Loader2 } from "lucide-react";
 import { Link, Redirect, Route, Switch, Router as WouterRouter } from "wouter";
 import { queryClient } from "@/lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -22,16 +23,24 @@ import NotFound from "@/pages/not-found";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
+function LoadingScreen() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <Loader2 className="h-8 w-8 animate-spin text-primary/50" />
+    </div>
+  );
+}
+
 function HomeRedirect() {
   const { role, isLoaded, isSignedIn } = useAppAuth();
-  if (!isLoaded) return null;
+  if (!isLoaded) return <LoadingScreen />;
   if (!isSignedIn) return <Redirect to="/sign-in" />;
   return role === "staff" ? <Redirect to="/dashboard" /> : <Redirect to="/portal" />;
 }
 
 function ProtectedStaffRoute({ component: Component }: { component: React.ComponentType }) {
   const { role, isLoaded, isSignedIn } = useAppAuth();
-  if (!isLoaded) return null;
+  if (!isLoaded) return <LoadingScreen />;
   if (!isSignedIn) return <Redirect to="/sign-in" />;
   if (role !== "staff") return <Redirect to="/portal" />;
   return (
@@ -43,7 +52,7 @@ function ProtectedStaffRoute({ component: Component }: { component: React.Compon
 
 function ProtectedBorrowerRoute({ component: Component }: { component: React.ComponentType }) {
   const { role, isLoaded, isSignedIn } = useAppAuth();
-  if (!isLoaded) return null;
+  if (!isLoaded) return <LoadingScreen />;
   if (!isSignedIn) return <Redirect to="/sign-in" />;
   if (role !== "borrower") return <Redirect to="/dashboard" />;
   return (
@@ -55,7 +64,7 @@ function ProtectedBorrowerRoute({ component: Component }: { component: React.Com
 
 function ProtectedSharedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isLoaded, isSignedIn } = useAppAuth();
-  if (!isLoaded) return null;
+  if (!isLoaded) return <LoadingScreen />;
   if (!isSignedIn) return <Redirect to="/sign-in" />;
   return (
     <SharedLayout>
@@ -66,7 +75,7 @@ function ProtectedSharedRoute({ component: Component }: { component: React.Compo
 
 function SignInRoute() {
   const { isLoaded, isSignedIn, role } = useAppAuth();
-  if (!isLoaded) return null;
+  if (!isLoaded) return <LoadingScreen />;
   if (isSignedIn) {
     return role === "staff" ? <Redirect to="/dashboard" /> : <Redirect to="/portal" />;
   }
