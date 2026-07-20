@@ -38,7 +38,7 @@ import { Badge } from "@/components/ui/badge";
 import { LoanStatusBadge } from "@/components/status-badges";
 import { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchEmiLoans, EmiLoan, markEmiLoanMonthlyPaid, EMI_LOANS_QUERY_KEY, parsePayAmountsFromNotes } from "./emi-loans/components/emi-loan-form-dialog";
+import { fetchEmiLoans, EmiLoan, markEmiLoanMonthlyPaid, EMI_LOANS_QUERY_KEY } from "./emi-loans/components/emi-loan-form-dialog";
 import {
   Table,
   TableBody,
@@ -76,94 +76,340 @@ interface AdminCollectionItem {
   amountDue: number;
   urgency: AdminItemUrgency;
   dueDate: Date | null;
+  /** Human-readable sub-label (e.g. "2 missed payments") */
+  subLabel?: string;
 }
 
-function detectEmiFrequency(loan: EmiLoan): { frequency: AdminItemFrequency; amountDue: number } {
-  // Priority for FREQUENCY: sheet column → notes regex → paidDates tags (legacy).
-  // Priority for AMOUNT: notes-explicit > column value > computed fallback.
-  //
-  // Notes-explicit amount wins over the column value because the column can be set to
-  // a sentinel "1" to mark the loan type without encoding the real instalment amount.
-  // parsePayAmountsFromNotes extracts the number from "pay daily NNN" / "pay weekly NNN".
-  const paidDates = loan.paidDates ?? [];
-  const mp = loan.monthlyPayment ?? 0;
-  const notesAmts = parsePayAmountsFromNotes(loan.notes);
+// ── Date-schedule helpers (mirrors portal.tsx) ─────────────────────────────────
+const MONTHLY_PAYMENT_DAYS = [8, 15, 22, 30] as const;
+const BIMONTHLY_PAYMENT_DAYS = [15, 30] as const;
 
-  // 1. Column flags determine frequency; notes-extracted amount takes precedence for value.
-  if (loan.dailyAmount != null && loan.dailyAmount > 0)
-    return { frequency: "daily", amountDue: notesAmts.daily ?? loan.dailyAmount };
-  if (loan.weeklyAmount != null && loan.weeklyAmount > 0)
-    return { frequency: "weekly", amountDue: notesAmts.weekly ?? loan.weeklyAmount };
-  if (loan.bimonthlyAmount != null && loan.bimonthlyAmount > 0) {
-    const bm = (loan.notes ?? "").match(/pay\s+bi-?monthly\s+(\d+)/i);
-    return { frequency: "bimonthly", amountDue: bm ? Number(bm[1]) : loan.bimonthlyAmount };
+function _getCurrentWeeklyPaymentDate(startDate: Date, targetDate: Date): Date | null {
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const target = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  let best: Date | null = null;
+  let year = start.getFullYear(), month = start.getMonth();
+  for (let m = 0; m < 36; m++) {
+    for (const day of MONTHLY_PAYMENT_DAYS) {
+      const d = new Date(year, month, day);
+      if (d <= start) continue;
+      if (d > target) return best;
+      best = d;
+    }
+    month++; if (month > 11) { month = 0; year++; }
   }
-
-  // 2. Notes with explicit amount (column is absent — amount comes entirely from text).
-  if (notesAmts.daily != null) return { frequency: "daily", amountDue: notesAmts.daily };
-  if (notesAmts.weekly != null) return { frequency: "weekly", amountDue: notesAmts.weekly };
-  const bmNotes = (loan.notes ?? "").match(/pay\s+bi-?monthly\s+(\d+)/i);
-  if (bmNotes) return { frequency: "bimonthly", amountDue: Number(bmNotes[1]) };
-
-  // 3. paidDates tags (legacy fallback, lowest priority — no explicit amount available).
-  if (paidDates.some(e => { const t = e.split(":")[2]; return t === "BM" || t === "BMM"; }))
-    return { frequency: "bimonthly", amountDue: Math.round(mp / 2) };
-  if (paidDates.some(e => { const t = e.split(":")[2]; return t === "W" || t === "WM"; }))
-    return { frequency: "weekly", amountDue: Math.round(mp / 4) };
-  if (paidDates.some(e => { const t = e.split(":")[2]; return t === "D" || t === "DM"; }))
-    return { frequency: "daily", amountDue: Math.round(mp / 30) };
-
-  return { frequency: "monthly", amountDue: mp };
+  return best;
 }
 
+function _getNextWeeklyPaymentDate(startDate: Date, targetDate: Date): Date | null {
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const target = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  let year = target.getFullYear(), month = target.getMonth();
+  for (let m = 0; m < 36; m++) {
+    for (const day of MONTHLY_PAYMENT_DAYS) {
+      const d = new Date(year, month, day);
+      if (d <= start) continue;
+      if (d > target) return d;
+    }
+    month++; if (month > 11) { month = 0; year++; }
+  }
+  return null;
+}
+
+function _getCurrentBimonthlyPaymentDate(startDate: Date, targetDate: Date): Date | null {
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const target = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  let best: Date | null = null;
+  let year = start.getFullYear(), month = start.getMonth();
+  for (let m = 0; m < 36; m++) {
+    for (const day of BIMONTHLY_PAYMENT_DAYS) {
+      const d = new Date(year, month, day);
+      if (d <= start) continue;
+      if (d > target) return best;
+      best = d;
+    }
+    month++; if (month > 11) { month = 0; year++; }
+  }
+  return best;
+}
+
+function _getNextBimonthlyPaymentDate(startDate: Date, targetDate: Date): Date | null {
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const target = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  let year = target.getFullYear(), month = target.getMonth();
+  for (let m = 0; m < 36; m++) {
+    for (const day of BIMONTHLY_PAYMENT_DAYS) {
+      const d = new Date(year, month, day);
+      if (d <= start) continue;
+      if (d > target) return d;
+    }
+    month++; if (month > 11) { month = 0; year++; }
+  }
+  return null;
+}
+
+/**
+ * Parse frequency + amount from notes/whatsapp text.
+ * Mirrors portal.tsx parsePaymentFrequency exactly.
+ */
+function _parsePaymentFrequency(
+  notes: string | null | undefined,
+  whatsapp: string | null | undefined,
+): { type: "daily" | "weekly" | "bimonthly" | null; amount: number | null } {
+  const text = `${notes ?? ""} ${whatsapp ?? ""}`.toLowerCase();
+  const dailyMatch = text.match(/pay\s+daily\s+(\d+)/);
+  if (dailyMatch) return { type: "daily", amount: Number(dailyMatch[1]) };
+  const weeklyMatch = text.match(/pay\s+weekly\s+(\d+)/);
+  if (weeklyMatch) return { type: "weekly", amount: Number(weeklyMatch[1]) };
+  const bmMatch = text.match(/pay\s+bi-?monthly\s+(\d+)/);
+  if (bmMatch) return { type: "bimonthly", amount: Number(bmMatch[1]) };
+  return { type: null, amount: null };
+}
+
+/**
+ * Build the list of EMI loans that need admin attention today.
+ * Mirrors the logic in portal.tsx buildRepaymentItems — uses calendar date math
+ * for daily/weekly/bimonthly frequencies instead of the server's monthly-cycle
+ * nextPaymentDate / lateDays (which are meaningless for sub-monthly schedules).
+ */
 function buildAdminCollectionItems(emiLoans: EmiLoan[]): AdminCollectionItem[] {
-  const todayStr = dateFnsFormat(new Date(), "yyyy-MM-dd");
   const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayStr = dateFnsFormat(today, "yyyy-MM-dd");
   const items: AdminCollectionItem[] = [];
 
   for (const loan of emiLoans) {
-    // Skip non-active loans — Archived loans are explicitly excluded even though
-    // status !== "Pending" already covers them, to be explicit about intent.
-    if (loan.status !== "Pending" || (loan.status as string) === "Archived") continue;
+    if (loan.status !== "Pending") continue;
 
-    const { frequency, amountDue } = detectEmiFrequency(loan);
+    const mp = loan.monthlyPayment ?? 0;
+    const txDate = loan.transactionDate
+      ? new Date(loan.transactionDate + "T00:00:00Z")
+      : null;
+    const txDateLocal = txDate
+      ? new Date(txDate.getFullYear(), txDate.getMonth(), txDate.getDate())
+      : null;
 
-    // Daily: skip only if a "D" or "DM" type instalment was already recorded today.
-    // Monthly "M" entries on today's date must NOT suppress the daily loan.
-    if (frequency === "daily") {
-      const alreadyPaidToday = (loan.paidDates ?? []).some(e => {
-        if (!e.startsWith(todayStr + ":")) return false;
-        const type = e.split(":")[2] ?? "M";
-        return type === "D" || type === "DM";
-      });
-      if (alreadyPaidToday) continue;
-    }
+    // ── Detect frequency (notes text > sheet column > paidDates tag) ──────────
+    const freq = _parsePaymentFrequency(loan.notes, loan.whatsapp);
 
-    const nextDate = loan.nextPaymentDate ? new Date(loan.nextPaymentDate) : null;
-    const isOverdue = (loan.lateDays ?? 0) > 0;
+    const isDaily =
+      freq.type === "daily" ||
+      (loan.dailyAmount != null && loan.dailyAmount > 0);
+    const isWeekly =
+      !isDaily &&
+      (freq.type === "weekly" || (loan.weeklyAmount != null && loan.weeklyAmount > 0));
+    const isBimonthly =
+      !isDaily &&
+      !isWeekly &&
+      (freq.type === "bimonthly" || (loan.bimonthlyAmount != null && loan.bimonthlyAmount > 0));
 
-    let urgency: AdminItemUrgency;
-    if (isOverdue) {
-      urgency = "overdue";
-    } else if (frequency === "daily") {
-      // Daily loans always need collection today if not already paid above.
-      urgency = "upcoming";
-    } else if (nextDate) {
-      const daysUntil = differenceInCalendarDays(nextDate, now);
-      // Include loans due within the next 7 days (today = 0 days, tomorrow = 1, etc.).
-      if (daysUntil <= 7) urgency = "upcoming";
-      else continue; // beyond 7 days — skip
+    // ── Amount resolution ─────────────────────────────────────────────────────
+    // Notes-explicit amount wins; column value used when > 1 (sentinel=1 falls
+    // back to monthlyPayment ÷ period).
+    let amountDue: number;
+    let frequency: AdminItemFrequency;
+
+    if (isDaily) {
+      frequency = "daily";
+      const colAmt = loan.dailyAmount ?? 0;
+      amountDue =
+        freq.amount != null && freq.amount > 0 ? freq.amount
+        : colAmt > 1 ? colAmt
+        : mp > 0 ? Math.round(mp / 30)
+        : 0;
+    } else if (isWeekly) {
+      frequency = "weekly";
+      const colAmt = loan.weeklyAmount ?? 0;
+      amountDue =
+        freq.amount != null && freq.amount > 0 ? freq.amount
+        : colAmt > 1 ? colAmt
+        : mp > 0 ? Math.round(mp / 4)
+        : 0;
+    } else if (isBimonthly) {
+      frequency = "bimonthly";
+      const colAmt = loan.bimonthlyAmount ?? 0;
+      amountDue =
+        freq.amount != null && freq.amount > 0 ? freq.amount
+        : colAmt > 1 ? colAmt
+        : mp > 0 ? Math.round(mp / 2)
+        : 0;
     } else {
-      continue; // no due date, not overdue — skip
+      frequency = "monthly";
+      amountDue = mp;
     }
 
-    items.push({ key: loan.emiId ?? loan.id, loan, name: loan.name, frequency, amountDue, urgency, dueDate: nextDate });
+    if (amountDue <= 0) continue;
+
+    // ── Per-frequency due-date + overdue logic ────────────────────────────────
+
+    // DAILY
+    if (isDaily) {
+      if (!txDateLocal) continue;
+      const daysElapsed = Math.max(differenceInCalendarDays(today, txDateLocal), 0);
+      // Count paid daily instalments (D / DM type only)
+      const paidDaily = (loan.paidDates ?? []).reduce((sum, e) => {
+        const t = e.split(":")[2] ?? "M";
+        return (t === "D" || t === "DM") ? sum + 1 : sum;
+      }, 0);
+      const periodsForOverdue = Math.max(daysElapsed - 1, 0); // yesterday and before
+      const overdueDays = Math.max(periodsForOverdue - paidDaily, 0);
+      const todayCovered = paidDaily >= daysElapsed;
+
+      if (overdueDays > 0) {
+        items.push({
+          key: `${loan.emiId ?? loan.id}-daily-overdue`,
+          loan, name: loan.name, frequency, amountDue,
+          urgency: "overdue",
+          dueDate: today,
+          subLabel: `${overdueDays} missed payment${overdueDays > 1 ? "s" : ""}`,
+        });
+      }
+      if (!todayCovered) {
+        items.push({
+          key: `${loan.emiId ?? loan.id}-daily-today`,
+          loan, name: loan.name, frequency, amountDue,
+          urgency: "upcoming",
+          dueDate: today,
+          subLabel: overdueDays > 0 ? `Today's payment (${overdueDays} missed)` : "Due today",
+        });
+      }
+      continue;
+    }
+
+    // WEEKLY (8th / 15th / 22nd / 30th schedule)
+    if (isWeekly) {
+      if (!txDateLocal) continue;
+      const currentDue = _getCurrentWeeklyPaymentDate(txDateLocal, today);
+      const daysLate = currentDue ? differenceInCalendarDays(today, currentDue) : 0;
+
+      // Overdue count: elapsed periods minus paid W/WM entries (cumulative approach)
+      const weeklyPaid = (loan.paidDates ?? []).reduce((sum, e) => {
+        const parts = e.split(":");
+        return sum + (Number(parts[1]) || 0);
+      }, 0);
+      // Count elapsed 8/15/22/30 dates
+      let elapsed = 0;
+      { let yr = txDateLocal.getFullYear(), mo = txDateLocal.getMonth();
+        outer: for (let mi = 0; mi < 36; mi++) {
+          for (const day of MONTHLY_PAYMENT_DAYS) {
+            const d = new Date(yr, mo, day);
+            if (d <= txDateLocal) continue;
+            if (d > today) break outer;
+            elapsed++;
+          }
+          mo++; if (mo > 11) { mo = 0; yr++; }
+        }
+      }
+      const overdueCount = Math.max(elapsed - Math.floor(weeklyPaid / amountDue), 0);
+
+      if (overdueCount > 0) {
+        items.push({
+          key: `${loan.emiId ?? loan.id}-weekly-overdue`,
+          loan, name: loan.name, frequency, amountDue,
+          urgency: "overdue",
+          dueDate: currentDue,
+          subLabel: `${overdueCount} missed payment${overdueCount > 1 ? "s" : ""} · ${daysLate}d overdue`,
+        });
+        continue;
+      }
+
+      // Not overdue — show if current or next payment is within 7 days
+      const isDueToday = currentDue && daysLate === 0;
+      const upcomingDue = isDueToday
+        ? currentDue!
+        : _getNextWeeklyPaymentDate(txDateLocal, today);
+      if (!upcomingDue) continue;
+      const daysUntil = differenceInCalendarDays(upcomingDue, today);
+      if (daysUntil > 7) continue;
+      items.push({
+        key: `${loan.emiId ?? loan.id}-weekly`,
+        loan, name: loan.name, frequency, amountDue,
+        urgency: "upcoming",
+        dueDate: upcomingDue,
+        subLabel: isDueToday ? "Due today" : undefined,
+      });
+      continue;
+    }
+
+    // BIMONTHLY (15th / 30th schedule)
+    if (isBimonthly) {
+      if (!txDateLocal) continue;
+      const currentDue = _getCurrentBimonthlyPaymentDate(txDateLocal, today);
+      const daysLate = currentDue ? differenceInCalendarDays(today, currentDue) : 0;
+
+      const biPaid = (loan.paidDates ?? []).reduce((sum, e) => {
+        const parts = e.split(":");
+        return sum + (Number(parts[1]) || 0);
+      }, 0);
+      let elapsed = 0;
+      { let yr = txDateLocal.getFullYear(), mo = txDateLocal.getMonth();
+        outer: for (let mi = 0; mi < 36; mi++) {
+          for (const day of BIMONTHLY_PAYMENT_DAYS) {
+            const d = new Date(yr, mo, day);
+            if (d <= txDateLocal) continue;
+            if (d > today) break outer;
+            elapsed++;
+          }
+          mo++; if (mo > 11) { mo = 0; yr++; }
+        }
+      }
+      const overdueCount = Math.max(elapsed - Math.floor(biPaid / amountDue), 0);
+
+      if (overdueCount > 0) {
+        items.push({
+          key: `${loan.emiId ?? loan.id}-bimonthly-overdue`,
+          loan, name: loan.name, frequency, amountDue,
+          urgency: "overdue",
+          dueDate: currentDue,
+          subLabel: `${overdueCount} missed payment${overdueCount > 1 ? "s" : ""} · ${daysLate}d overdue`,
+        });
+        continue;
+      }
+
+      const isDueTodayBi = currentDue && daysLate === 0;
+      const upcomingBiDue = isDueTodayBi
+        ? currentDue!
+        : _getNextBimonthlyPaymentDate(txDateLocal, today);
+      if (!upcomingBiDue) continue;
+      const daysUntilBi = differenceInCalendarDays(upcomingBiDue, today);
+      if (daysUntilBi > 7) continue;
+      items.push({
+        key: `${loan.emiId ?? loan.id}-bimonthly`,
+        loan, name: loan.name, frequency, amountDue,
+        urgency: "upcoming",
+        dueDate: upcomingBiDue,
+        subLabel: isDueTodayBi ? "Due today" : undefined,
+      });
+      continue;
+    }
+
+    // MONTHLY — use server-computed nextPaymentDate + lateDays
+    const isOverdue = (loan.lateDays ?? 0) > 0;
+    const nextDate = loan.nextPaymentDate ? new Date(loan.nextPaymentDate) : null;
+    if (isOverdue) {
+      items.push({
+        key: `${loan.emiId ?? loan.id}-monthly-overdue`,
+        loan, name: loan.name, frequency, amountDue,
+        urgency: "overdue",
+        dueDate: nextDate,
+        subLabel: `${loan.lateDays}d overdue`,
+      });
+    } else if (nextDate) {
+      const daysUntil = differenceInCalendarDays(nextDate, today);
+      if (daysUntil > 7) continue;
+      items.push({
+        key: `${loan.emiId ?? loan.id}-monthly`,
+        loan, name: loan.name, frequency, amountDue,
+        urgency: "upcoming",
+        dueDate: nextDate,
+      });
+    }
   }
 
   const urgencyOrder: Record<AdminItemUrgency, number> = { overdue: 0, upcoming: 1 };
   return items.sort((a, b) => {
-    if (urgencyOrder[a.urgency] !== urgencyOrder[b.urgency]) return urgencyOrder[a.urgency] - urgencyOrder[b.urgency];
-    // Within upcoming: daily loans (null nextDate) float to the top; rest sort by date
+    if (urgencyOrder[a.urgency] !== urgencyOrder[b.urgency])
+      return urgencyOrder[a.urgency] - urgencyOrder[b.urgency];
     const da = a.dueDate?.getTime() ?? 0;
     const db = b.dueDate?.getTime() ?? 0;
     return da - db;
@@ -413,17 +659,15 @@ function AdminCollectionPopup({ items }: { items: AdminCollectionItem[] }) {
                         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${FREQ_COLORS[item.frequency]}`}>
                           {FREQ_LABELS[item.frequency]}
                         </span>
-                        {section === "overdue" && (item.loan.lateDays ?? 0) > 0 && (
-                          <span className="text-[10px] text-destructive font-medium">{item.loan.lateDays}d late</span>
-                        )}
-                        {section === "upcoming" && item.dueDate && (
+                        {item.subLabel ? (
+                          <span className={`text-[10px] font-medium ${section === "overdue" ? "text-destructive" : "text-blue-600"}`}>
+                            {item.subLabel}
+                          </span>
+                        ) : item.dueDate ? (
                           <span className="text-[10px] text-blue-600">
                             due {item.dueDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
                           </span>
-                        )}
-                        {section === "upcoming" && !item.dueDate && item.frequency === "daily" && (
-                          <span className="text-[10px] text-amber-600 font-medium">due today</span>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                     <div className="flex flex-col items-end gap-1 shrink-0">
