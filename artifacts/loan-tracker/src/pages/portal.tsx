@@ -1134,7 +1134,7 @@ function BulkRepayDialog({
 
 // ─── Repayment item type ──────────────────────────────────────────────────────
 
-type RepayItem = {
+export type RepayItem = {
   key: string;
   id: string;
   /** Human-readable loan/EMI ID (e.g. L042, E003) */
@@ -1356,7 +1356,7 @@ function calcOverdueTotal(
   return Math.ceil(total);
 }
 
-function buildRepaymentItems(
+export function buildRepaymentItems(
   loans: Loan[] | undefined,
   emiLoans: EmiLoan[] | undefined,
 ): RepayItem[] {

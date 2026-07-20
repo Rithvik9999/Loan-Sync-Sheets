@@ -57,16 +57,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { differenceInCalendarDays, format as dateFnsFormat } from "date-fns";
+import { format as dateFnsFormat } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
+import { RepayItem, buildRepaymentItems } from "./portal";
 
 // ─── Admin Collection Popup ───────────────────────────────────────────────────
 
 /** Dismissed flag resets on hard page reload (module re-evaluation). */
 let adminPopupDismissedThisLoad = false;
 
-type AdminItemFrequency = "daily" | "weekly" | "bimonthly" | "monthly";
-type AdminItemUrgency = "overdue" | "upcoming";
+/** Portal RepayItem augmented with borrower name for admin display. */
+type AdminRepayItem = RepayItem & { name: string };
+
+// (placeholder — replaced below)
 
 interface AdminCollectionItem {
   key: string;
