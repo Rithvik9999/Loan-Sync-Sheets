@@ -55,6 +55,7 @@ type LoanRequest = {
   purpose: string | null;
   status: "Pending" | "Approved" | "Rejected";
   createdAt: string;
+  approvedAt?: string | null;
 };
 
 function RequestRow({ req }: { req: LoanRequest }) {
@@ -128,7 +129,15 @@ function RequestRow({ req }: { req: LoanRequest }) {
               {req.purpose}
             </p>
           )}
-          <p className="text-xs text-muted-foreground">{formatDate(req.createdAt)}</p>
+          <p className="text-xs text-muted-foreground">
+            Requested {formatDate(req.createdAt)}
+            {req.approvedAt && (
+              <span className="ml-2 text-xs">
+                · {req.status === "Approved" ? "Approved" : "Decided"}{" "}
+                {formatDate(req.approvedAt)}
+              </span>
+            )}
+          </p>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">

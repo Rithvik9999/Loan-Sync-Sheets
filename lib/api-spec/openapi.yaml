@@ -541,6 +541,14 @@ components:
           description: Computed as paid minus principal.
         notes:
           type: string
+        createdAt:
+          type: ["string", "null"]
+          description: ISO datetime when this loan row was created. Null for legacy rows predating this field.
+        partPaymentTimestamps:
+          type: array
+          items:
+            type: string
+          description: ISO datetimes for each entry in dateOfPartPayment (same order). Empty for legacy rows.
 
     LoanInput:
       type: object
@@ -640,6 +648,12 @@ components:
           $ref: "#/components/schemas/LoanRequestStatus"
         createdAt:
           type: string
+        approvedAt:
+          type: ["string", "null"]
+          description: ISO datetime when the request was approved or rejected. Null if still Pending or pre-dates this field.
+        loanId:
+          type: ["string", "null"]
+          description: UUID of the loan row created when this request was approved.
 
     LoanRequestInput:
       type: object

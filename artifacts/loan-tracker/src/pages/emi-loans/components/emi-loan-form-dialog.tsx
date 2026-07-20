@@ -70,6 +70,10 @@ export interface EmiLoan {
   weeklyAmount?: number | null;
   /** Custom bimonthly instalment override stored in sheet column W. null = use monthlyPayment ÷ 2. */
   bimonthlyAmount?: number | null;
+  /** ISO datetime of when this EMI loan was created. Null for legacy rows. */
+  createdAt?: string | null;
+  /** ISO datetimes for each paidDates entry (same order). */
+  paidTimestamps?: string[];
 }
 
 const emiLoanSchema = z.object({

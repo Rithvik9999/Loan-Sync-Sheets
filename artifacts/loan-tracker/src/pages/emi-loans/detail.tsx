@@ -962,6 +962,15 @@ export default function EmiLoanDetail() {
                       </div>
                       <p className="text-xs text-muted-foreground">
                         Entry #{(loan.paidDates ?? []).length - entry.index}
+                        {loan.paidTimestamps?.[entry.index] && (
+                          <span className="ml-1">
+                            · Recorded {new Date(loan.paidTimestamps[entry.index]).toLocaleString("en-IN", {
+                              day: "2-digit", month: "short", year: "numeric",
+                              hour: "2-digit", minute: "2-digit", hour12: true,
+                              timeZone: "Asia/Kolkata",
+                            })}
+                          </span>
+                        )}
                       </p>
                     </div>
                     <div className="font-bold font-numeric text-emerald-700">

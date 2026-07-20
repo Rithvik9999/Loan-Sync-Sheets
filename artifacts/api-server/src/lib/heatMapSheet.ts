@@ -45,7 +45,7 @@ const TAB = "Heat Map";
 const HEADER_ROW = 5;
 const FORMULA_ROW = 6;
 const DATA_START_ROW = 7;
-const LAST_COL_INDEX = 21; // V
+const LAST_COL_INDEX = 23; // X
 
 const COL = {
   ID: 0,
@@ -69,6 +69,8 @@ const COL = {
   PAID: 18,
   PROFIT: 19,
   NOTES: 21,
+  CREATED_AT: 22,             // col W — ISO datetime of loan creation
+  PART_PAYMENT_TIMESTAMPS: 23, // col X — pipe-separated ISO datetimes for each part-payment
 } as const;
 
 export type LoanStatus = "Pending" | "Clear" | "Temp" | "Archived";
@@ -112,6 +114,10 @@ export interface LoanRow {
   /** Per-day late-fee accrual rate (rupees/day). Derived from lateFees / lateDays
    *  when both are available. Useful so borrowers know their daily cost of delay. */
   perDayAddition: number | null;
+  /** ISO datetime string of when this loan was created. Null for legacy rows. */
+  createdAt: string | null;
+  /** ISO datetime strings for each part-payment entry (same order as partPayments). */
+  partPaymentTimestamps: string[];
 }
 
 export interface LoanRowInput {
@@ -269,6 +275,11 @@ function parseRow(raw: unknown[], rowNumber: number): LoanRow {
     profit: toNumberOrNull(get(COL.PROFIT)),
     notes: toText(get(COL.NOTES)),
     perDayAddition,
+    createdAt: toText(get(COL.CREATED_AT)) || null,
+    partPaymentTimestamps: toText(get(COL.PART_PAYMENT_TIMESTAMPS))
+      .split("|")
+      .map(s => s.trim())
+      .filter(Boolean),
   };
 }
 
@@ -378,8 +389,10 @@ export async function createLoanRow(input: LoanRowInput): Promise<LoanRow> {
   const rowNumber = DATA_START_ROW;
 
   const id = randomUUID();
+  const createdAt = new Date().toISOString();
   const updates = [
     { range: `${TAB}!${colLetter(COL.ID)}${rowNumber}`, values: [[id]] },
+    { range: `${TAB}!${colLetter(COL.CREATED_AT)}${rowNumber}`, values: [[createdAt]] },
     ...inputCellUpdates(rowNumber, { ...input, status: input.status ?? "Pending" }),
   ];
   await batchUpdateCells(updates);
@@ -439,6 +452,11 @@ export async function updateLoanRow(
       return sum + (isNaN(amt) ? 0 : amt);
     }, 0);
 
+    // Also append a timestamp entry so the UI can show when each payment was recorded
+    const prevTimestamps = existing.partPaymentTimestamps.join("|");
+    const newTimestamp = new Date().toISOString();
+    const newTimestamps = prevTimestamps ? `${prevTimestamps}|${newTimestamp}` : newTimestamp;
+
     updates.push(
       {
         range: `${TAB}!${colLetter(COL.DATE_PART_PAYMENT)}${existing.rowNumber}`,
@@ -447,6 +465,10 @@ export async function updateLoanRow(
       {
         range: `${TAB}!${colLetter(COL.PART_PAYMENT)}${existing.rowNumber}`,
         values: [[totalPartPayment]],
+      },
+      {
+        range: `${TAB}!${colLetter(COL.PART_PAYMENT_TIMESTAMPS)}${existing.rowNumber}`,
+        values: [[newTimestamps]],
       },
     );
   }
