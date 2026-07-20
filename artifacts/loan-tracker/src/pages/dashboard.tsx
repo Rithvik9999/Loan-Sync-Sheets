@@ -122,12 +122,14 @@ function buildAdminCollectionItems(emiLoans: EmiLoan[]): AdminCollectionItem[] {
   const items: AdminCollectionItem[] = [];
 
   for (const loan of emiLoans) {
-    if (loan.status !== "Pending") continue;
+    // Skip non-active loans — Archived loans are explicitly excluded even though
+    // status !== "Pending" already covers them, to be explicit about intent.
+    if (loan.status !== "Pending" || (loan.status as string) === "Archived") continue;
+
     const { frequency, amountDue } = detectEmiFrequency(loan);
 
     // Daily: skip only if a "D" or "DM" type instalment was already recorded today.
-    // A monthly "M" entry from today (e.g. first-payment date) must NOT suppress the
-    // daily loan — that would be a false "already collected" signal.
+    // Monthly "M" entries on today's date must NOT suppress the daily loan.
     if (frequency === "daily") {
       const alreadyPaidToday = (loan.paidDates ?? []).some(e => {
         if (!e.startsWith(todayStr + ":")) return false;
@@ -144,25 +146,27 @@ function buildAdminCollectionItems(emiLoans: EmiLoan[]): AdminCollectionItem[] {
     if (isOverdue) {
       urgency = "overdue";
     } else if (frequency === "daily") {
-      // Daily loans always need collection today (if not already paid above).
-      urgency = "today";
+      // Daily loans always need collection today if not already paid above.
+      urgency = "upcoming";
     } else if (nextDate) {
       const daysUntil = differenceInCalendarDays(nextDate, now);
-      // Show due-today as "today", everything future as "upcoming" — no upper limit.
-      // Removing the 7-day cap ensures loans due later in the month still appear.
-      urgency = daysUntil <= 0 ? "today" : "upcoming";
+      // Include loans due within the next 7 days (today = 0 days, tomorrow = 1, etc.).
+      if (daysUntil <= 7) urgency = "upcoming";
+      else continue; // beyond 7 days — skip
     } else {
-      // No nextPaymentDate and not overdue → still include as upcoming so it's visible.
-      urgency = "upcoming";
+      continue; // no due date, not overdue — skip
     }
 
     items.push({ key: loan.emiId ?? loan.id, loan, name: loan.name, frequency, amountDue, urgency, dueDate: nextDate });
   }
 
-  const urgencyOrder: Record<AdminItemUrgency, number> = { overdue: 0, today: 1, upcoming: 2 };
+  const urgencyOrder: Record<AdminItemUrgency, number> = { overdue: 0, upcoming: 1 };
   return items.sort((a, b) => {
     if (urgencyOrder[a.urgency] !== urgencyOrder[b.urgency]) return urgencyOrder[a.urgency] - urgencyOrder[b.urgency];
-    return (a.dueDate?.getTime() ?? 0) - (b.dueDate?.getTime() ?? 0);
+    // Within upcoming: daily loans (null nextDate) float to the top; rest sort by date
+    const da = a.dueDate?.getTime() ?? 0;
+    const db = b.dueDate?.getTime() ?? 0;
+    return da - db;
   });
 }
 
@@ -372,16 +376,14 @@ function AdminCollectionPopup({ items }: { items: AdminCollectionItem[] }) {
           </button>
         </div>
 
-        {/* Section labels + items */}
+        {/* Section labels + items — two sections only: Overdue and Coming Up */}
         <div className="overflow-y-auto flex-1 divide-y divide-border/40">
-          {(["overdue", "today", "upcoming"] as AdminItemUrgency[]).map(section => {
+          {(["overdue", "upcoming"] as AdminItemUrgency[]).map(section => {
             const sectionItems = items.filter(i => i.urgency === section);
             if (sectionItems.length === 0) return null;
-            const sectionLabel = section === "overdue" ? "Overdue" : section === "today" ? "Due Today" : "Upcoming (7 days)";
+            const sectionLabel = section === "overdue" ? "Overdue" : "Coming Up (next 7 days)";
             const sectionColor = section === "overdue"
               ? "bg-destructive/10 text-destructive"
-              : section === "today"
-              ? "bg-amber-100 text-amber-800"
               : "bg-blue-50 text-blue-700";
             return (
               <div key={section}>
@@ -392,7 +394,7 @@ function AdminCollectionPopup({ items }: { items: AdminCollectionItem[] }) {
                   <div
                     key={item.key}
                     className={`flex items-center gap-3 px-3 py-2.5 border-t border-border/30 ${
-                      section === "overdue" ? "bg-destructive/[0.03]" : section === "today" ? "bg-amber-50/30" : "bg-blue-50/10"
+                      section === "overdue" ? "bg-destructive/[0.03]" : "bg-blue-50/10"
                     }`}
                   >
                     <Checkbox
@@ -404,8 +406,6 @@ function AdminCollectionPopup({ items }: { items: AdminCollectionItem[] }) {
                       <div className="flex items-center gap-1.5">
                         {section === "overdue"
                           ? <AlertTriangle className="h-3 w-3 text-destructive shrink-0" />
-                          : section === "today"
-                          ? <Clock className="h-3 w-3 text-amber-600 shrink-0" />
                           : <CalendarClock className="h-3 w-3 text-blue-500 shrink-0" />}
                         <p className="text-xs font-semibold truncate">{item.name}</p>
                       </div>
@@ -421,11 +421,14 @@ function AdminCollectionPopup({ items }: { items: AdminCollectionItem[] }) {
                             due {item.dueDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
                           </span>
                         )}
+                        {section === "upcoming" && !item.dueDate && item.frequency === "daily" && (
+                          <span className="text-[10px] text-amber-600 font-medium">due today</span>
+                        )}
                       </div>
                     </div>
                     <div className="flex flex-col items-end gap-1 shrink-0">
                       <span className={`font-bold text-sm font-numeric ${
-                        section === "overdue" ? "text-destructive" : section === "today" ? "text-amber-700" : "text-blue-700"
+                        section === "overdue" ? "text-destructive" : "text-blue-700"
                       }`}>
                         {formatCurrency(item.amountDue)}
                       </span>
