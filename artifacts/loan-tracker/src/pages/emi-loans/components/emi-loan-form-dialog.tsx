@@ -54,7 +54,7 @@ export interface EmiLoan {
   totalInterest: number | null;
   discountPerMonth: number;
   principalPerMonth: number | null;
-  status: "Pending" | "Clear" | "Temp";
+  status: "Pending" | "Clear" | "Temp" | "Archived";
   whatsapp: string;
   lateFees: number | null;
   remainingMonths: number | null;
@@ -81,7 +81,7 @@ const emiLoanSchema = z.object({
   discountPerMonth: z.coerce.number().optional(),
   statusNotes: z.string().optional(),
   notes: z.string().optional(),
-  status: z.enum(["Pending", "Clear", "Temp"]).optional(),
+  status: z.enum(["Pending", "Clear", "Temp", "Archived"]).optional(),
   customDailyAmount: z.coerce.number().min(0).optional(),
   customWeeklyAmount: z.coerce.number().min(0).optional(),
   customBimonthlyAmount: z.coerce.number().min(0).optional(),

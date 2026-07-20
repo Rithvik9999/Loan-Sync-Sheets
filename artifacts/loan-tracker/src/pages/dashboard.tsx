@@ -57,7 +57,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { format as dateFnsFormat } from "date-fns";
+import { format as dateFnsFormat, differenceInCalendarDays } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { RepayItem, buildRepaymentItems } from "./portal";
 
@@ -70,6 +70,9 @@ let adminPopupDismissedThisLoad = false;
 type AdminRepayItem = RepayItem & { name: string };
 
 // (placeholder — replaced below)
+
+type AdminItemFrequency = "daily" | "weekly" | "bimonthly" | "monthly";
+type AdminItemUrgency = "overdue" | "upcoming";
 
 interface AdminCollectionItem {
   key: string;
