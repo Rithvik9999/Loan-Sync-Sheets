@@ -209,6 +209,7 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
   const [namePopoverOpen, setNamePopoverOpen] = useState(false);
   const [nameSearch, setNameSearch] = useState("");
   const [isPending, setIsPending] = useState(false);
+  const [primaryFrequency, setPrimaryFrequency] = useState<"monthly" | "daily" | "weekly" | "bimonthly">("monthly");
 
   const { data: emiLoans } = useQuery({
     queryKey: EMI_LOANS_QUERY_KEY,
@@ -371,8 +372,10 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
                           </div>
                         )}
                         <div
-                          className="max-h-52 overflow-y-auto overscroll-contain py-1"
+                          className="max-h-52 overflow-y-scroll overscroll-contain py-1"
                           style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+                          onTouchStart={(e) => e.stopPropagation()}
+                          onTouchMove={(e) => e.stopPropagation()}
                         >
                           {filteredNames.length === 0 ? (
                             <div className="py-3 text-center text-sm text-muted-foreground">
