@@ -471,15 +471,12 @@ export default function LoanDetail() {
           ? Math.max(daysElapsed - 1, 0)
           : periodsElapsed;
         const totalPaid = loan.paid ?? 0;
-        // isOnTime: paid at normal rate covers all PAST (overdue-eligible) periods.
-        // When behind, only the extra-rate payment clears an overdue period.
+        // Count actual installments paid at the BASE rate only.
+        // Using a fee-inflated divisor (dailyAmt × 1.02) when late would under-credit
+        // paid periods (e.g. ₹9 000 ÷ ₹510 = 17.6 → 17 instead of 18) and manufacture
+        // phantom extra overdue periods. Late fees are added on top separately.
         const paidPeriodsNormal = Math.floor(totalPaid / periodAmount);
-        const isOnTime = paidPeriodsNormal >= periodsElapsedForOverdue;
-        const clearingAmt = isOnTime
-          ? periodAmount
-          : (isDaily ? (dailyAmtExtra ?? periodAmount) : (weeklyAmtExtra ?? periodAmount));
-        const paidPeriods = Math.floor(totalPaid / clearingAmt);
-        const overduePeriods = Math.max(periodsElapsedForOverdue - paidPeriods, 0);
+        const overduePeriods = Math.max(periodsElapsedForOverdue - paidPeriodsNormal, 0);
 
         // Contract total = periods in tenure × per-period amount
         const totalPeriods = Math.floor((loan.tenureDays ?? 0) / daysPerPeriod);

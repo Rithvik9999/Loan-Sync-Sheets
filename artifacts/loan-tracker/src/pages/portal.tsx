@@ -1381,11 +1381,14 @@ export function buildRepaymentItems(
       // the overdue count so the portal matches the detail page's logic.
       // periodsElapsedForOverdue = yesterday and before only.
       const periodsElapsedForOverdue = Math.max(daysElapsed - 1, 0);
+      // paidNormal = number of full daily instalments received at the base rate.
+      // We use this directly for the overdue count — NOT a fee-adjusted divisor.
+      // Dividing by ceil(dailyAmt × 1.02) when late would under-credit paid periods
+      // (e.g. ₹9 000 paid ÷ ₹510 = 17.6 → 17, when 18 were actually paid) and
+      // manufactures phantom extra overdue days. Late fees are computed separately
+      // by calcOverdueTotal and must not reduce the credited period count here.
       const paidNormal = Math.floor((l.paid ?? 0) / dailyAmt);
-      const isOnTimeLoan = paidNormal >= periodsElapsedForOverdue;
-      const clearingAmtLoan = isOnTimeLoan ? dailyAmt : Math.ceil(dailyAmt * 1.02);
-      const paidPeriods = Math.floor((l.paid ?? 0) / clearingAmtLoan);
-      const overdueDays = Math.max(periodsElapsedForOverdue - paidPeriods, 0);
+      const overdueDays = Math.max(periodsElapsedForOverdue - paidNormal, 0);
       const returnDate = l.returnDate ? new Date(l.returnDate + "T00:00:00Z") : null;
       const withinTenure = !returnDate || today <= returnDate;
 
@@ -1397,7 +1400,7 @@ export function buildRepaymentItems(
       if (overdueDays > 0) {
         // Each missed day piles up with 2%/day late fee
         const overdueTotal = calcOverdueTotal(dailyAmt, overdueDays, 1, undefined, 0.02);
-        const firstDue = new Date(txDate.getTime() + (paidPeriods + 1) * 86400000);
+        const firstDue = new Date(txDate.getTime() + (paidNormal + 1) * 86400000);
         items.push({
           key: `daily-overdue-${l.id}`,
           id: l.id, loanId: l.loanId, type: "loan",
