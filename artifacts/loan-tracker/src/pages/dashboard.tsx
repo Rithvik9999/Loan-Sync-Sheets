@@ -159,8 +159,7 @@ async function recordAdminPayment(item: AdminRepayItem, date: string): Promise<v
       throw new Error(err.error || "Failed to record payment");
     }
   } else {
-    // Normal (lump-sum) loan — append via part-payment so the amount adds to
-    // existing paid rather than overwriting the absolute value.
+    // One-time (monthly) loan — record the part-payment then mark as Clear.
     const res = await fetch(`/api/loans/${item.id}/part-payment`, {
       method: "POST",
       credentials: "include",
@@ -170,6 +169,17 @@ async function recordAdminPayment(item: AdminRepayItem, date: string): Promise<v
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "Failed" }));
       throw new Error(err.error || "Failed to record payment");
+    }
+    // Mark the loan as Clear now that the full expected amount has been collected
+    const clearRes = await fetch(`/api/loans/${item.id}`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "Clear" }),
+    });
+    if (!clearRes.ok) {
+      const err = await clearRes.json().catch(() => ({ error: "Failed" }));
+      throw new Error(err.error || "Failed to mark loan as Clear");
     }
   }
 }

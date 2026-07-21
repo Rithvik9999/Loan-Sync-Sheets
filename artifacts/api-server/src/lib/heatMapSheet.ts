@@ -483,6 +483,8 @@ export async function updateLoanRow(
 
   if (updates.length > 0) {
     await batchUpdateCells(updates);
+    // Allow sheet array formulas to recompute before reading back
+    await new Promise((r) => setTimeout(r, 1500));
   }
   return getLoanRowAtRowNumber(existing.rowNumber);
 }

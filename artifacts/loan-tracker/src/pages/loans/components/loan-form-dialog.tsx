@@ -198,6 +198,16 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
       ? (data.isDiscount ? -Math.abs(data.discountOrChargesAbs) : Math.abs(data.discountOrChargesAbs))
       : 0;
 
+    // Strip any existing pay directives, then inject the selected frequency
+    let finalNotes = (data.notes || "").replace(/\bpay\s+(daily|weekly|bi-?monthly)\s+\d+\n?/gi, "").trim();
+    if (loanFrequency !== "monthly" && periodAmount && periodAmount > 0) {
+      const directive =
+        loanFrequency === "daily" ? `pay daily ${Math.round(periodAmount)}`
+        : loanFrequency === "weekly" ? `pay weekly ${Math.round(periodAmount)}`
+        : `pay bi-monthly ${Math.round(periodAmount)}`;
+      finalNotes = finalNotes ? `${finalNotes}\n${directive}` : directive;
+    }
+
     const submitData = {
       name: data.name,
       transactionDate: data.transactionDate,
@@ -205,7 +215,7 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
       tenureDays: data.tenureDays,
       whatsapp: data.whatsapp,
       discountOrCharges,
-      notes: data.notes,
+      notes: finalNotes,
       status: data.status,
     };
 
@@ -216,6 +226,10 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
           onSuccess: (updatedLoan) => {
             queryClient.setQueryData(getGetLoanQueryKey(loan.id), updatedLoan);
             queryClient.invalidateQueries({ queryKey: getListLoansQueryKey() });
+            // Refetch detail after sheet formulas settle (~2s)
+            setTimeout(() => {
+              queryClient.invalidateQueries({ queryKey: getGetLoanQueryKey(loan.id) });
+            }, 2000);
             toast({ title: "Loan updated", description: "The sheet has recalculated the computed fields." });
             onOpenChange(false);
           },
@@ -257,7 +271,9 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
       }
       form.reset(defaults);
       setNameSearch("");
-      setLoanFrequency(inferFrequency(defaults.tenureDays));
+      const detectedFreq = inferFrequencyFromNotes(defaults.notes || "");
+      setLoanFrequency(detectedFreq);
+      setPeriodAmount(inferPeriodAmountFromNotes(defaults.notes || ""));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, loan, defaultName]);
@@ -267,14 +283,22 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
     b.name.toLowerCase().includes(nameSearch.toLowerCase()),
   );
 
-  // Loan frequency quick-select (drives tenureDays shortcut)
+  // Loan frequency quick-select + per-period repayment amount
   const [loanFrequency, setLoanFrequency] = useState<"daily" | "weekly" | "bimonthly" | "monthly">("monthly");
+  const [periodAmount, setPeriodAmount] = useState<number | undefined>(undefined);
 
-  const inferFrequency = (days: number): typeof loanFrequency => {
-    if (days === 1) return "daily";
-    if (days === 7) return "weekly";
-    if (days === 15) return "bimonthly";
+  /** Detect frequency type from notes (e.g. "pay daily 600"). */
+  const inferFrequencyFromNotes = (notes: string): typeof loanFrequency => {
+    if (/pay\s+daily\s+\d+/i.test(notes)) return "daily";
+    if (/pay\s+weekly\s+\d+/i.test(notes)) return "weekly";
+    if (/pay\s+bi-?monthly\s+\d+/i.test(notes)) return "bimonthly";
     return "monthly";
+  };
+
+  /** Extract per-period amount from notes (e.g. "pay daily 600" → 600). */
+  const inferPeriodAmountFromNotes = (notes: string): number | undefined => {
+    const m = notes.match(/pay\s+(?:daily|weekly|bi-?monthly)\s+(\d+)/i);
+    return m ? Number(m[1]) : undefined;
   };
 
   const isDiscountChecked = form.watch("isDiscount");
@@ -467,12 +491,15 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                     size="sm"
                     onClick={() => {
                       setLoanFrequency(opt.value);
-                      if (opt.value === "monthly") {
-                        handleTenureChange("30");
-                      } else {
-                        // Non-monthly: clear tenure and return date so admin enters the actual duration
-                        form.setValue("tenureDays", "" as unknown as number, { shouldValidate: false });
-                        form.setValue("returnDate", "", { shouldValidate: false });
+                      setPeriodAmount(undefined);
+                      // Only auto-set tenure for new loans; editing keeps existing tenure
+                      if (!isEditing) {
+                        if (opt.value === "monthly") {
+                          handleTenureChange("30");
+                        } else {
+                          form.setValue("tenureDays", "" as unknown as number, { shouldValidate: false });
+                          form.setValue("returnDate", "", { shouldValidate: false });
+                        }
                       }
                     }}
                   >
@@ -481,6 +508,26 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                 ))}
               </div>
             </div>
+
+            {/* Per-period repayment amount for daily/weekly/bimonthly loans */}
+            {loanFrequency !== "monthly" && (
+              <div className="space-y-1.5">
+                <FormLabel>
+                  {loanFrequency === "daily" ? "Daily" : loanFrequency === "weekly" ? "Weekly" : "Bimonthly"} Repayment Amount (₹)
+                </FormLabel>
+                <Input
+                  type="number"
+                  step="1"
+                  min="0"
+                  placeholder="e.g. 600"
+                  value={periodAmount ?? ""}
+                  onChange={(e) => setPeriodAmount(e.target.value === "" ? undefined : Number(e.target.value))}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Amount collected each {loanFrequency === "daily" ? "day" : loanFrequency === "weekly" ? "week" : "15 days"}. Stored in notes for the repayment portal.
+                </p>
+              </div>
+            )}
 
             {/* Tenure + Return Date — linked pair */}
             <div className="grid grid-cols-2 gap-4">
