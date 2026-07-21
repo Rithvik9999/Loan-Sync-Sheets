@@ -351,6 +351,8 @@ export const ListLoanRequestsResponseItem = zod.object({
   "purpose": zod.string().nullable(),
   "upiId": zod.string().nullish().describe('Optional UPI ID provided by the borrower for payment reference.'),
   "discount": zod.number().optional().describe('Discount applied by admin when approving (rupees).'),
+  "loanId": zod.string().nullable().optional().describe('UUID of the loan row created when this request was approved.'),
+  "approvedAt": zod.string().nullable().optional().describe('ISO datetime when the request was approved or rejected.'),
   "status": zod.enum(['Pending', 'Approved', 'Rejected']),
   "createdAt": zod.string()
 })

@@ -613,7 +613,7 @@ export default function LoanDetail() {
                   <p className="text-xl font-bold font-numeric text-emerald-700 dark:text-emerald-400">
                     {formatCurrency(totalPaid)}
                   </p>
-                  <p className="text-[10px] text-muted-foreground">{paidPeriods} {periodLabel}s paid</p>
+                  <p className="text-[10px] text-muted-foreground">{paidPeriodsNormal} {periodLabel}s paid</p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-xs text-muted-foreground">Remaining (full contract)</p>

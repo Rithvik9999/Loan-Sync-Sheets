@@ -70,7 +70,7 @@ router.get("/loan-requests", async (req, res): Promise<void> => {
   const requests = await loanRequestsRepo.listLoanRequests();
   const filtered =
     info.role === "borrower"
-      ? requests.filter((r) => r.borrowerId === info.borrowerId)
+      ? requests.filter((r) => r.borrowerId != null && r.borrowerId === info.borrowerId)
       : requests;
   res.json(ListLoanRequestsResponse.parse(filtered));
 });
@@ -297,7 +297,7 @@ router.delete(
       // Borrowers may only cancel their own Pending requests
       const all = await loanRequestsRepo.listLoanRequests();
       const found = all.find((r) => r.id === id);
-      if (!found || found.borrowerId !== info.borrowerId) {
+      if (!found || found.borrowerId == null || found.borrowerId !== info.borrowerId) {
         res.status(403).json({ error: "Cannot delete this request" });
         return;
       }
