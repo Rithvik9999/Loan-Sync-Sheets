@@ -810,7 +810,7 @@ export default function EmiLoanDetail() {
           </CardContent>
         </Card>
 
-        <Card className="md:col-span-1 shadow-sm border-border/60 bg-primary/5">
+        {isStaff && <Card className="md:col-span-1 shadow-sm border-border/60 bg-primary/5">
           <CardHeader>
             <CardTitle>Monthly Payment</CardTitle>
             <CardDescription>Computed by the sheet</CardDescription>
@@ -885,7 +885,7 @@ export default function EmiLoanDetail() {
               </div>
             )}
           </CardContent>
-        </Card>
+        </Card>}
       </div>
 
       <Card className="shadow-sm border-border/60">

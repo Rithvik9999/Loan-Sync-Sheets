@@ -243,7 +243,7 @@ export default function LoanDetail() {
           </CardContent>
         </Card>
 
-        <Card className="md:col-span-1 shadow-sm border-border/60 bg-primary/5">
+        {isStaff && <Card className="md:col-span-1 shadow-sm border-border/60 bg-primary/5">
           <CardHeader>
             <CardTitle>Final Amount</CardTitle>
             <CardDescription>Computed by the sheet</CardDescription>
@@ -322,7 +322,7 @@ export default function LoanDetail() {
               </Button>
             )}
           </CardContent>
-        </Card>
+        </Card>}
       </div>
 
       <Card className="shadow-sm border-border/60">

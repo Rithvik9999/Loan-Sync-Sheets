@@ -467,7 +467,13 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                     size="sm"
                     onClick={() => {
                       setLoanFrequency(opt.value);
-                      handleTenureChange(String(opt.days));
+                      if (opt.value === "monthly") {
+                        handleTenureChange("30");
+                      } else {
+                        // Non-monthly: clear tenure and return date so admin enters the actual duration
+                        form.setValue("tenureDays", "" as unknown as number, { shouldValidate: false });
+                        form.setValue("returnDate", "", { shouldValidate: false });
+                      }
                     }}
                   >
                     {opt.label}
