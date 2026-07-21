@@ -138,10 +138,29 @@ async function recordAdminPayment(item: AdminRepayItem, date: string): Promise<v
         throw new Error(err.error || "Failed to record payment");
       }
     }
+  } else if (freq === "daily" || freq === "weekly") {
+    // Daily/weekly regular loans: period-count is tracked via col S (paid).
+    // The part-payment endpoint only writes col Q (partPayment), so it never
+    // updates l.paid — the popup item would never clear. Instead, fetch the
+    // current paid value and PATCH it upward, mirroring handleQuickPay on the
+    // detail page.
+    const loanRes = await fetch(`/api/loans/${item.id}`, { credentials: "include" });
+    if (!loanRes.ok) throw new Error("Could not fetch loan details");
+    const loan = await loanRes.json();
+    const currentPaid = typeof loan.paid === "number" ? loan.paid : 0;
+    const patchRes = await fetch(`/api/loans/${item.id}`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paid: currentPaid + item.outstanding, dateOfPartPayment: date }),
+    });
+    if (!patchRes.ok) {
+      const err = await patchRes.json().catch(() => ({ error: "Failed" }));
+      throw new Error(err.error || "Failed to record payment");
+    }
   } else {
-    // Regular loan — always append via part-payment so the amount adds to existing paid,
-    // rather than overwriting it (PATCH paid= sets the absolute value, which would be wrong
-    // for partial loans where paid is already non-zero).
+    // Normal (lump-sum) loan — append via part-payment so the amount adds to
+    // existing paid rather than overwriting the absolute value.
     const res = await fetch(`/api/loans/${item.id}/part-payment`, {
       method: "POST",
       credentials: "include",
