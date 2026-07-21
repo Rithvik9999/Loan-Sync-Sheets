@@ -257,6 +257,7 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
       }
       form.reset(defaults);
       setNameSearch("");
+      setLoanFrequency(inferFrequency(defaults.tenureDays));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, loan, defaultName]);
@@ -265,6 +266,16 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
   const filteredNames = uniqueNames.filter((b) =>
     b.name.toLowerCase().includes(nameSearch.toLowerCase()),
   );
+
+  // Loan frequency quick-select (drives tenureDays shortcut)
+  const [loanFrequency, setLoanFrequency] = useState<"daily" | "weekly" | "bimonthly" | "monthly">("monthly");
+
+  const inferFrequency = (days: number): typeof loanFrequency => {
+    if (days === 1) return "daily";
+    if (days === 7) return "weekly";
+    if (days === 15) return "bimonthly";
+    return "monthly";
+  };
 
   const isDiscountChecked = form.watch("isDiscount");
   const watchedDiscountAbs = form.watch("discountOrChargesAbs");
@@ -436,6 +447,34 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
                 </FormItem>
               )}
             />
+
+            {/* Loan Frequency Quick-Select */}
+            <div className="space-y-2">
+              <FormLabel>Loan Type</FormLabel>
+              <div className="grid grid-cols-4 gap-2">
+                {(
+                  [
+                    { value: "daily", label: "Daily", days: 1 },
+                    { value: "weekly", label: "Weekly", days: 7 },
+                    { value: "bimonthly", label: "15 Days", days: 15 },
+                    { value: "monthly", label: "Monthly", days: 30 },
+                  ] as const
+                ).map((opt) => (
+                  <Button
+                    key={opt.value}
+                    type="button"
+                    variant={loanFrequency === opt.value ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => {
+                      setLoanFrequency(opt.value);
+                      handleTenureChange(String(opt.days));
+                    }}
+                  >
+                    {opt.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
 
             {/* Tenure + Return Date — linked pair */}
             <div className="grid grid-cols-2 gap-4">
