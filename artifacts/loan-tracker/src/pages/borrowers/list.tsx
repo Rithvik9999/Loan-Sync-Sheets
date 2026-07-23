@@ -341,29 +341,42 @@ export default function BorrowersList() {
 
     // Add active EMI loan amounts per borrower
     for (const emi of emiLoans ?? []) {
-      if (emi.status === "Clear") continue;
+      if (emi.status === "Clear" || (emi.status as string) === "Archived") continue;
       const phone = ((emi as unknown as { whatsapp?: string }).whatsapp ?? "").split("\n")[0].trim();
       const existing = findExisting(phone, emi.name);
+
+      // Helper: compute credit-used and total-due for this EMI
+      const rem = emi.remainingMonths != null ? Math.max(emi.remainingMonths, 0) : null;
+      let emiCreditUsed = 0;
+      if (rem != null && emi.principalPerMonth != null) {
+        emiCreditUsed = emi.principalPerMonth * rem;
+      } else if (rem != null && emi.tenureMonths > 0) {
+        emiCreditUsed = Math.ceil((emi.principal ?? 0) * rem / emi.tenureMonths);
+      } else {
+        emiCreditUsed = emi.principal ?? 0;
+      }
+      const emiTotalDue = rem != null
+        ? (emi.monthlyPayment != null ? emi.monthlyPayment * rem : (emi.principal ?? 0))
+        : (emi.principal ?? 0);
+
       if (existing) {
-        // Credit Used: remaining principal (accounts for partially paid EMI months).
-        // Uses principalPerMonth × remainingMonths when available; falls back to
-        // proportional estimate or full principal if tracking hasn't started yet.
-        const rem = emi.remainingMonths != null ? Math.max(emi.remainingMonths, 0) : null;
-        if (rem != null && emi.principalPerMonth != null) {
-          existing.creditUsed += emi.principalPerMonth * rem;
-        } else if (rem != null && emi.tenureMonths > 0) {
-          existing.creditUsed += Math.ceil((emi.principal ?? 0) * rem / emi.tenureMonths);
-        } else {
-          existing.creditUsed += (emi.principal ?? 0);
-        }
-        // Total Due: actual financial obligation — monthlyPayment × remaining months
-        if (rem != null) {
-          existing.totalDue += emi.monthlyPayment != null
-            ? emi.monthlyPayment * rem
-            : (emi.principal ?? 0);
-        } else {
-          existing.totalDue += (emi.principal ?? 0);
-        }
+        existing.creditUsed += emiCreditUsed;
+        existing.totalDue += emiTotalDue;
+      } else {
+        // EMI-only borrower: not in the regular loans list or Borrowers tab yet
+        const newEntry: BorrowerEntry = {
+          id: null,
+          name: emi.name.trim(),
+          phone,
+          hasPin: false,
+          pin: "",
+          creditLimit: null,
+          loanCount: 0,
+          creditUsed: emiCreditUsed,
+          totalDue: emiTotalDue,
+        };
+        entries.push(newEntry);
+        index(newEntry);
       }
     }
 

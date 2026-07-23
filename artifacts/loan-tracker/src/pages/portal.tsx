@@ -624,8 +624,8 @@ function EmiRequestDialog({
     const t = Number(watchedTenure);
     if (!p || !t || p <= 0 || t <= 0) return null;
     const monthlyRate = 0.02;
-    const interestPerMonth = Math.round(p * monthlyRate);
-    const principalPerMonth = Math.round(p / t);
+    const interestPerMonth = Math.ceil(p * monthlyRate);
+    const principalPerMonth = Math.ceil(p / t);
     const monthlyPayment = interestPerMonth + principalPerMonth;
     const totalAmount = p + interestPerMonth * t;
     return { interestPerMonth, principalPerMonth, monthlyPayment, totalAmount };
@@ -3454,7 +3454,7 @@ export default function Portal() {
           return sum + e.principalPerMonth * rem;
         }
         if (rem != null && e.tenureMonths > 0) {
-          return sum + Math.round((e.principal ?? 0) * rem / e.tenureMonths);
+          return sum + Math.ceil((e.principal ?? 0) * rem / e.tenureMonths);
         }
         return sum + (e.principal ?? 0);
       }, 0),

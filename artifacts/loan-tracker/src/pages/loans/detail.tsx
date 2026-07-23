@@ -481,7 +481,9 @@ export default function LoanDetail() {
         // Contract total = periods in tenure × per-period amount
         const totalPeriods = Math.floor((loan.tenureDays ?? 0) / daysPerPeriod);
         const contractTotal = totalPeriods * periodAmount;
-        const remainingContract = Math.max(contractTotal - totalPaid, 0);
+        // Use the authoritative finalAmount (sheet-computed) so "Remaining (full contract)"
+        // always matches the "Amount to collect" card. Fall back to contractTotal if not yet computed.
+        const remainingContract = Math.max((loan.finalAmount ?? contractTotal) - totalPaid, 0);
 
         // Accumulated overdue: daily uses 2%/day, weekly uses 1%/day
         const lateRate = isDaily ? 0.02 : 0.01;

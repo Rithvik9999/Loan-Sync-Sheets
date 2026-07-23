@@ -224,12 +224,11 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
         { id: loan.id, data: submitData },
         {
           onSuccess: (updatedLoan) => {
+            // Immediate optimistic update, then force-refetch so sheet-computed fields arrive fresh
+            // (backend already waits 1.5 s before reading back)
             queryClient.setQueryData(getGetLoanQueryKey(loan.id), updatedLoan);
             queryClient.invalidateQueries({ queryKey: getListLoansQueryKey() });
-            // Refetch detail after sheet formulas settle (~2s)
-            setTimeout(() => {
-              queryClient.invalidateQueries({ queryKey: getGetLoanQueryKey(loan.id) });
-            }, 2000);
+            queryClient.refetchQueries({ queryKey: getGetLoanQueryKey(loan.id) });
             toast({ title: "Loan updated", description: "The sheet has recalculated the computed fields." });
             onOpenChange(false);
           },

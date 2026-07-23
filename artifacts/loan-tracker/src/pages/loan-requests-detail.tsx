@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "@/components/ui/link";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { estimateFinalAmount } from "@/lib/early-payment-discount";
@@ -129,6 +130,7 @@ export default function LoanRequestDetail() {
   const req = requests?.find((r) => r.id === id);
 
   const [discount, setDiscount] = useState("0");
+  const [isDiscount, setIsDiscount] = useState(true); // true = discount (reduces final), false = extra charge
   const [overrideAmount, setOverrideAmount] = useState("");
   const [transactionDate, setTransactionDate] = useState(
     new Date().toISOString().slice(0, 10),
@@ -179,32 +181,25 @@ export default function LoanRequestDetail() {
   // Use the override amount for all fee estimates — the sheet formulas base fees on principal.
   const principal = overrideAmountNum;
   const tenureDays = req?.tenureDays ?? 0;
-  // NOTE: discount is stored as a negative discountOrCharges in the sheet.
-  // The sheet's array formula computes: finalAmount = principal + flatFee + interest + discountOrCharges + lateFees.
-  // We estimate flat fee + interest using the same tiered formulas from early-payment-discount.ts.
-  // The admin-entered discount reduces this estimated final amount.
+  // When isDiscount=true: discount > 0 reduces final. When isDiscount=false: value is an extra charge that adds to final.
+  // estimateFinalAmount receives a signed value: positive = discount (subtracted), negative = charge (added).
+  const effectiveDiscount = isDiscount ? discountNum : -discountNum;
   const {
     flatFee: estimatedFlatFee,
     interest: estimatedInterest,
     finalAmount: estimatedFinalAmount,
-  } = estimateFinalAmount({ principal, tenureDays, discount: discountNum });
+  } = estimateFinalAmount({ principal, tenureDays, discount: effectiveDiscount });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const reqAny = req as any;
 
   const handlePay = async () => {
     if (!req) return;
-    if (discountNum < 0) {
-      toast({
-        variant: "destructive",
-        title: "Invalid discount",
-        description: "Discount cannot be negative.",
-      });
-      return;
-    }
     setIsPaying(true);
     try {
-      const payBody: Record<string, unknown> = { discount: discountNum, transactionDate };
+      // Send signed discount: positive = discount (backend writes -discount to sheet),
+      // negative = extra charge (backend writes +charge to sheet).
+      const payBody: Record<string, unknown> = { discount: effectiveDiscount, transactionDate };
       // Only send overrideAmount if it differs from the requested amount
       if (overrideAmountNum !== requestedAmount) {
         payBody.overrideAmount = overrideAmountNum;
@@ -244,7 +239,7 @@ export default function LoanRequestDetail() {
           tenureLabel,
           flatFee: estimatedFlatFee,
           interest: estimatedInterest,
-          discount: discountNum,
+          discount: effectiveDiscount,
           finalAmount: estimatedFinalAmount,
           transactionDate,
           repaymentDueDate: dueDateStr,
@@ -312,13 +307,9 @@ export default function LoanRequestDetail() {
    *  loan row in the sheet and the stored discount on the request record). */
   const handleUpdate = async () => {
     if (!req || req.status !== "Approved") return;
-    if (discountNum < 0) {
-      toast({ variant: "destructive", title: "Invalid discount", description: "Discount cannot be negative." });
-      return;
-    }
     setIsUpdating(true);
     try {
-      const updateBody: Record<string, unknown> = { discount: discountNum };
+      const updateBody: Record<string, unknown> = { discount: effectiveDiscount };
       // Only send amount if it differs from the originally requested amount
       if (overrideAmountNum !== requestedAmount) {
         updateBody.amount = overrideAmountNum;
@@ -506,10 +497,22 @@ export default function LoanRequestDetail() {
                 />
               </div>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">
-                Discount (₹)
-              </label>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">
+                  {isDiscount ? "Discount" : "Extra Charge"} (₹)
+                </label>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="is-discount-toggle"
+                    checked={isDiscount}
+                    onCheckedChange={(v) => setIsDiscount(!!v)}
+                  />
+                  <label htmlFor="is-discount-toggle" className="text-sm text-muted-foreground cursor-pointer select-none">
+                    Is discount
+                  </label>
+                </div>
+              </div>
               <Input
                 type="number"
                 min="0"
@@ -519,7 +522,9 @@ export default function LoanRequestDetail() {
                 className="max-w-[200px]"
               />
               <p className="text-xs text-muted-foreground">
-                Enter 0 if no discount applies.
+                {isDiscount
+                  ? "Reduces the final amount — e.g. rounding discount."
+                  : "Adds to the final amount — e.g. processing fee or penalty."}
               </p>
             </div>
 
@@ -541,9 +546,11 @@ export default function LoanRequestDetail() {
               </div>
               {discountNum > 0 && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Discount (applied to final)</span>
-                  <span className="font-numeric text-emerald-700">
-                    − {formatCurrency(discountNum)}
+                  <span className="text-muted-foreground">
+                    {isDiscount ? "Discount" : "Extra Charge"}
+                  </span>
+                  <span className={`font-numeric ${isDiscount ? "text-emerald-700" : "text-amber-700"}`}>
+                    {isDiscount ? "−" : "+"} {formatCurrency(discountNum)}
                   </span>
                 </div>
               )}

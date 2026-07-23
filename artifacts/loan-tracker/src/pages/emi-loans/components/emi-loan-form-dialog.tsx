@@ -267,6 +267,7 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
         const updated = await updateEmiLoan(loan.id, payload);
         queryClient.setQueryData(emiLoanQueryKey(loan.id), updated);
         queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
+        queryClient.refetchQueries({ queryKey: emiLoanQueryKey(loan.id) });
         toast({ title: "EMI Loan updated", description: "The sheet has recalculated the computed fields." });
         onOpenChange(false);
       } else {
