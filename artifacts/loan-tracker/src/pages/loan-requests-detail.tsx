@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "@/components/ui/link";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { estimateFinalAmount } from "@/lib/early-payment-discount";
@@ -37,6 +38,7 @@ import {
   Info,
   MessageCircle,
   Trash2,
+  Clock,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -128,15 +130,19 @@ export default function LoanRequestDetail() {
   const req = requests?.find((r) => r.id === id);
 
   const [discount, setDiscount] = useState("0");
+  const [isDiscount, setIsDiscount] = useState(true); // true = discount (reduces final), false = extra charge
+  const [overrideAmount, setOverrideAmount] = useState("");
   const [transactionDate, setTransactionDate] = useState(
     new Date().toISOString().slice(0, 10),
   );
 
-  // Auto-populate the discount field:
-  //  - Pending: use the rounding-discount formula so admin only needs to override.
-  //  - Approved: pre-fill with the discount that was stored at approval time.
+  // Auto-populate the discount and amount fields when the request loads.
+  //  - Pending: amount = requested amount; discount = rounding formula
+  //  - Approved: amount = linked loan's principal (or requested); discount = stored discount
   useEffect(() => {
     if (!req) return;
+    // Always seed the override amount from the request
+    setOverrideAmount(String(req.amount ?? 0));
     if (req.status === "Pending") {
       const p = req.amount ?? 0;
       const t = req.tenureDays ?? 0;
@@ -169,38 +175,40 @@ export default function LoanRequestDetail() {
   );
 
   const discountNum = Number(discount) || 0;
-  const principal = req?.amount ?? 0;
+  const requestedAmount = req?.amount ?? 0;
+  // Admin may have entered a different actual amount to disburse.
+  const overrideAmountNum = Number(overrideAmount) || requestedAmount;
+  // Use the override amount for all fee estimates — the sheet formulas base fees on principal.
+  const principal = overrideAmountNum;
   const tenureDays = req?.tenureDays ?? 0;
-  // NOTE: discount is stored as a negative discountOrCharges in the sheet.
-  // The sheet's array formula computes: finalAmount = principal + flatFee + interest + discountOrCharges + lateFees.
-  // We estimate flat fee + interest using the same tiered formulas from early-payment-discount.ts.
-  // The admin-entered discount reduces this estimated final amount.
+  // When isDiscount=true: discount > 0 reduces final. When isDiscount=false: value is an extra charge that adds to final.
+  // estimateFinalAmount receives a signed value: positive = discount (subtracted), negative = charge (added).
+  const effectiveDiscount = isDiscount ? discountNum : -discountNum;
   const {
     flatFee: estimatedFlatFee,
     interest: estimatedInterest,
     finalAmount: estimatedFinalAmount,
-  } = estimateFinalAmount({ principal, tenureDays, discount: discountNum });
+  } = estimateFinalAmount({ principal, tenureDays, discount: effectiveDiscount });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const reqAny = req as any;
 
   const handlePay = async () => {
     if (!req) return;
-    if (discountNum < 0) {
-      toast({
-        variant: "destructive",
-        title: "Invalid discount",
-        description: "Discount cannot be negative.",
-      });
-      return;
-    }
     setIsPaying(true);
     try {
+      // Send signed discount: positive = discount (backend writes -discount to sheet),
+      // negative = extra charge (backend writes +charge to sheet).
+      const payBody: Record<string, unknown> = { discount: effectiveDiscount, transactionDate };
+      // Only send overrideAmount if it differs from the requested amount
+      if (overrideAmountNum !== requestedAmount) {
+        payBody.overrideAmount = overrideAmountNum;
+      }
       const res = await fetch(`/api/loan-requests/${req.id}/pay`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ discount: discountNum, transactionDate }),
+        body: JSON.stringify(payBody),
         // discount is written as -discountNum into sheet's discountOrCharges column,
         // which applies to the sheet-computed finalAmount (principal + fees + interest).
       });
@@ -231,7 +239,7 @@ export default function LoanRequestDetail() {
           tenureLabel,
           flatFee: estimatedFlatFee,
           interest: estimatedInterest,
-          discount: discountNum,
+          discount: effectiveDiscount,
           finalAmount: estimatedFinalAmount,
           transactionDate,
           repaymentDueDate: dueDateStr,
@@ -299,17 +307,18 @@ export default function LoanRequestDetail() {
    *  loan row in the sheet and the stored discount on the request record). */
   const handleUpdate = async () => {
     if (!req || req.status !== "Approved") return;
-    if (discountNum < 0) {
-      toast({ variant: "destructive", title: "Invalid discount", description: "Discount cannot be negative." });
-      return;
-    }
     setIsUpdating(true);
     try {
+      const updateBody: Record<string, unknown> = { discount: effectiveDiscount };
+      // Only send amount if it differs from the originally requested amount
+      if (overrideAmountNum !== requestedAmount) {
+        updateBody.amount = overrideAmountNum;
+      }
       const res = await fetch(`/api/loan-requests/${req.id}/update-approval`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ discount: discountNum }),
+        body: JSON.stringify(updateBody),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Failed to update." }));
@@ -464,17 +473,19 @@ export default function LoanRequestDetail() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">
-                  Discount (₹) <span className="text-destructive">*</span>
+                  Principal (₹) <span className="text-destructive">*</span>
                 </label>
                 <Input
                   type="number"
-                  min="0"
-                  placeholder="0"
-                  value={discount}
-                  onChange={(e) => setDiscount(e.target.value)}
+                  min="1"
+                  placeholder={String(requestedAmount)}
+                  value={overrideAmount}
+                  onChange={(e) => setOverrideAmount(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Enter 0 if no discount applies.
+                  {overrideAmountNum !== requestedAmount
+                    ? `Requested: ${formatCurrency(requestedAmount)}`
+                    : "Matches borrower's request."}
                 </p>
               </div>
               <div className="space-y-1.5">
@@ -485,6 +496,36 @@ export default function LoanRequestDetail() {
                   onChange={(e) => setTransactionDate(e.target.value)}
                 />
               </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">
+                  {isDiscount ? "Discount" : "Extra Charge"} (₹)
+                </label>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="is-discount-toggle"
+                    checked={isDiscount}
+                    onCheckedChange={(v) => setIsDiscount(!!v)}
+                  />
+                  <label htmlFor="is-discount-toggle" className="text-sm text-muted-foreground cursor-pointer select-none">
+                    Is discount
+                  </label>
+                </div>
+              </div>
+              <Input
+                type="number"
+                min="0"
+                placeholder="0"
+                value={discount}
+                onChange={(e) => setDiscount(e.target.value)}
+                className="max-w-[200px]"
+              />
+              <p className="text-xs text-muted-foreground">
+                {isDiscount
+                  ? "Reduces the final amount — e.g. rounding discount."
+                  : "Adds to the final amount — e.g. processing fee or penalty."}
+              </p>
             </div>
 
             {/* Live breakdown */}
@@ -505,9 +546,11 @@ export default function LoanRequestDetail() {
               </div>
               {discountNum > 0 && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Discount (applied to final)</span>
-                  <span className="font-numeric text-emerald-700">
-                    − {formatCurrency(discountNum)}
+                  <span className="text-muted-foreground">
+                    {isDiscount ? "Discount" : "Extra Charge"}
+                  </span>
+                  <span className={`font-numeric ${isDiscount ? "text-emerald-700" : "text-amber-700"}`}>
+                    {isDiscount ? "−" : "+"} {formatCurrency(discountNum)}
                   </span>
                 </div>
               )}
@@ -652,6 +695,52 @@ export default function LoanRequestDetail() {
           </CardContent>
         </Card>
       )}
+
+      {/* Activity Log — request lifecycle timestamps */}
+      {(() => {
+        const entries: { label: string; date: Date }[] = [];
+        if (req.createdAt) {
+          const d = new Date(req.createdAt);
+          if (!isNaN(d.getTime())) entries.push({ label: "Request submitted", date: d });
+        }
+        if ((req as any).approvedAt) {
+          const d = new Date((req as any).approvedAt as string);
+          if (!isNaN(d.getTime())) entries.push({ label: "Request approved & loan disbursed", date: d });
+        }
+        if (entries.length === 0) return null;
+        entries.sort((a, b) => b.date.getTime() - a.date.getTime());
+        return (
+          <Card className="shadow-sm border-border/60">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                Activity Log
+              </CardTitle>
+              <CardDescription>Timeline of this loan request.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="relative pl-6">
+                <div className="absolute left-2 top-1 bottom-1 w-px bg-border" />
+                <div className="space-y-4">
+                  {entries.map((entry, i) => (
+                    <div key={i} className="relative">
+                      <div className="absolute -left-[22px] top-1 h-3 w-3 rounded-full border-2 border-primary/50 bg-background" />
+                      <p className="text-sm font-medium leading-snug">{entry.label}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {entry.date.toLocaleString("en-IN", {
+                          day: "2-digit", month: "short", year: "numeric",
+                          hour: "2-digit", minute: "2-digit", hour12: true,
+                          timeZone: "Asia/Kolkata",
+                        })}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
     </div>
   );
 }

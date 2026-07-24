@@ -44,7 +44,7 @@ import {
 
 const TAB = "Heat Map";
 const DATA_START_ROW = 6; // Row 6 is the first real data row (also has array formulas)
-const LAST_COL = "W";     // Column W = index 22
+const LAST_COL = "Z";     // Column Z = index 25
 
 const COL = {
   ID: 0,
@@ -70,9 +70,12 @@ const COL = {
   DAILY_AMOUNT: 20,
   WEEKLY_AMOUNT: 21,
   BIMONTHLY_AMOUNT: 22,
+  CREATED_AT: 23,       // col X — ISO datetime of EMI loan creation
+  PAID_TIMESTAMPS: 24,  // col Y — pipe-separated ISO datetimes for each paidDates entry
+  ACTIVITY_LOG: 25,     // col Z — pipe-separated activity entries (ISO_timestamp~label)
 } as const;
 
-export type EmiLoanStatus = "Pending" | "Clear";
+export type EmiLoanStatus = "Pending" | "Clear" | "Archived";
 
 export interface EmiLoanRow {
   id: string;
@@ -111,6 +114,12 @@ export interface EmiLoanRow {
   weeklyAmount: number | null;
   /** Optional custom bimonthly (twice-a-month) instalment override. When null, UI falls back to monthlyPayment ÷ 2. */
   bimonthlyAmount: number | null;
+  /** ISO datetime string of when this EMI loan was created. Null for legacy rows. */
+  createdAt: string | null;
+  /** ISO datetime strings for each paidDates entry (same order). Null/empty for legacy rows. */
+  paidTimestamps: string[];
+  /** Pipe-separated activity log entries (ISO_timestamp~label). Appended on every write action. */
+  activityLog: string[];
 }
 
 export interface EmiLoanInput {
@@ -333,7 +342,7 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
       : 0;
 
   return {
-    id: toText(get(COL.ID)),
+    id: toText(get(COL.ID)).trim(),
     emiId: makeEmiId(rowNumber),
     rowNumber,
     name: toText(get(COL.NAME)),
@@ -352,7 +361,11 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
     status,
     whatsapp: toText(get(COL.WHATSAPP)),
     lateFees,
-    remainingMonths,
+    // Return effectiveRemaining (corrected for accumulated partial payments and
+    // calendar-based safety cap) rather than the raw sheet value so that every
+    // consumer — portal Total Due, admin borrower list, detail pages — sees the
+    // same consistent month count that the lateDays / nextPaymentDate logic uses.
+    remainingMonths: effectiveRemaining,
     notes: toText(get(COL.NOTES)),
     lateDays,
     paidDates: toText(get(COL.PAID_DATES))
@@ -362,6 +375,15 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
     dailyAmount: dailyAmountVal,
     weeklyAmount: weeklyAmountVal,
     bimonthlyAmount: toNumberOrNull(get(COL.BIMONTHLY_AMOUNT)),
+    createdAt: toText(get(COL.CREATED_AT)) || null,
+    paidTimestamps: toText(get(COL.PAID_TIMESTAMPS))
+      .split("|")
+      .map((s) => s.trim())
+      .filter(Boolean),
+    activityLog: toText(get(COL.ACTIVITY_LOG))
+      .split("|")
+      .map((s) => s.trim())
+      .filter(Boolean),
   };
 }
 
@@ -448,7 +470,9 @@ export async function listEmiLoanRows(): Promise<EmiLoanRow[]> {
 
 export async function getEmiLoanRow(id: string): Promise<EmiLoanRow | null> {
   const rows = await listEmiLoanRows();
-  return rows.find((r) => r.id === id) ?? null;
+  // Primary: match by UUID. Fallback: match by human-readable emiId (e.g. "E-0012")
+  // so that bookmark-style links and UUID write-back failures don't leave a loan inaccessible.
+  return rows.find((r) => r.id === id || r.emiId === id) ?? null;
 }
 
 async function getEmiLoanRowAtRowNumber(rowNumber: number): Promise<EmiLoanRow | null> {
@@ -517,8 +541,11 @@ export async function createEmiLoanRow(input: EmiLoanInput): Promise<EmiLoanRow>
   const rowNumber = await findNextEmiRowNumber();
   await ensureGridRowCountForSheet(sheetId, TAB, rowNumber);
   const id = randomUUID();
+  const createdAt = new Date().toISOString();
   const updates = [
     { range: `${TAB}!${colLetter(COL.ID)}${rowNumber}`, values: [[id]] },
+    { range: `${TAB}!${colLetter(COL.CREATED_AT)}${rowNumber}`, values: [[createdAt]] },
+    { range: `${TAB}!${colLetter(COL.ACTIVITY_LOG)}${rowNumber}`, values: [[`${createdAt}~EMI loan created`]] },
     ...emiInputCellUpdates(rowNumber, { ...input, status: input.status ?? "Pending" }),
   ];
   // Write initial server-managed tracking columns.
@@ -598,6 +625,7 @@ function appendEmiMonth(
   paidDateStr: string,
   amountOrNull: number | null,
   entryType: string,
+  paidTimestamp?: string,
 ): { range: string; values: (string | number)[][] }[] {
   const statusNotesText = buildStatusNotes(
     existing.transactionDate, existing.tenureMonths, newRemaining,
@@ -607,11 +635,16 @@ function appendEmiMonth(
     ? `${paidDateStr}:${amountOrNull}:${entryType}`
     : `${paidDateStr}::${entryType}`;
   const prev = existing.paidDates.join("|");
+  // Update paidTimestamps in parallel with paidDates (same order, one ISO datetime per entry)
+  const ts = paidTimestamp ?? new Date().toISOString();
+  const prevTs = existing.paidTimestamps.join("|");
+  const newTs = prevTs ? `${prevTs}|${ts}` : ts;
   return [
     { range: `${TAB}!${colLetter(COL.REMAINING_MONTHS)}${rowNumber}`, values: [[newRemaining]] },
     { range: `${TAB}!${colLetter(COL.STATUS)}${rowNumber}`, values: [[newStatus]] },
     { range: `${TAB}!${colLetter(COL.STATUS_NOTES)}${rowNumber}`, values: [[statusNotesText]] },
     { range: `${TAB}!${colLetter(COL.PAID_DATES)}${rowNumber}`, values: [[prev ? `${prev}|${entry}` : entry]] },
+    { range: `${TAB}!${colLetter(COL.PAID_TIMESTAMPS)}${rowNumber}`, values: [[newTs]] },
   ];
 }
 
@@ -639,7 +672,7 @@ export async function markEmiMonthlyPayment(
   const newStatus: EmiLoanStatus = newRemaining <= 0 ? "Clear" : "Pending";
 
   const updates = appendEmiMonth(rowNumber, existing, newRemaining, newStatus,
-    paidDate, paidAmount ?? null, "M");
+    paidDate, paidAmount ?? null, "M", new Date().toISOString());
   await batchUpdateCellsInSheet(sheetId, updates);
   return getEmiLoanRowAtRowNumber(rowNumber);
 }
@@ -714,8 +747,11 @@ export async function recordPartialEmiPayment(
       // Record as plain partial to avoid corrupting remaining months count.
       const entry = `${date}:${amount}:${frequency}`;
       const prev = existing.paidDates.join("|");
+      const ts = new Date().toISOString();
+      const prevTs = existing.paidTimestamps.join("|");
       updates = [
         { range: `${TAB}!${colLetter(COL.PAID_DATES)}${rowNumber}`, values: [[prev ? `${prev}|${entry}` : entry]] },
+        { range: `${TAB}!${colLetter(COL.PAID_TIMESTAMPS)}${rowNumber}`, values: [[prevTs ? `${prevTs}|${ts}` : ts]] },
       ];
       await batchUpdateCellsInSheet(sheetId, updates);
       return getEmiLoanRowAtRowNumber(rowNumber);
@@ -723,13 +759,16 @@ export async function recordPartialEmiPayment(
 
     const newStatus: EmiLoanStatus = newRemaining <= 0 ? "Clear" : "Pending";
     const entryType: string = frequency === "D" ? "DM" : frequency === "W" ? "WM" : "BMM";
-    updates = appendEmiMonth(rowNumber, existing, newRemaining, newStatus, date, amount, entryType);
+    updates = appendEmiMonth(rowNumber, existing, newRemaining, newStatus, date, amount, entryType, new Date().toISOString());
   } else {
     // Plain partial — just append, no month change yet.
     const entry = `${date}:${amount}:${frequency}`;
     const prev = existing.paidDates.join("|");
+    const ts = new Date().toISOString();
+    const prevTs = existing.paidTimestamps.join("|");
     updates = [
       { range: `${TAB}!${colLetter(COL.PAID_DATES)}${rowNumber}`, values: [[prev ? `${prev}|${entry}` : entry]] },
+      { range: `${TAB}!${colLetter(COL.PAID_TIMESTAMPS)}${rowNumber}`, values: [[prevTs ? `${prevTs}|${ts}` : ts]] },
     ];
   }
 
@@ -758,9 +797,13 @@ export async function undoLastEmiPayment(id: string): Promise<EmiLoanRow | null>
 
   const remaining = existing.paidDates.slice(0, -1);
   const newPaidDates = remaining.join("|");
+  // Also remove the matching timestamp entry
+  const remainingTs = existing.paidTimestamps.slice(0, -1);
+  const newPaidTimestamps = remainingTs.join("|");
 
   const updates: { range: string; values: (string | number)[][] }[] = [
     { range: `${TAB}!${colLetter(COL.PAID_DATES)}${rowNumber}`, values: [[newPaidDates]] },
+    { range: `${TAB}!${colLetter(COL.PAID_TIMESTAMPS)}${rowNumber}`, values: [[newPaidTimestamps]] },
   ];
 
   // Any type containing "M" means a month was consumed — restore it
@@ -814,4 +857,26 @@ export async function deleteEmiLoanRow(id: string): Promise<EmiLoanRow | null> {
   const sheetId = getEmiSpreadsheetId();
   await deleteRowAtInSheet(sheetId, TAB, existing.rowNumber);
   return existing;
+}
+
+/**
+ * Appends a timestamped activity entry to the ACTIVITY_LOG column (col Z) for an EMI loan row.
+ * Non-fatal: any error is swallowed so activity logging never disrupts core operations.
+ */
+export async function appendEmiActivity(rowNumber: number, label: string): Promise<void> {
+  try {
+    const sheetId = getEmiSpreadsheetId();
+    const col = colLetter(COL.ACTIVITY_LOG);
+    const raw = await getRawValuesFromSheet(sheetId, `${TAB}!${col}${rowNumber}:${col}${rowNumber}`);
+    const existing = typeof raw?.[0]?.[0] === "string" ? (raw[0][0] as string) : "";
+    const ts = new Date().toISOString();
+    const entry = `${ts}~${label}`;
+    const newLog = existing ? `${existing}|${entry}` : entry;
+    await batchUpdateCellsInSheet(sheetId, [{
+      range: `${TAB}!${col}${rowNumber}`,
+      values: [[newLog]],
+    }]);
+  } catch {
+    // Non-fatal — activity logging must never break core operations
+  }
 }

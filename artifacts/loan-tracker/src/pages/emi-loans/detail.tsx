@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "@/components/ui/link";
 import {
   ArrowLeft, Edit, Trash2, Calendar, FileText, Loader2,
-  CircleDollarSign, CalendarDays, CalendarRange, Undo2,
+  CircleDollarSign, CalendarDays, CalendarRange, Undo2, Share2, Clock,
 } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +39,26 @@ import {
 
 import EmiLoanFormDialog, { EmiLoan, EMI_LOANS_QUERY_KEY, emiLoanQueryKey } from "./components/emi-loan-form-dialog";
 
+// ─── WhatsApp Share Helpers ──────────────────────────────────────────────────
+
+const ADMIN_WA = "8917656405";
+
+function sanitizePhoneNumber(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  const stripped = digits.length > 10 && digits.startsWith("91") ? digits.slice(2) : digits;
+  return stripped.slice(-10);
+}
+
+function openWaLink(url: string) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 function EmiStatusBadge({ status }: { status: string }) {
   switch (status) {
     case "Pending":
@@ -47,6 +67,8 @@ function EmiStatusBadge({ status }: { status: string }) {
       return <Badge variant="success">Clear</Badge>;
     case "Temp":
       return <Badge variant="outline" className="border-amber-200 text-amber-800 bg-amber-50">Temp</Badge>;
+    case "Archived":
+      return <Badge variant="outline" className="border-slate-300 text-slate-500 bg-slate-50">Archived</Badge>;
     default:
       return <Badge variant="outline">{status}</Badge>;
   }
@@ -445,6 +467,31 @@ export default function EmiLoanDetail() {
     new Date(loan.nextPaymentDate) < now &&
     loan.status !== "Clear";
 
+  const handleShare = () => {
+    const lines = [
+      `📋 EMI Loan Summary`,
+      `👤 Name: ${loan.name}`,
+      ...(loan.emiId ? [`🔖 EMI ID: ${loan.emiId}`] : []),
+      `💰 Principal: ${formatCurrency(loan.principal)}`,
+      ...(loan.transactionDate ? [`📅 Transaction Date: ${formatDate(loan.transactionDate)}`] : []),
+      `💳 Monthly Payment: ${loan.monthlyPayment != null ? formatCurrency(loan.monthlyPayment) : "—"}`,
+      ...(loan.nextPaymentDate ? [`📆 Next Payment: ${formatDate(loan.nextPaymentDate)}`] : []),
+      `📊 Remaining: ${loan.remainingMonths != null ? `${loan.remainingMonths} month${loan.remainingMonths !== 1 ? "s" : ""}` : "—"}`,
+      `📋 Status: ${loan.status}`,
+      ...(isOverdue && (loan.lateDays ?? 0) > 0 ? [`⚠️ Late by: ${loan.lateDays} days`] : []),
+    ];
+    const msg = lines.join("\n");
+    let phone: string;
+    if (isStaff) {
+      const raw = (loan.whatsapp ?? "").split("\n")[0].trim();
+      const digits = sanitizePhoneNumber(raw);
+      phone = digits.length === 10 ? `91${digits}` : ADMIN_WA;
+    } else {
+      phone = ADMIN_WA;
+    }
+    openWaLink(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`);
+  };
+
   const perDayCharge =
     isOverdue && loan.lateFees != null && (loan.lateDays ?? 0) > 0
       ? Math.round(loan.lateFees / (loan.lateDays ?? 1))
@@ -700,6 +747,9 @@ export default function EmiLoanDetail() {
                   Undo Last
                 </Button>
               )}
+              <Button variant="outline" size="sm" onClick={handleShare}>
+                <Share2 className="h-4 w-4 mr-2" /> Share
+              </Button>
               <Button variant="outline" onClick={() => setIsEditOpen(true)}>
                 <Edit className="h-4 w-4 mr-2" /> Edit
               </Button>
@@ -708,6 +758,11 @@ export default function EmiLoanDetail() {
               </Button>
             </div>
           </div>
+        )}
+        {!isStaff && (
+          <Button variant="outline" size="sm" onClick={handleShare}>
+            <Share2 className="h-4 w-4 mr-2" /> Share
+          </Button>
         )}
       </div>
 
@@ -755,7 +810,7 @@ export default function EmiLoanDetail() {
           </CardContent>
         </Card>
 
-        <Card className="md:col-span-1 shadow-sm border-border/60 bg-primary/5">
+        {isStaff && <Card className="md:col-span-1 shadow-sm border-border/60 bg-primary/5">
           <CardHeader>
             <CardTitle>Monthly Payment</CardTitle>
             <CardDescription>Computed by the sheet</CardDescription>
@@ -830,7 +885,7 @@ export default function EmiLoanDetail() {
               </div>
             )}
           </CardContent>
-        </Card>
+        </Card>}
       </div>
 
       <Card className="shadow-sm border-border/60">
@@ -907,6 +962,15 @@ export default function EmiLoanDetail() {
                       </div>
                       <p className="text-xs text-muted-foreground">
                         Entry #{(loan.paidDates ?? []).length - entry.index}
+                        {loan.paidTimestamps?.[entry.index] && (
+                          <span className="ml-1">
+                            · Recorded {new Date(loan.paidTimestamps[entry.index]).toLocaleString("en-IN", {
+                              day: "2-digit", month: "short", year: "numeric",
+                              hour: "2-digit", minute: "2-digit", hour12: true,
+                              timeZone: "Asia/Kolkata",
+                            })}
+                          </span>
+                        )}
                       </p>
                     </div>
                     <div className="font-bold font-numeric text-emerald-700">
@@ -921,6 +985,54 @@ export default function EmiLoanDetail() {
           </CardContent>
         </Card>
       )}
+
+      {/* Activity Log */}
+      {(() => {
+        const activityLog = ((loan as any).activityLog as string[] | undefined) ?? [];
+        if (activityLog.length === 0) return null;
+        const entries = activityLog
+          .map(e => {
+            const i = e.indexOf("~");
+            if (i === -1) return null;
+            const date = new Date(e.slice(0, i));
+            if (isNaN(date.getTime())) return null;
+            return { label: e.slice(i + 1), date };
+          })
+          .filter((e): e is { label: string; date: Date } => e !== null)
+          .sort((a, b) => b.date.getTime() - a.date.getTime());
+        if (entries.length === 0) return null;
+        return (
+          <Card className="shadow-sm border-border/60">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                Activity Log
+              </CardTitle>
+              <CardDescription>All recorded actions on this EMI loan, newest first.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="relative pl-6">
+                <div className="absolute left-2 top-1 bottom-1 w-px bg-border" />
+                <div className="space-y-4">
+                  {entries.map((entry, i) => (
+                    <div key={i} className="relative">
+                      <div className="absolute -left-[22px] top-1 h-3 w-3 rounded-full border-2 border-primary/50 bg-background" />
+                      <p className="text-sm font-medium leading-snug">{entry.label}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {entry.date.toLocaleString("en-IN", {
+                          day: "2-digit", month: "short", year: "numeric",
+                          hour: "2-digit", minute: "2-digit", hour12: true,
+                          timeZone: "Asia/Kolkata",
+                        })}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {isStaff && (
         <>

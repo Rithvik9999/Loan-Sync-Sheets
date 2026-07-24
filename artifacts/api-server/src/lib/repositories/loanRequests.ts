@@ -17,6 +17,7 @@ const HEADERS = [
   "createdAt",
   "discount",
   "loanId",
+  "approvedAt",
 ];
 
 export type LoanRequestStatus = "Pending" | "Approved" | "Rejected";
@@ -38,6 +39,8 @@ export interface LoanRequest {
   discount: number;
   /** UUID of the loan row created when this request was approved. Null if not yet approved or pre-dates this field. */
   loanId: string | null;
+  /** ISO datetime when the request was approved or rejected. Null if still pending or pre-dates this field. */
+  approvedAt: string | null;
 }
 
 export interface LoanRequestInput {
@@ -74,6 +77,7 @@ function fromRow(row: Record<string, string>): LoanRequest {
     createdAt: row.createdAt,
     discount: Number(row.discount) || 0,
     loanId: row.loanId || null,
+    approvedAt: row.approvedAt || null,
   };
 }
 
@@ -89,6 +93,7 @@ function toRow(request: LoanRequest): Record<string, string> {
     type: request.type,
     discount: String(request.discount ?? 0),
     loanId: request.loanId ?? "",
+    approvedAt: request.approvedAt ?? "",
   };
 }
 
@@ -139,6 +144,7 @@ export async function createLoanRequest(
     createdAt: new Date().toISOString(),
     discount: 0,
     loanId: null,
+    approvedAt: null,
   };
   await appendRow(TAB, HEADERS, toRow(request));
   return request;
@@ -151,7 +157,11 @@ export async function updateLoanRequestStatus(
   const { rows, rowNumbers } = await readTabWithIds();
   const idx = rows.findIndex((r) => r.id === id);
   if (idx === -1) return null;
-  const updated: LoanRequest = { ...fromRow(rows[idx]), status };
+  // Record when the status changes to a terminal state (Approved / Rejected)
+  const approvedAt = (status === "Approved" || status === "Rejected")
+    ? new Date().toISOString()
+    : fromRow(rows[idx]).approvedAt;
+  const updated: LoanRequest = { ...fromRow(rows[idx]), status, approvedAt: approvedAt ?? null };
   await updateRowAt(TAB, rowNumbers[idx], HEADERS, toRow(updated));
   return updated;
 }
@@ -169,6 +179,7 @@ export async function approveLoanRequest(
     ...fromRow(rows[idx]),
     status: "Approved",
     discount: discount ?? 0,
+    approvedAt: new Date().toISOString(),
     ...(loanId != null ? { loanId } : {}),
   };
   await updateRowAt(TAB, rowNumbers[idx], HEADERS, toRow(updated));

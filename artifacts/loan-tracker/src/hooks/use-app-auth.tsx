@@ -101,19 +101,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const msg = typeof err?.error === "string" ? err.error : "Login failed. Please try again.";
       throw new Error(msg || "Invalid phone number or PIN");
     }
+    // Always wipe the React Query cache before loading the new user's data.
+    // The effect-based clear only fires on isSignedIn transitions (false→true /
+    // true→false). If a user logs in while another session is still active
+    // (isSignedIn stays true throughout), the effect never fires and the
+    // previous user's data would remain visible — explicit clear prevents that.
+    queryClient.clear();
     // Fetch /me after login so creditLimit (and any other borrower-only fields)
     // are populated — the login endpoint only returns basic identity.
     const fullState = await fetchMe();
     setState(fullState);
-  }, []);
+  }, [queryClient]);
 
   const logout = useCallback(async () => {
     await fetch("/api/auth/logout", {
       method: "POST",
       credentials: "include",
     });
+    // Clear synchronously before state update so no cached data is readable
+    // even during the brief React render between setState and the effect firing.
+    queryClient.clear();
     setState({ ...defaultState, isLoaded: true });
-  }, []);
+  }, [queryClient]);
 
   return (
     <AuthContext.Provider value={{ ...state, login, logout }}>

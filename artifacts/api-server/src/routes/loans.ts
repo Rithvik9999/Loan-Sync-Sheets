@@ -5,16 +5,13 @@ import {
   GetLoanParams,
   UpdateLoanParams,
   DeleteLoanParams,
-  ListLoansResponse,
-  CreateLoanResponse,
-  GetLoanResponse,
-  UpdateLoanResponse,
 } from "@workspace/api-zod";
 import { attachRole, requireStaff } from "../middlewares/auth";
 import * as loansRepo from "../lib/repositories/loans";
 import * as borrowersRepo from "../lib/repositories/borrowers";
 import { attachBorrowerId } from "../lib/repositories/loans";
 import { extractPhoneFromWhatsapp, normalizePhone, normalizeName } from "../lib/authTokens";
+import { appendLoanActivity } from "../lib/heatMapSheet";
 
 const router: IRouter = Router();
 
@@ -36,10 +33,12 @@ router.get("/loans", async (req, res): Promise<void> => {
       const rowPhone = extractPhoneFromWhatsapp(l.whatsapp);
       const phoneMatch = !!(rowPhone && myPhone && rowPhone === myPhone);
       const nameMatch = normalizeName(l.name) === myName;
-      // Accept if phone matches OR name matches — a phone format mismatch
-      // between the sheet's WhatsApp column and the Borrowers tab should not
-      // silently hide loans that clearly belong to this borrower by name.
-      return phoneMatch || nameMatch;
+      // Only fall back to name matching when the sheet row has no extractable
+      // phone number (data gap in the WhatsApp column). If the row does have a
+      // phone, require an exact phone match — name-only matching across rows
+      // that have phones risks exposing one borrower's loans to another
+      // borrower who happens to share the same normalized name.
+      return rowPhone ? phoneMatch : nameMatch;
     });
   }
 
@@ -57,7 +56,13 @@ router.get("/loans", async (req, res): Promise<void> => {
       ? forRole.filter((l) => l.status === status)
       : forRole;
 
-  res.json(ListLoansResponse.parse(filtered));
+  // Do NOT Zod-parse the list response — the schema has non-nullable
+  // transactionDate but the sheet can legitimately return null for legacy rows,
+  // which would throw a ZodError and make the endpoint return 500 for everyone.
+  // The EMI route uses the same pattern (plain res.json). Extra fields such as
+  // partPayments, perDayAddition, activityLog are intentionally kept because
+  // the detail page reads them via (loan as any) casts.
+  res.json(filtered);
 });
 
 /**
@@ -95,7 +100,7 @@ router.post("/loans", requireStaff, async (req, res): Promise<void> => {
   }
   const loan = await loansRepo.createLoan(parsed.data);
   const borrowers = await borrowersRepo.listBorrowers();
-  res.status(201).json(CreateLoanResponse.parse(attachBorrowerId(loan, borrowers)));
+  res.status(201).json(attachBorrowerId(loan, borrowers));
 });
 
 router.get("/loans/:id", async (req, res): Promise<void> => {
@@ -115,13 +120,16 @@ router.get("/loans/:id", async (req, res): Promise<void> => {
     const rowPhone = extractPhoneFromWhatsapp(loan.whatsapp);
     const phoneMatch = !!(rowPhone && myPhone && rowPhone === myPhone);
     const nameMatch = normalizeName(loan.name) === normalizeName(info.name);
-    if (!phoneMatch && !nameMatch) {
+    const allowed = rowPhone ? phoneMatch : nameMatch;
+    if (!allowed) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }
   }
   const borrowers = await borrowersRepo.listBorrowers();
-  res.json(GetLoanResponse.parse(attachBorrowerId(loan, borrowers)));
+  // Plain res.json — no Zod parse to avoid ZodError on null transactionDate
+  // (same pattern as the list endpoint and the EMI route).
+  res.json(attachBorrowerId(loan, borrowers));
 });
 
 router.patch(
@@ -144,7 +152,19 @@ router.patch(
       return;
     }
     const borrowers = await borrowersRepo.listBorrowers();
-    res.json(UpdateLoanResponse.parse(attachBorrowerId(loan, borrowers)));
+    res.json(attachBorrowerId(loan, borrowers));
+
+    // Fire-and-forget: append an activity entry based on what was patched
+    const pd = parsed.data;
+    let actLabel: string;
+    if (pd.paid != null && Object.keys(pd).filter(k => k !== "paid").length === 0) {
+      actLabel = `Payment updated — total ₹${pd.paid.toLocaleString("en-IN")}`;
+    } else if (pd.status) {
+      actLabel = `Status → ${pd.status}`;
+    } else {
+      actLabel = "Loan details updated";
+    }
+    appendLoanActivity(loan.rowNumber, actLabel).catch(() => {});
   },
 );
 
@@ -172,6 +192,7 @@ router.post(
     if (!loan) { res.status(404).json({ error: "Loan not found" }); return; }
     const borrowers = await borrowersRepo.listBorrowers();
     res.json(attachBorrowerId(loan, borrowers));
+    appendLoanActivity(loan.rowNumber, `Part payment ₹${amount.toLocaleString("en-IN")} on ${date}`).catch(() => {});
   },
 );
 

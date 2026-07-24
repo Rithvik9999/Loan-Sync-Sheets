@@ -624,8 +624,8 @@ function EmiRequestDialog({
     const t = Number(watchedTenure);
     if (!p || !t || p <= 0 || t <= 0) return null;
     const monthlyRate = 0.02;
-    const interestPerMonth = Math.round(p * monthlyRate);
-    const principalPerMonth = Math.round(p / t);
+    const interestPerMonth = Math.ceil(p * monthlyRate);
+    const principalPerMonth = Math.ceil(p / t);
     const monthlyPayment = interestPerMonth + principalPerMonth;
     const totalAmount = p + interestPerMonth * t;
     return { interestPerMonth, principalPerMonth, monthlyPayment, totalAmount };
@@ -1134,7 +1134,7 @@ function BulkRepayDialog({
 
 // ─── Repayment item type ──────────────────────────────────────────────────────
 
-type RepayItem = {
+export type RepayItem = {
   key: string;
   id: string;
   /** Human-readable loan/EMI ID (e.g. L042, E003) */
@@ -1356,7 +1356,7 @@ function calcOverdueTotal(
   return Math.ceil(total);
 }
 
-function buildRepaymentItems(
+export function buildRepaymentItems(
   loans: Loan[] | undefined,
   emiLoans: EmiLoan[] | undefined,
 ): RepayItem[] {
@@ -1381,11 +1381,14 @@ function buildRepaymentItems(
       // the overdue count so the portal matches the detail page's logic.
       // periodsElapsedForOverdue = yesterday and before only.
       const periodsElapsedForOverdue = Math.max(daysElapsed - 1, 0);
+      // paidNormal = number of full daily instalments received at the base rate.
+      // We use this directly for the overdue count — NOT a fee-adjusted divisor.
+      // Dividing by ceil(dailyAmt × 1.02) when late would under-credit paid periods
+      // (e.g. ₹9 000 paid ÷ ₹510 = 17.6 → 17, when 18 were actually paid) and
+      // manufactures phantom extra overdue days. Late fees are computed separately
+      // by calcOverdueTotal and must not reduce the credited period count here.
       const paidNormal = Math.floor((l.paid ?? 0) / dailyAmt);
-      const isOnTimeLoan = paidNormal >= periodsElapsedForOverdue;
-      const clearingAmtLoan = isOnTimeLoan ? dailyAmt : Math.ceil(dailyAmt * 1.02);
-      const paidPeriods = Math.floor((l.paid ?? 0) / clearingAmtLoan);
-      const overdueDays = Math.max(periodsElapsedForOverdue - paidPeriods, 0);
+      const overdueDays = Math.max(periodsElapsedForOverdue - paidNormal, 0);
       const returnDate = l.returnDate ? new Date(l.returnDate + "T00:00:00Z") : null;
       const withinTenure = !returnDate || today <= returnDate;
 
@@ -1397,7 +1400,7 @@ function buildRepaymentItems(
       if (overdueDays > 0) {
         // Each missed day piles up with 2%/day late fee
         const overdueTotal = calcOverdueTotal(dailyAmt, overdueDays, 1, undefined, 0.02);
-        const firstDue = new Date(txDate.getTime() + (paidPeriods + 1) * 86400000);
+        const firstDue = new Date(txDate.getTime() + (paidNormal + 1) * 86400000);
         items.push({
           key: `daily-overdue-${l.id}`,
           id: l.id, loanId: l.loanId, type: "loan",
@@ -2590,7 +2593,7 @@ function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
                   </div>
                 </div>
                 <div className="p-4 space-y-0.5">
-                  <div className="text-xs text-muted-foreground">Instalments</div>
+                  <div className="text-xs text-muted-foreground">Instalments Remaining</div>
                   <div className="text-base font-semibold">
                     {remainingDisplay}
                   </div>
@@ -3451,7 +3454,7 @@ export default function Portal() {
           return sum + e.principalPerMonth * rem;
         }
         if (rem != null && e.tenureMonths > 0) {
-          return sum + Math.round((e.principal ?? 0) * rem / e.tenureMonths);
+          return sum + Math.ceil((e.principal ?? 0) * rem / e.tenureMonths);
         }
         return sum + (e.principal ?? 0);
       }, 0),

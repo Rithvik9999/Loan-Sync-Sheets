@@ -28,6 +28,7 @@ interface BorrowerEntry {
   name: string;
   phone: string;
   hasPin: boolean;
+  pin: string;          // plain-text PIN (admin only)
   creditLimit: number | null;
   loanCount: number;
   creditUsed: number;   // sum of active loan principals
@@ -229,6 +230,15 @@ export default function BorrowersList() {
     queryFn: fetchEmiLoans,
   });
 
+  const { data: borrowerPins } = useQuery<{ id: string; name: string; phone: string; pin: string }[]>({
+    queryKey: ["borrowers", "pins"],
+    queryFn: async () => {
+      const res = await fetch("/api/borrowers/pins", { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+
   const isLoading = isLoadingBorrowers || isLoadingLoans || isLoadingEmi;
 
   // Build unified borrower list. Loan-sheet rows and Borrowers-tab records are
@@ -278,6 +288,7 @@ export default function BorrowersList() {
           name: loan.name.trim(),
           phone,
           hasPin: false,
+          pin: "",
           creditLimit: null,
           loanCount: 1,
           creditUsed: loan.status !== "Clear" ? (loan.principal ?? 0) : 0,
@@ -286,6 +297,14 @@ export default function BorrowersList() {
         entries.push(entry);
         index(entry);
       }
+    }
+
+    // Build a phone→pin lookup from the pins endpoint
+    const pinByPhone = new Map<string, string>();
+    const pinById = new Map<string, string>();
+    for (const p of borrowerPins ?? []) {
+      if (p.phone) pinByPhone.set(normPhone(p.phone), p.pin);
+      if (p.id) pinById.set(p.id, p.pin);
     }
 
     for (const b of borrowers ?? []) {
@@ -309,6 +328,7 @@ export default function BorrowersList() {
           name: b.name.trim(),
           phone: b.phone ?? "",
           hasPin: b.hasPin ?? false,
+          pin: "",
           creditLimit: b.creditLimit ?? null,
           loanCount: 0,
           creditUsed: 0,
@@ -321,29 +341,51 @@ export default function BorrowersList() {
 
     // Add active EMI loan amounts per borrower
     for (const emi of emiLoans ?? []) {
-      if (emi.status === "Clear") continue;
+      if (emi.status === "Clear" || (emi.status as string) === "Archived") continue;
       const phone = ((emi as unknown as { whatsapp?: string }).whatsapp ?? "").split("\n")[0].trim();
       const existing = findExisting(phone, emi.name);
+
+      // Helper: compute credit-used and total-due for this EMI
+      const rem = emi.remainingMonths != null ? Math.max(emi.remainingMonths, 0) : null;
+      let emiCreditUsed = 0;
+      if (rem != null && emi.principalPerMonth != null) {
+        emiCreditUsed = emi.principalPerMonth * rem;
+      } else if (rem != null && emi.tenureMonths > 0) {
+        emiCreditUsed = Math.ceil((emi.principal ?? 0) * rem / emi.tenureMonths);
+      } else {
+        emiCreditUsed = emi.principal ?? 0;
+      }
+      const emiTotalDue = rem != null
+        ? (emi.monthlyPayment != null ? emi.monthlyPayment * rem : (emi.principal ?? 0))
+        : (emi.principal ?? 0);
+
       if (existing) {
-        // Credit Used: remaining principal (accounts for partially paid EMI months).
-        // Uses principalPerMonth × remainingMonths when available; falls back to
-        // proportional estimate or full principal if tracking hasn't started yet.
-        const rem = emi.remainingMonths != null ? Math.max(emi.remainingMonths, 0) : null;
-        if (rem != null && emi.principalPerMonth != null) {
-          existing.creditUsed += emi.principalPerMonth * rem;
-        } else if (rem != null && emi.tenureMonths > 0) {
-          existing.creditUsed += Math.ceil((emi.principal ?? 0) * rem / emi.tenureMonths);
-        } else {
-          existing.creditUsed += (emi.principal ?? 0);
-        }
-        // Total Due: actual financial obligation — monthlyPayment × remaining months
-        if (rem != null) {
-          existing.totalDue += emi.monthlyPayment != null
-            ? emi.monthlyPayment * rem
-            : (emi.principal ?? 0);
-        } else {
-          existing.totalDue += (emi.principal ?? 0);
-        }
+        existing.creditUsed += emiCreditUsed;
+        existing.totalDue += emiTotalDue;
+      } else {
+        // EMI-only borrower: not in the regular loans list or Borrowers tab yet
+        const newEntry: BorrowerEntry = {
+          id: null,
+          name: emi.name.trim(),
+          phone,
+          hasPin: false,
+          pin: "",
+          creditLimit: null,
+          loanCount: 0,
+          creditUsed: emiCreditUsed,
+          totalDue: emiTotalDue,
+        };
+        entries.push(newEntry);
+        index(newEntry);
+      }
+    }
+
+    // Attach PIN to each entry via id then phone lookup
+    for (const entry of entries) {
+      if (entry.id && pinById.has(entry.id)) {
+        entry.pin = pinById.get(entry.id)!;
+      } else if (entry.phone) {
+        entry.pin = pinByPhone.get(normPhone(entry.phone)) ?? "";
       }
     }
 
@@ -383,6 +425,7 @@ export default function BorrowersList() {
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Phone</TableHead>
+                  <TableHead>PIN</TableHead>
                   <TableHead>Loans</TableHead>
                   <TableHead>Credit Limit</TableHead>
                   <TableHead>Credit Used</TableHead>
@@ -398,6 +441,13 @@ export default function BorrowersList() {
                     <TableCell className="text-muted-foreground">
                       {b.phone ? (
                         <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{b.phone}</span>
+                      ) : (
+                        <span className="text-muted-foreground/50">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="font-numeric text-sm">
+                      {b.pin ? (
+                        <span className="font-mono tracking-widest">{b.pin}</span>
                       ) : (
                         <span className="text-muted-foreground/50">—</span>
                       )}

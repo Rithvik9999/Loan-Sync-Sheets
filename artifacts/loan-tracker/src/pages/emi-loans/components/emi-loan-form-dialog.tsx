@@ -54,7 +54,7 @@ export interface EmiLoan {
   totalInterest: number | null;
   discountPerMonth: number;
   principalPerMonth: number | null;
-  status: "Pending" | "Clear" | "Temp";
+  status: "Pending" | "Clear" | "Temp" | "Archived";
   whatsapp: string;
   lateFees: number | null;
   remainingMonths: number | null;
@@ -70,6 +70,10 @@ export interface EmiLoan {
   weeklyAmount?: number | null;
   /** Custom bimonthly instalment override stored in sheet column W. null = use monthlyPayment ÷ 2. */
   bimonthlyAmount?: number | null;
+  /** ISO datetime of when this EMI loan was created. Null for legacy rows. */
+  createdAt?: string | null;
+  /** ISO datetimes for each paidDates entry (same order). */
+  paidTimestamps?: string[];
 }
 
 const emiLoanSchema = z.object({
@@ -81,7 +85,7 @@ const emiLoanSchema = z.object({
   discountPerMonth: z.coerce.number().optional(),
   statusNotes: z.string().optional(),
   notes: z.string().optional(),
-  status: z.enum(["Pending", "Clear", "Temp"]).optional(),
+  status: z.enum(["Pending", "Clear", "Temp", "Archived"]).optional(),
   customDailyAmount: z.coerce.number().min(0).optional(),
   customWeeklyAmount: z.coerce.number().min(0).optional(),
   customBimonthlyAmount: z.coerce.number().min(0).optional(),
@@ -205,6 +209,7 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
   const [namePopoverOpen, setNamePopoverOpen] = useState(false);
   const [nameSearch, setNameSearch] = useState("");
   const [isPending, setIsPending] = useState(false);
+  const [primaryFrequency, setPrimaryFrequency] = useState<"monthly" | "daily" | "weekly" | "bimonthly">("monthly");
 
   const { data: emiLoans } = useQuery({
     queryKey: EMI_LOANS_QUERY_KEY,
@@ -262,6 +267,7 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
         const updated = await updateEmiLoan(loan.id, payload);
         queryClient.setQueryData(emiLoanQueryKey(loan.id), updated);
         queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
+        queryClient.refetchQueries({ queryKey: emiLoanQueryKey(loan.id) });
         toast({ title: "EMI Loan updated", description: "The sheet has recalculated the computed fields." });
         onOpenChange(false);
       } else {
@@ -279,10 +285,18 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
     }
   }
 
+  const inferEmiFrequency = (l?: EmiLoan): typeof primaryFrequency => {
+    if (l?.dailyAmount && l.dailyAmount > 0) return "daily";
+    if (l?.weeklyAmount && l.weeklyAmount > 0) return "weekly";
+    if (l?.bimonthlyAmount && l.bimonthlyAmount > 0) return "bimonthly";
+    return "monthly";
+  };
+
   useEffect(() => {
     if (open) {
       form.reset(defaults());
       setNameSearch("");
+      setPrimaryFrequency(inferEmiFrequency(loan));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, loan, defaultName]);
@@ -310,7 +324,7 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto" style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}>
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit EMI Loan" : "Record EMI Loan"}</DialogTitle>
           <DialogDescription>
@@ -367,8 +381,10 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
                           </div>
                         )}
                         <div
-                          className="max-h-52 overflow-y-auto overscroll-contain py-1"
+                          className="max-h-52 overflow-y-scroll overscroll-contain py-1"
                           style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+                          onTouchStart={(e) => e.stopPropagation()}
+                          onTouchMove={(e) => e.stopPropagation()}
                         >
                           {filteredNames.length === 0 ? (
                             <div className="py-3 text-center text-sm text-muted-foreground">
@@ -490,92 +506,118 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
               )}
             />
 
-            {/* Custom daily / weekly / bimonthly payment amounts */}
-            <div className="rounded-lg border border-sky-200 bg-sky-50/60 dark:bg-sky-950/20 dark:border-sky-800 p-4 space-y-3">
-              <p className="text-xs font-semibold text-sky-800 dark:text-sky-300 uppercase tracking-wide">
-                Daily / Weekly / Bimonthly Quick-Pay Amounts
-              </p>
-              <p className="text-xs text-sky-700 dark:text-sky-400">
-                Override the auto-computed amounts for the one-click daily, weekly, and bimonthly payment buttons on the detail page.
-              </p>
-              <div className="grid grid-cols-3 gap-4">
-                <FormField
-                  control={form.control}
-                  name="customDailyAmount"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Daily Amount (₹)</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          step="1"
-                          min="0"
-                          placeholder={
-                            form.watch("principal") && form.watch("tenureMonths")
-                              ? String(Math.round((Number(form.watch("principal")) * 0.02 + Number(form.watch("principal")) / Number(form.watch("tenureMonths"))) / 30))
-                              : "e.g. 250"
-                          }
-                          {...field}
-                          value={field.value ?? ""}
-                          onChange={(e) => field.onChange(e.target.value === "" ? undefined : e.target.value)}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="customWeeklyAmount"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Weekly Amount (₹)</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          step="1"
-                          min="0"
-                          placeholder={
-                            form.watch("principal") && form.watch("tenureMonths")
-                              ? String(Math.round((Number(form.watch("principal")) * 0.02 + Number(form.watch("principal")) / Number(form.watch("tenureMonths"))) / 4))
-                              : "e.g. 1750"
-                          }
-                          {...field}
-                          value={field.value ?? ""}
-                          onChange={(e) => field.onChange(e.target.value === "" ? undefined : e.target.value)}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="customBimonthlyAmount"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Bimonthly Amount (₹)</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          step="1"
-                          min="0"
-                          placeholder={
-                            form.watch("principal") && form.watch("tenureMonths")
-                              ? String(Math.round((Number(form.watch("principal")) * 0.02 + Number(form.watch("principal")) / Number(form.watch("tenureMonths"))) / 2))
-                              : "e.g. 3750"
-                          }
-                          {...field}
-                          value={field.value ?? ""}
-                          onChange={(e) => field.onChange(e.target.value === "" ? undefined : e.target.value)}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+            {/* Repayment Frequency */}
+            <div className="space-y-2">
+              <FormLabel>Repayment Frequency</FormLabel>
+              <div className="grid grid-cols-4 gap-2">
+                {(
+                  [
+                    { value: "monthly", label: "Monthly" },
+                    { value: "bimonthly", label: "15 Days" },
+                    { value: "weekly", label: "Weekly" },
+                    { value: "daily", label: "Daily" },
+                  ] as const
+                ).map((opt) => (
+                  <Button
+                    key={opt.value}
+                    type="button"
+                    variant={primaryFrequency === opt.value ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setPrimaryFrequency(opt.value)}
+                  >
+                    {opt.label}
+                  </Button>
+                ))}
               </div>
+              <p className="text-xs text-muted-foreground">
+                {primaryFrequency === "monthly"
+                  ? "Standard monthly EMI — payment buttons use the auto-computed monthly amount."
+                  : `Sets the primary quick-pay button on the detail page. Override the auto-computed ${primaryFrequency} amount below (optional).`}
+              </p>
             </div>
+
+            {/* Custom amount for the selected non-monthly frequency */}
+            {primaryFrequency === "daily" && (
+              <FormField
+                control={form.control}
+                name="customDailyAmount"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Daily Amount (₹) <span className="text-muted-foreground font-normal">— optional override</span></FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        step="1"
+                        min="0"
+                        placeholder={
+                          form.watch("principal") && form.watch("tenureMonths")
+                            ? String(Math.round((Number(form.watch("principal")) * 0.02 + Number(form.watch("principal")) / Number(form.watch("tenureMonths"))) / 30))
+                            : "e.g. 250"
+                        }
+                        {...field}
+                        value={field.value ?? ""}
+                        onChange={(e) => field.onChange(e.target.value === "" ? undefined : e.target.value)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
+            {primaryFrequency === "weekly" && (
+              <FormField
+                control={form.control}
+                name="customWeeklyAmount"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Weekly Amount (₹) <span className="text-muted-foreground font-normal">— optional override</span></FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        step="1"
+                        min="0"
+                        placeholder={
+                          form.watch("principal") && form.watch("tenureMonths")
+                            ? String(Math.round((Number(form.watch("principal")) * 0.02 + Number(form.watch("principal")) / Number(form.watch("tenureMonths"))) / 4))
+                            : "e.g. 1750"
+                        }
+                        {...field}
+                        value={field.value ?? ""}
+                        onChange={(e) => field.onChange(e.target.value === "" ? undefined : e.target.value)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
+            {primaryFrequency === "bimonthly" && (
+              <FormField
+                control={form.control}
+                name="customBimonthlyAmount"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>15-Day Amount (₹) <span className="text-muted-foreground font-normal">— optional override</span></FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        step="1"
+                        min="0"
+                        placeholder={
+                          form.watch("principal") && form.watch("tenureMonths")
+                            ? String(Math.round((Number(form.watch("principal")) * 0.02 + Number(form.watch("principal")) / Number(form.watch("tenureMonths"))) / 2))
+                            : "e.g. 3750"
+                        }
+                        {...field}
+                        value={field.value ?? ""}
+                        onChange={(e) => field.onChange(e.target.value === "" ? undefined : e.target.value)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
 
             <FormField
               control={form.control}

@@ -82,6 +82,12 @@ router.post("/borrowers", async (req, res): Promise<void> => {
   res.status(201).json(toPublic(borrower));
 });
 
+/** Staff-only: returns all borrowers with their plain-text PINs for the admin panel. */
+router.get("/borrowers/pins", async (_req, res): Promise<void> => {
+  const borrowers = await borrowersRepo.listBorrowers();
+  res.json(borrowers.map((b) => ({ id: b.id, name: b.name, phone: b.phone, pin: b.pin ?? "" })));
+});
+
 router.get("/borrowers/:id", async (req, res): Promise<void> => {
   const params = GetBorrowerParams.safeParse(req.params);
   if (!params.success) {

@@ -18,7 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "@/components/ui/link";
-import { ArrowLeft, Edit, Trash2, Calendar, FileText, Plus, TrendingUp, CalendarDays, CalendarRange, Loader2, RotateCcw, Pencil } from "lucide-react";
+import { ArrowLeft, Edit, Trash2, Calendar, FileText, Plus, TrendingUp, CalendarDays, CalendarRange, Loader2, RotateCcw, Pencil, Share2, Clock } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { LoanStatusBadge } from "@/components/status-badges";
 
@@ -35,6 +35,26 @@ import {
 
 import LoanFormDialog from "./components/loan-form-dialog";
 import RecordPaymentDialog from "./components/record-payment-dialog";
+
+// ─── WhatsApp Share Helpers ──────────────────────────────────────────────────
+
+const ADMIN_WA = "8917656405";
+
+function sanitizePhoneNumber(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  const stripped = digits.length > 10 && digits.startsWith("91") ? digits.slice(2) : digits;
+  return stripped.slice(-10);
+}
+
+function openWaLink(url: string) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
 
 export default function LoanDetail() {
   const { id } = useParams<{ id: string }>();
@@ -97,6 +117,33 @@ export default function LoanDetail() {
 
   const isOverdue = (loan.lateDays ?? 0) > 0 && loan.status !== "Clear";
 
+  const handleShare = () => {
+    const outstanding = Math.max((loan.finalAmount ?? 0) - (loan.paid ?? 0), 0);
+    const lines = [
+      `📋 Loan Summary`,
+      `👤 Name: ${loan.name}`,
+      `🔖 Loan ID: ${loan.loanId}`,
+      `💰 Principal: ${formatCurrency(loan.principal)}`,
+      ...(loan.transactionDate ? [`📅 Transaction Date: ${formatDate(loan.transactionDate)}`] : []),
+      ...(loan.returnDate ? [`📆 Return Date: ${formatDate(loan.returnDate)}`] : []),
+      `💵 Amount to Collect: ${loan.finalAmount != null ? formatCurrency(loan.finalAmount) : "—"}`,
+      `✅ Collected: ${formatCurrency(loan.paid ?? 0)}`,
+      ...(outstanding > 0 ? [`🔴 Outstanding: ${formatCurrency(outstanding)}`] : []),
+      `📊 Status: ${loan.status}`,
+      ...(isOverdue && (loan.lateDays ?? 0) > 0 ? [`⚠️ Late by: ${loan.lateDays} days`] : []),
+    ];
+    const msg = lines.join("\n");
+    let phone: string;
+    if (isStaff) {
+      const raw = (loan.whatsapp ?? "").split("\n")[0].trim();
+      const digits = sanitizePhoneNumber(raw);
+      phone = digits.length === 10 ? `91${digits}` : ADMIN_WA;
+    } else {
+      phone = ADMIN_WA;
+    }
+    openWaLink(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`);
+  };
+
   // Compute perDayAddition locally as a fallback in case the API field is absent
   const perDayAddition: number | null =
     (loan as any).perDayAddition ??
@@ -145,16 +192,21 @@ export default function LoanDetail() {
           </div>
         </div>
 
-        {isStaff && (
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setIsEditOpen(true)}>
-              <Edit className="h-4 w-4 mr-2" /> Edit
-            </Button>
-            <Button variant="destructive" onClick={() => setIsDeleteStep1Open(true)}>
-              <Trash2 className="h-4 w-4 mr-2" /> Delete
-            </Button>
-          </div>
-        )}
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={handleShare}>
+            <Share2 className="h-4 w-4 mr-2" /> Share
+          </Button>
+          {isStaff && (
+            <>
+              <Button variant="outline" onClick={() => setIsEditOpen(true)}>
+                <Edit className="h-4 w-4 mr-2" /> Edit
+              </Button>
+              <Button variant="destructive" onClick={() => setIsDeleteStep1Open(true)}>
+                <Trash2 className="h-4 w-4 mr-2" /> Delete
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="grid md:grid-cols-3 gap-6">
@@ -191,7 +243,7 @@ export default function LoanDetail() {
           </CardContent>
         </Card>
 
-        <Card className="md:col-span-1 shadow-sm border-border/60 bg-primary/5">
+        {isStaff && <Card className="md:col-span-1 shadow-sm border-border/60 bg-primary/5">
           <CardHeader>
             <CardTitle>Final Amount</CardTitle>
             <CardDescription>Computed by the sheet</CardDescription>
@@ -270,7 +322,7 @@ export default function LoanDetail() {
               </Button>
             )}
           </CardContent>
-        </Card>
+        </Card>}
       </div>
 
       <Card className="shadow-sm border-border/60">
@@ -419,20 +471,19 @@ export default function LoanDetail() {
           ? Math.max(daysElapsed - 1, 0)
           : periodsElapsed;
         const totalPaid = loan.paid ?? 0;
-        // isOnTime: paid at normal rate covers all PAST (overdue-eligible) periods.
-        // When behind, only the extra-rate payment clears an overdue period.
+        // Count actual installments paid at the BASE rate only.
+        // Using a fee-inflated divisor (dailyAmt × 1.02) when late would under-credit
+        // paid periods (e.g. ₹9 000 ÷ ₹510 = 17.6 → 17 instead of 18) and manufacture
+        // phantom extra overdue periods. Late fees are added on top separately.
         const paidPeriodsNormal = Math.floor(totalPaid / periodAmount);
-        const isOnTime = paidPeriodsNormal >= periodsElapsedForOverdue;
-        const clearingAmt = isOnTime
-          ? periodAmount
-          : (isDaily ? (dailyAmtExtra ?? periodAmount) : (weeklyAmtExtra ?? periodAmount));
-        const paidPeriods = Math.floor(totalPaid / clearingAmt);
-        const overduePeriods = Math.max(periodsElapsedForOverdue - paidPeriods, 0);
+        const overduePeriods = Math.max(periodsElapsedForOverdue - paidPeriodsNormal, 0);
 
         // Contract total = periods in tenure × per-period amount
         const totalPeriods = Math.floor((loan.tenureDays ?? 0) / daysPerPeriod);
         const contractTotal = totalPeriods * periodAmount;
-        const remainingContract = Math.max(contractTotal - totalPaid, 0);
+        // Use the authoritative finalAmount (sheet-computed) so "Remaining (full contract)"
+        // always matches the "Amount to collect" card. Fall back to contractTotal if not yet computed.
+        const remainingContract = Math.max((loan.finalAmount ?? contractTotal) - totalPaid, 0);
 
         // Accumulated overdue: daily uses 2%/day, weekly uses 1%/day
         const lateRate = isDaily ? 0.02 : 0.01;
@@ -564,7 +615,7 @@ export default function LoanDetail() {
                   <p className="text-xl font-bold font-numeric text-emerald-700 dark:text-emerald-400">
                     {formatCurrency(totalPaid)}
                   </p>
-                  <p className="text-[10px] text-muted-foreground">{paidPeriods} {periodLabel}s paid</p>
+                  <p className="text-[10px] text-muted-foreground">{paidPeriodsNormal} {periodLabel}s paid</p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-xs text-muted-foreground">Remaining (full contract)</p>
@@ -614,7 +665,22 @@ export default function LoanDetail() {
                       <p className="text-sm font-medium">
                         {pp.date ? formatDate(pp.date) : "Date not set"}
                       </p>
-                      <p className="text-xs text-muted-foreground">Part payment #{i + 1}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Part payment #{i + 1}
+                        {(() => {
+                          const ts = ((loan as any).partPaymentTimestamps as string[] | undefined)?.[i];
+                          if (!ts) return null;
+                          return (
+                            <span className="ml-1">
+                              · Recorded {new Date(ts).toLocaleString("en-IN", {
+                                day: "2-digit", month: "short", year: "numeric",
+                                hour: "2-digit", minute: "2-digit", hour12: true,
+                                timeZone: "Asia/Kolkata",
+                              })}
+                            </span>
+                          );
+                        })()}
+                      </p>
                     </div>
                     <div className="font-bold font-numeric text-emerald-700 dark:text-emerald-400">
                       {pp.amount > 0 ? formatCurrency(pp.amount) : "—"}
@@ -629,6 +695,54 @@ export default function LoanDetail() {
                     </span>
                   </div>
                 )}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
+      {/* Activity Log */}
+      {(() => {
+        const activityLog = ((loan as any).activityLog as string[] | undefined) ?? [];
+        if (activityLog.length === 0) return null;
+        const entries = activityLog
+          .map(e => {
+            const i = e.indexOf("~");
+            if (i === -1) return null;
+            const date = new Date(e.slice(0, i));
+            if (isNaN(date.getTime())) return null;
+            return { label: e.slice(i + 1), date };
+          })
+          .filter((e): e is { label: string; date: Date } => e !== null)
+          .sort((a, b) => b.date.getTime() - a.date.getTime());
+        if (entries.length === 0) return null;
+        return (
+          <Card className="shadow-sm border-border/60">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                Activity Log
+              </CardTitle>
+              <CardDescription>All recorded actions on this loan, newest first.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="relative pl-6">
+                <div className="absolute left-2 top-1 bottom-1 w-px bg-border" />
+                <div className="space-y-4">
+                  {entries.map((entry, i) => (
+                    <div key={i} className="relative">
+                      <div className="absolute -left-[22px] top-1 h-3 w-3 rounded-full border-2 border-primary/50 bg-background" />
+                      <p className="text-sm font-medium leading-snug">{entry.label}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {entry.date.toLocaleString("en-IN", {
+                          day: "2-digit", month: "short", year: "numeric",
+                          hour: "2-digit", minute: "2-digit", hour12: true,
+                          timeZone: "Asia/Kolkata",
+                        })}
+                      </p>
+                    </div>
+                  ))}
+                </div>
               </div>
             </CardContent>
           </Card>

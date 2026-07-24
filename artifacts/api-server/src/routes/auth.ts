@@ -52,6 +52,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       name: "Admin",
       phone,
     });
+    res.clearCookie(SESSION_COOKIE, { path: "/" });
     res.cookie(SESSION_COOKIE, token, COOKIE_OPTIONS);
     res.json(
       LoginResponse.parse({
@@ -77,6 +78,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     name: borrower.name,
     phone,
   });
+  res.clearCookie(SESSION_COOKIE, { path: "/" });
   res.cookie(SESSION_COOKIE, token, COOKIE_OPTIONS);
   res.json(
     LoginResponse.parse({

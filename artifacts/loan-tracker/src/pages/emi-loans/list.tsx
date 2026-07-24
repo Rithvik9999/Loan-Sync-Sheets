@@ -16,7 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus, Search, ChevronRight, CalendarClock, CheckSquare, CheckCircle2, Loader2, CalendarRange, Banknote } from "lucide-react";
+import { Plus, Search, ChevronRight, CalendarClock, CheckSquare, CheckCircle2, Loader2, CalendarRange, Banknote, Archive } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
@@ -34,8 +34,23 @@ function EmiStatusBadge({ status }: { status: string }) {
       return <Badge variant="success">Clear</Badge>;
     case "Temp":
       return <Badge variant="outline" className="border-amber-200 text-amber-800 bg-amber-50">Temp</Badge>;
+    case "Archived":
+      return <Badge variant="outline" className="border-slate-300 text-slate-500 bg-slate-50">Archived</Badge>;
     default:
       return <Badge variant="outline">{status}</Badge>;
+  }
+}
+
+async function archiveEmiLoan(id: string): Promise<void> {
+  const res = await fetch(`/api/emi-loans/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status: "Archived" }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to archive EMI loan");
   }
 }
 
@@ -62,7 +77,7 @@ function BulkMarkPaidDialog({
   const handleConfirm = async () => {
     setIsPending(true);
     try {
-      await Promise.all(loans.map((l) => markEmiLoanMonthlyPaid(l.id, paidDate)));
+      await Promise.all(loans.map((l) => markEmiLoanMonthlyPaid(l.emiId ?? l.id, paidDate)));
       queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
       toast({
         title: `${loans.length} EMI payment${loans.length !== 1 ? "s" : ""} recorded`,
@@ -185,8 +200,9 @@ function RecordEmiPaymentInlineDialog({
     }
     setIsPending(true);
     try {
+      const emiKey = loan.emiId ?? loan.id;
       if (markClear) {
-        const res = await fetch(`/api/emi-loans/${loan.id}`, {
+        const res = await fetch(`/api/emi-loans/${emiKey}`, {
           method: "PATCH",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -194,7 +210,7 @@ function RecordEmiPaymentInlineDialog({
         });
         if (!res.ok) throw new Error((await res.json()).error || "Failed");
       } else {
-        const res = await fetch(`/api/emi-loans/${loan.id}/pay`, {
+        const res = await fetch(`/api/emi-loans/${emiKey}/pay`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -283,7 +299,10 @@ export default function EmiLoansList() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkPaidOpen, setBulkPaidOpen] = useState(false);
+  const [bulkArchivePending, setBulkArchivePending] = useState(false);
   const [payLoan, setPayLoan] = useState<EmiLoan | null>(null);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const { data: loans, isLoading } = useQuery<EmiLoan[]>({
     queryKey: EMI_LOANS_QUERY_KEY,
@@ -318,7 +337,9 @@ export default function EmiLoansList() {
         .filter((l) => {
           const nameMatch = l.name.toLowerCase().includes(search.toLowerCase());
           const statusMatch =
-            statusFilter === "all" ? l.status !== "Clear" : l.status === statusFilter;
+            statusFilter === "all"
+              ? l.status !== "Clear" && l.status !== "Archived"
+              : l.status === statusFilter;
           return nameMatch && statusMatch;
         })
         .filter((l) => {
@@ -345,7 +366,7 @@ export default function EmiLoansList() {
 
   const toggleAll = () => {
     if (!filtered) return;
-    const ids = filtered.map((l) => l.id);
+    const ids = filtered.map((l) => l.emiId ?? l.id);
     const allSelected = ids.every((id) => selected.has(id));
     if (allSelected) {
       setSelected(new Set());
@@ -355,8 +376,27 @@ export default function EmiLoansList() {
   };
 
   const [, setLocation] = useLocation();
-  const selectedLoans = (filtered ?? []).filter((l) => selected.has(l.id));
-  const pendingSelected = selectedLoans.filter((l) => l.status !== "Clear");
+  const selectedLoans = (filtered ?? []).filter((l) => selected.has(l.emiId ?? l.id));
+  const pendingSelected = selectedLoans.filter((l) => l.status !== "Clear" && l.status !== "Archived");
+  const archivableSelected = selectedLoans.filter((l) => l.status !== "Clear" && l.status !== "Archived");
+
+  const handleBulkArchive = async () => {
+    if (archivableSelected.length === 0) return;
+    setBulkArchivePending(true);
+    try {
+      await Promise.all(archivableSelected.map((l) => archiveEmiLoan(l.emiId ?? l.id)));
+      queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
+      toast({
+        title: `${archivableSelected.length} EMI loan${archivableSelected.length !== 1 ? "s" : ""} archived`,
+        description: "Archived loans are hidden from the active list. Use the Archived filter to view them.",
+      });
+      setSelected(new Set());
+    } catch {
+      toast({ variant: "destructive", title: "Error", description: "Some loans could not be archived. Please retry." });
+    } finally {
+      setBulkArchivePending(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -383,6 +423,20 @@ export default function EmiLoansList() {
             <Button variant="outline" size="sm" onClick={() => setSelected(new Set())}>
               Clear
             </Button>
+            {archivableSelected.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-slate-400 text-slate-700 hover:bg-slate-50"
+                onClick={handleBulkArchive}
+                disabled={bulkArchivePending}
+              >
+                {bulkArchivePending
+                  ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  : <Archive className="mr-1.5 h-3.5 w-3.5" />}
+                Archive {archivableSelected.length}
+              </Button>
+            )}
             {pendingSelected.length > 0 && (
               <Button
                 size="sm"
@@ -420,6 +474,7 @@ export default function EmiLoansList() {
                 <SelectItem value="Pending">Pending</SelectItem>
                 <SelectItem value="Temp">Temp</SelectItem>
                 <SelectItem value="Clear">Clear</SelectItem>
+                <SelectItem value="Archived">Archived</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -472,7 +527,7 @@ export default function EmiLoansList() {
                 <TableRow>
                   <TableHead className="w-10">
                     <Checkbox
-                      checked={filtered.length > 0 && filtered.every((l) => selected.has(l.id))}
+                      checked={filtered.length > 0 && filtered.every((l) => selected.has(l.emiId ?? l.id))}
                       onCheckedChange={toggleAll}
                       aria-label="Select all"
                     />
@@ -495,13 +550,13 @@ export default function EmiLoansList() {
                   return (
                     <TableRow
                       key={loan.id}
-                      className={`group cursor-pointer ${selected.has(loan.id) ? "bg-primary/5" : ""}`}
-                      onClick={() => setLocation(`/emi-loans/${loan.id}`)}
+                      className={`group cursor-pointer ${selected.has(loan.emiId ?? loan.id) ? "bg-primary/5" : ""}`}
+                      onClick={() => setLocation(`/emi-loans/${loan.emiId ?? loan.id}`)}
                     >
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <Checkbox
-                          checked={selected.has(loan.id)}
-                          onCheckedChange={() => toggleRow(loan.id)}
+                          checked={selected.has(loan.emiId ?? loan.id)}
+                          onCheckedChange={() => toggleRow(loan.emiId ?? loan.id)}
                           aria-label={`Select ${loan.name}`}
                         />
                       </TableCell>
@@ -537,7 +592,7 @@ export default function EmiLoansList() {
                             </Button>
                           )}
                           <Button variant="ghost" size="icon" asChild>
-                            <Link href={`/emi-loans/${loan.id}`}>
+                            <Link href={`/emi-loans/${loan.emiId ?? loan.id}`}>
                               <ChevronRight className="h-4 w-4" />
                               <span className="sr-only">View Details</span>
                             </Link>

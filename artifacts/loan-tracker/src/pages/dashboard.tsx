@@ -6,6 +6,7 @@ import {
   getGetDashboardSummaryQueryKey,
   getGetRecentActivityQueryKey,
   getListLoansQueryKey,
+  type Loan,
 } from "@workspace/api-client-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import {
@@ -26,14 +27,19 @@ import {
   Clock,
   CheckCircle2,
   TrendingUp,
+  Banknote,
+  XCircle,
+  AlertTriangle,
+  CalendarClock,
+  Loader2,
 } from "lucide-react";
 import { Link } from "@/components/ui/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LoanStatusBadge } from "@/components/status-badges";
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { fetchEmiLoans, EmiLoan } from "./emi-loans/components/emi-loan-form-dialog";
+import { useState, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchEmiLoans, EmiLoan, markEmiLoanMonthlyPaid, EMI_LOANS_QUERY_KEY } from "./emi-loans/components/emi-loan-form-dialog";
 import {
   Table,
   TableBody,
@@ -42,6 +48,433 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { format as dateFnsFormat, differenceInCalendarDays } from "date-fns";
+import { useToast } from "@/hooks/use-toast";
+import { RepayItem, buildRepaymentItems } from "./portal";
+
+// ─── Admin Collection Popup ───────────────────────────────────────────────────
+
+/** Dismissed flag resets on hard page reload (module re-evaluation). */
+let adminPopupDismissedThisLoad = false;
+
+/** Portal RepayItem augmented with borrower name for admin display. */
+type AdminRepayItem = RepayItem & { name: string };
+
+/**
+ * Derives the payment frequency from a RepayItem's key string.
+ * buildRepaymentItems embeds the frequency in the key prefix.
+ */
+function frequencyFromKey(key: string): "daily" | "weekly" | "bimonthly" | "monthly" {
+  if (key.includes("daily")) return "daily";
+  if (key.includes("weekly")) return "weekly";
+  if (key.includes("bimonthly")) return "bimonthly";
+  return "monthly";
+}
+
+/**
+ * Build admin collection items by running buildRepaymentItems over ALL
+ * non-Archived loans and EMIs, then attaching each borrower's name.
+ * This mirrors exactly what each borrower sees in their portal banner.
+ */
+function buildAdminItems(
+  allLoans: Loan[] | undefined,
+  emiLoans: EmiLoan[] | undefined,
+): AdminRepayItem[] {
+  const now = new Date();
+  const filteredLoans = (allLoans ?? []).filter(l => l.status !== "Archived");
+  const filteredEmi = (emiLoans ?? []).filter(e => e.status !== "Archived");
+
+  const items = buildRepaymentItems(filteredLoans, filteredEmi);
+
+  // Keep overdue items + items due within 7 days
+  const relevant = items.filter(item => {
+    if (item.isOverdue) return true;
+    if (!item.dueDate) return false;
+    const daysUntil = differenceInCalendarDays(item.dueDate, now);
+    return daysUntil >= 0 && daysUntil <= 7;
+  });
+
+  // Attach borrower name from the raw loan/EMI arrays
+  return relevant.map(item => {
+    let name = "";
+    if (item.type === "emi") {
+      const emi = filteredEmi.find(e => e.id === item.id || (e as any).emiId === item.loanId);
+      name = emi?.name ?? item.loanId ?? item.id;
+    } else {
+      const loan = filteredLoans.find(l => l.id === item.id || l.loanId === item.loanId);
+      name = loan?.name ?? item.loanId ?? item.id;
+    }
+    return { ...item, name };
+  });
+}
+
+
+async function recordAdminPayment(item: AdminRepayItem, date: string): Promise<void> {
+  const freq = frequencyFromKey(item.key);
+
+  if (item.type === "emi") {
+    if (freq === "monthly") {
+      await markEmiLoanMonthlyPaid(item.id, date, item.outstanding);
+    } else {
+      const freqCode = freq === "daily" ? "D" : freq === "weekly" ? "W" : "BM";
+      const res = await fetch(`/api/emi-loans/${item.id}/pay-partial`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, amount: item.outstanding, frequency: freqCode }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Failed" }));
+        throw new Error(err.error || "Failed to record payment");
+      }
+    }
+  } else if (freq === "daily" || freq === "weekly") {
+    // Daily/weekly regular loans: period-count is tracked via col S (paid).
+    // The part-payment endpoint only writes col Q (partPayment), so it never
+    // updates l.paid — the popup item would never clear. Instead, fetch the
+    // current paid value and PATCH it upward, mirroring handleQuickPay on the
+    // detail page.
+    const loanRes = await fetch(`/api/loans/${item.id}`, { credentials: "include" });
+    if (!loanRes.ok) throw new Error("Could not fetch loan details");
+    const loan = await loanRes.json();
+    const currentPaid = typeof loan.paid === "number" ? loan.paid : 0;
+    const patchRes = await fetch(`/api/loans/${item.id}`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paid: currentPaid + item.outstanding, dateOfPartPayment: date }),
+    });
+    if (!patchRes.ok) {
+      const err = await patchRes.json().catch(() => ({ error: "Failed" }));
+      throw new Error(err.error || "Failed to record payment");
+    }
+  } else {
+    // One-time (monthly) loan — record the part-payment then mark as Clear.
+    const res = await fetch(`/api/loans/${item.id}/part-payment`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: item.outstanding, date }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed" }));
+      throw new Error(err.error || "Failed to record payment");
+    }
+    // Mark the loan as Clear now that the full expected amount has been collected
+    const clearRes = await fetch(`/api/loans/${item.id}`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "Clear" }),
+    });
+    if (!clearRes.ok) {
+      const err = await clearRes.json().catch(() => ({ error: "Failed" }));
+      throw new Error(err.error || "Failed to mark loan as Clear");
+    }
+  }
+}
+
+function AdminPayDialog({
+  item, open, onOpenChange, onDone,
+}: {
+  item: AdminRepayItem; open: boolean;
+  onOpenChange: (v: boolean) => void; onDone: () => void;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [date, setDate] = useState(dateFnsFormat(new Date(), "yyyy-MM-dd"));
+  const [isPending, setIsPending] = useState(false);
+
+  const handleConfirm = async () => {
+    setIsPending(true);
+    try {
+      await recordAdminPayment(item, date);
+      queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: getListLoansQueryKey() });
+      toast({ title: "Payment recorded", description: `${item.name} — ₹${item.outstanding.toLocaleString("en-IN")} on ${date}` });
+      onDone();
+      onOpenChange(false);
+    } catch (err) {
+      toast({ variant: "destructive", title: "Error", description: err instanceof Error ? err.message : "Failed." });
+    } finally {
+      setIsPending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-xs">
+        <DialogHeader>
+          <DialogTitle>Record Payment</DialogTitle>
+          <DialogDescription>{item.name}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-1">
+          <div className="rounded-lg bg-muted/40 border px-4 py-3 space-y-0.5">
+            <p className="text-xs text-muted-foreground">{item.label}</p>
+            <p className="font-bold font-numeric text-lg">₹{item.outstanding.toLocaleString("en-IN")}</p>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Date</label>
+            <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+          </div>
+        </div>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>Cancel</Button>
+          <Button className="bg-emerald-700 hover:bg-emerald-800 text-white" onClick={handleConfirm} disabled={isPending || !date}>
+            {isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+            Collect
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AdminBulkPayDialog({
+  items, open, onOpenChange, onDone,
+}: {
+  items: AdminRepayItem[]; open: boolean;
+  onOpenChange: (v: boolean) => void; onDone: () => void;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [date, setDate] = useState(dateFnsFormat(new Date(), "yyyy-MM-dd"));
+  const [isPending, setIsPending] = useState(false);
+  const total = items.reduce((s, i) => s + i.outstanding, 0);
+
+  const handleConfirm = async () => {
+    setIsPending(true);
+    try {
+      await Promise.all(items.map(item => recordAdminPayment(item, date)));
+      queryClient.invalidateQueries({ queryKey: EMI_LOANS_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: getListLoansQueryKey() });
+      toast({
+        title: `${items.length} payment${items.length !== 1 ? "s" : ""} recorded`,
+        description: `Total ₹${total.toLocaleString("en-IN")} collected on ${date}.`,
+      });
+      onDone();
+      onOpenChange(false);
+    } catch (err) {
+      toast({ variant: "destructive", title: "Error", description: err instanceof Error ? err.message : "Some payments failed. Please retry." });
+    } finally {
+      setIsPending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[440px]">
+        <DialogHeader>
+          <DialogTitle>Collect {items.length} Payment{items.length !== 1 ? "s" : ""}</DialogTitle>
+          <DialogDescription>
+            Records payments for all selected items. Daily/weekly/bimonthly record a partial payment; monthly EMIs advance to the next instalment.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Date</label>
+            <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+          </div>
+          <div className="rounded-lg border bg-muted/30 divide-y max-h-48 overflow-y-auto">
+            {items.map(item => (
+              <div key={item.key} className="flex items-center justify-between px-3 py-2 text-sm">
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium truncate block">{item.name}</span>
+                  <span className="text-[10px] text-muted-foreground truncate block">{item.label}</span>
+                </div>
+                <span className="font-numeric font-semibold shrink-0 ml-3">₹{item.outstanding.toLocaleString("en-IN")}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-between rounded-lg bg-primary/5 border border-primary/20 px-4 py-3">
+            <span className="font-semibold text-sm">Total</span>
+            <span className="font-bold font-numeric text-lg">₹{total.toLocaleString("en-IN")}</span>
+          </div>
+        </div>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>Cancel</Button>
+          <Button
+            className="bg-emerald-700 hover:bg-emerald-800 text-white"
+            onClick={handleConfirm}
+            disabled={isPending || !date || items.length === 0}
+          >
+            {isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Banknote className="mr-1.5 h-4 w-4" />}
+            Collect All
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AdminCollectionPopup({ items }: { items: AdminRepayItem[] }) {
+  const [dismissed, setDismissed] = useState(() => adminPopupDismissedThisLoad);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [payItem, setPayItem] = useState<AdminRepayItem | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+
+  if (dismissed || items.length === 0) return null;
+
+  const dismiss = () => { adminPopupDismissedThisLoad = true; setDismissed(true); };
+
+  const toggle = (key: string) =>
+    setSelected(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; });
+
+  const allSelected = items.length > 0 && items.every(i => selected.has(i.key));
+  const selectedItems = items.filter(i => selected.has(i.key));
+  const hasOverdue = items.some(i => i.isOverdue);
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={dismiss} />
+
+      {/* Popup card */}
+      <div
+        className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[calc(100%-2rem)] max-w-sm rounded-2xl border border-border bg-background shadow-2xl overflow-hidden flex flex-col"
+        style={{ maxHeight: "85dvh" }}
+      >
+        {/* Header */}
+        <div className={`flex items-center justify-between px-4 py-3 border-b shrink-0 ${hasOverdue ? "bg-destructive/5" : "bg-amber-50"}`}>
+          <div className="flex items-center gap-2">
+            <CalendarClock className={`h-4 w-4 shrink-0 ${hasOverdue ? "text-destructive" : "text-amber-600"}`} />
+            <span className="font-semibold text-sm">Today's Collections</span>
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${hasOverdue ? "bg-destructive text-white" : "bg-amber-200 text-amber-800"}`}>
+              {items.length}
+            </span>
+          </div>
+          <button
+            onClick={dismiss}
+            className="rounded-full p-1.5 hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Dismiss"
+          >
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Section labels + items — two sections only: Overdue and Coming Up */}
+        <div className="overflow-y-auto flex-1 divide-y divide-border/40">
+          {(["overdue", "upcoming"] as const).map(section => {
+            const sectionItems = items.filter(i => section === "overdue" ? i.isOverdue : !i.isOverdue);
+            if (sectionItems.length === 0) return null;
+            const sectionLabel = section === "overdue" ? "Overdue" : "Coming Up (next 7 days)";
+            const sectionColor = section === "overdue"
+              ? "bg-destructive/10 text-destructive"
+              : "bg-blue-50 text-blue-700";
+            return (
+              <div key={section}>
+                <div className={`px-3 py-1 text-[10px] font-bold uppercase tracking-wider ${sectionColor}`}>
+                  {sectionLabel}
+                </div>
+                {sectionItems.map(item => (
+                  <div
+                    key={item.key}
+                    className={`flex items-center gap-3 px-3 py-2.5 border-t border-border/30 ${
+                      section === "overdue" ? "bg-destructive/[0.03]" : "bg-blue-50/10"
+                    }`}
+                  >
+                    <Checkbox
+                      checked={selected.has(item.key)}
+                      onCheckedChange={() => toggle(item.key)}
+                      className="shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        {section === "overdue"
+                          ? <AlertTriangle className="h-3 w-3 text-destructive shrink-0" />
+                          : <CalendarClock className="h-3 w-3 text-blue-500 shrink-0" />}
+                        <p className="text-xs font-semibold truncate">{item.name}</p>
+                      </div>
+                      <div className="pl-4 mt-0.5 space-y-0.5">
+                        <p className="text-[10px] text-muted-foreground truncate">{item.label}</p>
+                        {item.subLabel && (
+                          <p className={`text-[10px] font-medium ${section === "overdue" ? "text-destructive" : "text-blue-600"}`}>
+                            {item.subLabel}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <span className={`font-bold text-sm font-numeric ${
+                        section === "overdue" ? "text-destructive" : "text-blue-700"
+                      }`}>
+                        {formatCurrency(item.outstanding)}
+                      </span>
+                      <Button
+                        size="sm"
+                        className="h-6 text-[11px] px-2 bg-emerald-700 hover:bg-emerald-800 text-white"
+                        onClick={() => setPayItem(item)}
+                      >
+                        <Banknote className="h-3 w-3 mr-1" />
+                        Collect
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center gap-2 px-3 py-2.5 border-t bg-muted/10 shrink-0">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs h-7 px-2"
+            onClick={() => setSelected(allSelected ? new Set() : new Set(items.map(i => i.key)))}
+          >
+            {allSelected ? "Deselect All" : "Select All"}
+          </Button>
+          <div className="flex-1" />
+          {selectedItems.length > 0 && (
+            <Button
+              size="sm"
+              className="h-7 text-xs bg-emerald-700 hover:bg-emerald-800 text-white"
+              onClick={() => setBulkOpen(true)}
+            >
+              <Banknote className="h-3 w-3 mr-1" />
+              Collect {selectedItems.length}
+            </Button>
+          )}
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={dismiss}>
+            Dismiss
+          </Button>
+        </div>
+      </div>
+
+      {payItem && (
+        <AdminPayDialog
+          item={payItem}
+          open={!!payItem}
+          onOpenChange={open => { if (!open) setPayItem(null); }}
+          onDone={() => {
+            setSelected(prev => { const s = new Set(prev); s.delete(payItem.key); return s; });
+            setPayItem(null);
+          }}
+        />
+      )}
+      <AdminBulkPayDialog
+        items={selectedItems}
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        onDone={() => setSelected(new Set())}
+      />
+    </>
+  );
+}
+
+// ─── Dashboard Page ───────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const { isLoaded, role } = useAppAuth();
@@ -81,6 +514,12 @@ export default function Dashboard() {
   });
 
   const now = useMemo(() => new Date(), []);
+
+  // ── Admin collection popup items ──────────────────────────────────────────
+  const adminItems = useMemo(
+    () => buildAdminItems(allLoans, emiLoans),
+    [allLoans, emiLoans],
+  );
 
   const overdueLoans = useMemo(
     () =>
@@ -139,10 +578,16 @@ export default function Dashboard() {
       const row = getOrCreate(key);
       row.count++;
       row.expected += (loan.interest ?? 0) + (loan.flatFee ?? 0);
-      // Gained = interest+fees actually collected (paid − principal), floored at 0
-      if ((loan.paid ?? 0) > 0) {
+      // Gained = profit actually collected.
+      // Prefer the sheet-computed profit field (authoritative, accounts for discounts).
+      // For cleared loans without a profit field, fall back to paid − principal.
+      // For pending loans with partial payments, the fallback gives a rough estimate.
+      if (loan.profit != null && loan.profit > 0) {
+        row.gained += loan.profit;
+      } else if (loan.status === "Clear" && (loan.paid ?? 0) > 0) {
         row.gained += Math.max((loan.paid ?? 0) - loan.principal, 0);
       }
+      // Pending loans with no sheet profit: don't count as gained yet.
     }
 
     // EMI loans
@@ -192,6 +637,9 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8">
+      {/* Collection popup — shown once per page load when there are EMI payments due */}
+      {!isLoadingEmi && <AdminCollectionPopup items={adminItems} />}
+
       <div>
         <h1 className="text-3xl font-semibold tracking-tight text-foreground font-serif">
           Portfolio Overview

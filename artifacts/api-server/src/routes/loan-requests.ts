@@ -12,6 +12,7 @@ import * as borrowersRepo from "../lib/repositories/borrowers";
 import * as loansRepo from "../lib/repositories/loans";
 import { attachBorrowerId } from "../lib/repositories/loans";
 import * as emiSheet from "../lib/emiSheet";
+import { appendLoanActivity } from "../lib/heatMapSheet";
 import { extractPhoneFromWhatsapp, normalizePhone, normalizeName } from "../lib/authTokens";
 
 const router: IRouter = Router();
@@ -43,7 +44,13 @@ function validateCreateLoanRequest(body: unknown): { ok: true; data: CreateLoanR
   return { ok: true, data: { amount, tenureDays, tenureMonths, type, purpose, upiId } };
 }
 
-interface PayLoanRequestData { discount: number; transactionDate?: string; notes?: string | null; }
+interface PayLoanRequestData {
+  discount: number;
+  transactionDate?: string;
+  notes?: string | null;
+  /** Optional principal override — admin can disburse a different amount than what was requested. */
+  overrideAmount?: number;
+}
 
 function validatePayLoanRequest(body: unknown): { ok: true; data: PayLoanRequestData } | { ok: false; error: string } {
   if (!body || typeof body !== "object") return { ok: true, data: { discount: 0 } };
@@ -51,7 +58,11 @@ function validatePayLoanRequest(body: unknown): { ok: true; data: PayLoanRequest
   const discount = Math.max(0, Number(b.discount) || 0);
   const transactionDate = typeof b.transactionDate === "string" ? b.transactionDate : undefined;
   const notes = typeof b.notes === "string" ? b.notes : null;
-  return { ok: true, data: { discount, transactionDate, notes } };
+  const overrideAmount = b.overrideAmount != null ? Number(b.overrideAmount) : undefined;
+  if (overrideAmount !== undefined && (!Number.isFinite(overrideAmount) || overrideAmount < 0.01)) {
+    return { ok: false, error: "overrideAmount must be a positive number" };
+  }
+  return { ok: true, data: { discount, transactionDate, notes, overrideAmount } };
 }
 
 router.get("/loan-requests", async (req, res): Promise<void> => {
@@ -59,7 +70,7 @@ router.get("/loan-requests", async (req, res): Promise<void> => {
   const requests = await loanRequestsRepo.listLoanRequests();
   const filtered =
     info.role === "borrower"
-      ? requests.filter((r) => r.borrowerId === info.borrowerId)
+      ? requests.filter((r) => r.borrowerId != null && r.borrowerId === info.borrowerId)
       : requests;
   res.json(ListLoanRequestsResponse.parse(filtered));
 });
@@ -176,8 +187,9 @@ router.post(
       return;
     }
 
-    const { discount, transactionDate, notes } = parsed.data;
-    const principal = loanRequest.amount;
+    const { discount, transactionDate, notes, overrideAmount } = parsed.data;
+    // Admin may specify a different principal than what was originally requested.
+    const principal = overrideAmount ?? loanRequest.amount;
 
     // Create the loan row in the Heat Map sheet with Pending status.
     // The borrower still owes this loan — marking the request as "paid" means
@@ -202,16 +214,24 @@ router.post(
 
     const borrowers = await borrowersRepo.listBorrowers();
     res.status(201).json({ loan: attachBorrowerId(loan, borrowers) });
+
+    // Append a second activity entry noting this loan originated from a request approval.
+    appendLoanActivity(loan.rowNumber, `Disbursed via request approval ₹${principal.toLocaleString("en-IN")}`).catch(() => {});
   },
 );
 
-// Update discount on an already-approved loan request and patch the linked loan.
+// Update discount (and optionally principal) on an already-approved loan request.
 router.patch(
   "/loan-requests/:id/update-approval",
   requireStaff,
   async (req, res): Promise<void> => {
     const id = String(req.params.id);
     const discount = Math.max(0, Number(req.body?.discount) || 0);
+    // Optional: admin can change the principal on the linked loan after approval.
+    const rawAmount = req.body?.amount != null ? Number(req.body.amount) : null;
+    const newPrincipal = rawAmount != null && Number.isFinite(rawAmount) && rawAmount >= 0.01
+      ? rawAmount
+      : null;
 
     const all = await loanRequestsRepo.listLoanRequests();
     const loanRequest = all.find((r) => r.id === id);
@@ -224,10 +244,11 @@ router.patch(
       return;
     }
 
-    // Patch the linked loan's discountOrCharges so the sheet re-computes finalAmount.
+    // Patch the linked loan — discountOrCharges always, principal when provided.
     if (loanRequest.loanId) {
       await loansRepo.updateLoan(loanRequest.loanId, {
         discountOrCharges: discount > 0 ? -discount : 0,
+        ...(newPrincipal != null ? { principal: newPrincipal } : {}),
       });
     }
 
@@ -276,7 +297,7 @@ router.delete(
       // Borrowers may only cancel their own Pending requests
       const all = await loanRequestsRepo.listLoanRequests();
       const found = all.find((r) => r.id === id);
-      if (!found || found.borrowerId !== info.borrowerId) {
+      if (!found || found.borrowerId == null || found.borrowerId !== info.borrowerId) {
         res.status(403).json({ error: "Cannot delete this request" });
         return;
       }
