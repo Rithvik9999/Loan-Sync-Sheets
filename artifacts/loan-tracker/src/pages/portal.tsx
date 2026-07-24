@@ -1504,7 +1504,8 @@ export function buildRepaymentItems(
     }
 
     // ── Standard (lump-sum) loan ──
-    const outstanding = Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0);
+    // Use the sheet's "Final amount calculation" column directly — it already accounts for partial payments.
+    const outstanding = Math.max(l.finalAmount ?? 0, 0);
     if (outstanding <= 0) continue;
     let dueDate: Date | null = null;
     if (l.returnDate) {
@@ -2047,7 +2048,8 @@ function ComingUpTab({ items }: { items: RepayItem[] }) {
 
 function LoanCard({ loan }: { loan: Loan }) {
   const [repayOpen, setRepayOpen] = useState(false);
-  const outstanding = (loan.finalAmount ?? 0) - (loan.paid ?? 0);
+  // Use the sheet's "Final amount calculation" column directly — it already accounts for partial payments.
+  const outstanding = loan.finalAmount ?? 0;
 
   const dueDate = loan.returnDate
     ? new Date(loan.returnDate)
@@ -2970,11 +2972,11 @@ function LoansTab({
 
   const selectedItems = dateFilteredLoans.filter((l) => selected.has(l.id));
   const bulkTotal = selectedItems.reduce(
-    (s, l) => s + Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0),
+    (s, l) => s + Math.max(l.finalAmount ?? 0, 0),
     0,
   );
   const bulkDiscountTotal = selectedItems.reduce((s, l) => {
-    const outstanding = Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0);
+    const outstanding = Math.max(l.finalAmount ?? 0, 0);
     const dueDate = l.returnDate
       ? new Date(l.returnDate)
       : l.transactionDate && l.tenureDays
