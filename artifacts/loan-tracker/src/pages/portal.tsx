@@ -1164,7 +1164,8 @@ const MONTHLY_PAYMENT_DAYS = [8, 15, 22, 30] as const;
  */
 const BIMONTHLY_PAYMENT_DAYS = [15, 30] as const;
 
-/** Count of 8/15/22/30 dates strictly after startDate and ≤ targetDate. */
+/** Count of 8/15/22/30 dates strictly after startDate and strictly before targetDate.
+ *  Today's payment date is NOT counted as elapsed — it is "due today", not yet overdue. */
 function countWeeklyPaymentDates(startDate: Date, targetDate: Date): number {
   let count = 0;
   const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
@@ -1175,7 +1176,7 @@ function countWeeklyPaymentDates(startDate: Date, targetDate: Date): number {
     for (const day of MONTHLY_PAYMENT_DAYS) {
       const d = new Date(year, month, day);
       if (d <= start) continue;
-      if (d > target) return count;
+      if (d >= target) return count;
       count++;
     }
     month++;
@@ -1389,13 +1390,16 @@ export function buildRepaymentItems(
         ? differenceInCalendarDays(returnDate, txDate)
         : daysElapsed;
       const periodsElapsedForOverdue = Math.max(elapsedCapped - 1, 0);
-      const paidNormal = Math.floor((l.paid ?? 0) / dailyAmt);
+      // Daily payments are tracked in partPayment (sum of stacked date entries).
+      // l.paid may hold unrelated or negative sheet-formula values — guard with Math.max.
+      const totalDailyPaid = Math.max((l.partPayment ?? 0), 0) + Math.max((l.paid ?? 0), 0);
+      const paidNormal = Math.floor(totalDailyPaid / dailyAmt);
       // Use fee-adjusted divisor when late: borrower may have paid the inflated
       // daily rate (dailyAmt × 1.02), so dividing by that gives the correct
       // number of periods settled. When on time, base rate is the right divisor.
       const isOnTimeLoan = paidNormal >= periodsElapsedForOverdue;
       const clearingAmtLoan = isOnTimeLoan ? dailyAmt : Math.ceil(dailyAmt * 1.02);
-      const paidPeriods = Math.floor((l.paid ?? 0) / clearingAmtLoan);
+      const paidPeriods = Math.floor(totalDailyPaid / clearingAmtLoan);
       const overdueDays = Math.max(periodsElapsedForOverdue - paidPeriods, 0);
 
       // todayCovered: paidNormal counts how many full ₹dailyAmt payments have been
@@ -1521,7 +1525,8 @@ export function buildRepaymentItems(
       d.setDate(d.getDate() + l.tenureDays);
       dueDate = d;
     }
-    const isOverdue = !!(dueDate && dueDate < now);
+    // Compare midnight-to-midnight: a loan due today is "upcoming", not overdue.
+    const isOverdue = !!(dueDate && dueDate < today);
     const daysUntilDue = dueDate
       ? Math.ceil((dueDate.getTime() - now.getTime()) / 86400000)
       : null;
@@ -1596,7 +1601,7 @@ export function buildRepaymentItems(
             const dueDateStr = `${yr}-${String(mo + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
             if (dueDateStr <= txDateStr) continue; // before loan start
             if (firstPaidDateStr && dueDateStr < firstPaidDateStr) continue; // before first payment
-            if (dueDateStr > todayStr) break done;
+            if (dueDateStr >= todayStr) break done; // today's due date is "due today", not yet overdue
             elapsed++;
           }
           mo++; if (mo > 11) { mo = 0; yr++; }
@@ -1681,7 +1686,7 @@ export function buildRepaymentItems(
             const dueDateStr = `${yr}-${String(mo + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
             if (dueDateStr <= txDateStr) continue;
             if (firstPaidDateStr && dueDateStr < firstPaidDateStr) continue;
-            if (dueDateStr > todayStr) break done;
+            if (dueDateStr >= todayStr) break done; // today's due date is "due today", not yet overdue
             elapsed++;
           }
           mo++; if (mo > 11) { mo = 0; yr++; }
@@ -1736,7 +1741,8 @@ export function buildRepaymentItems(
     const monthly = e.monthlyPayment ?? 0;
     if (monthly <= 0) continue;
     const dueDate = e.nextPaymentDate ? new Date(e.nextPaymentDate) : null;
-    const isOverdue = !!(dueDate && dueDate < now);
+    // Compare midnight-to-midnight: a payment due today is "upcoming", not overdue.
+    const isOverdue = !!(dueDate && dueDate < today);
     // Add 2%/day late fee when overdue (use pre-computed server lateFees, which equals monthly × 0.02 × lateDays)
     const emiLateFees = isOverdue ? (e.lateFees ?? 0) : 0;
     items.push({
