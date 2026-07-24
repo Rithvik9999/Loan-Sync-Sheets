@@ -5,10 +5,6 @@ import {
   GetLoanParams,
   UpdateLoanParams,
   DeleteLoanParams,
-  ListLoansResponse,
-  CreateLoanResponse,
-  GetLoanResponse,
-  UpdateLoanResponse,
 } from "@workspace/api-zod";
 import { attachRole, requireStaff } from "../middlewares/auth";
 import * as loansRepo from "../lib/repositories/loans";
@@ -60,7 +56,13 @@ router.get("/loans", async (req, res): Promise<void> => {
       ? forRole.filter((l) => l.status === status)
       : forRole;
 
-  res.json(ListLoansResponse.parse(filtered));
+  // Do NOT Zod-parse the list response — the schema has non-nullable
+  // transactionDate but the sheet can legitimately return null for legacy rows,
+  // which would throw a ZodError and make the endpoint return 500 for everyone.
+  // The EMI route uses the same pattern (plain res.json). Extra fields such as
+  // partPayments, perDayAddition, activityLog are intentionally kept because
+  // the detail page reads them via (loan as any) casts.
+  res.json(filtered);
 });
 
 /**
@@ -98,7 +100,7 @@ router.post("/loans", requireStaff, async (req, res): Promise<void> => {
   }
   const loan = await loansRepo.createLoan(parsed.data);
   const borrowers = await borrowersRepo.listBorrowers();
-  res.status(201).json(CreateLoanResponse.parse(attachBorrowerId(loan, borrowers)));
+  res.status(201).json(attachBorrowerId(loan, borrowers));
 });
 
 router.get("/loans/:id", async (req, res): Promise<void> => {
@@ -125,7 +127,9 @@ router.get("/loans/:id", async (req, res): Promise<void> => {
     }
   }
   const borrowers = await borrowersRepo.listBorrowers();
-  res.json(GetLoanResponse.parse(attachBorrowerId(loan, borrowers)));
+  // Plain res.json — no Zod parse to avoid ZodError on null transactionDate
+  // (same pattern as the list endpoint and the EMI route).
+  res.json(attachBorrowerId(loan, borrowers));
 });
 
 router.patch(
@@ -148,7 +152,7 @@ router.patch(
       return;
     }
     const borrowers = await borrowersRepo.listBorrowers();
-    res.json(UpdateLoanResponse.parse(attachBorrowerId(loan, borrowers)));
+    res.json(attachBorrowerId(loan, borrowers));
 
     // Fire-and-forget: append an activity entry based on what was patched
     const pd = parsed.data;
