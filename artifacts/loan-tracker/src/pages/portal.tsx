@@ -3423,7 +3423,7 @@ export default function Portal() {
   const totalOutstanding = useMemo(
     () =>
       activeLoans.reduce(
-        (sum, l) => sum + Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0),
+        (sum, l) => sum + Math.max(l.finalAmount ?? 0, 0),
         0,
       ) +
       activeEmi.reduce(

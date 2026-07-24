@@ -280,7 +280,7 @@ export default function BorrowersList() {
         // Accumulate active loan principal and outstanding dues
         if (loan.status !== "Clear") {
           existing.creditUsed += (loan.principal ?? 0);
-          existing.totalDue += Math.max((loan.finalAmount ?? 0) - (loan.paid ?? 0), 0);
+          existing.totalDue += Math.max(loan.finalAmount ?? 0, 0);
         }
       } else {
         const entry: BorrowerEntry = {
@@ -292,7 +292,7 @@ export default function BorrowersList() {
           creditLimit: null,
           loanCount: 1,
           creditUsed: loan.status !== "Clear" ? (loan.principal ?? 0) : 0,
-          totalDue: loan.status !== "Clear" ? Math.max((loan.finalAmount ?? 0) - (loan.paid ?? 0), 0) : 0,
+          totalDue: loan.status !== "Clear" ? Math.max(loan.finalAmount ?? 0, 0) : 0,
         };
         entries.push(entry);
         index(entry);
