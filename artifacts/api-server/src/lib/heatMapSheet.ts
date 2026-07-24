@@ -54,22 +54,23 @@ const COL = {
   TIMELY_RETURN: 3,
   TRANSACTION_DATE: 4,
   PRINCIPAL: 5,
-  TENURE_DAYS: 6,
-  WHATSAPP: 7,
-  STATUS: 8,
-  FLAT_FEE: 9,
-  INTEREST_PCT: 10,
-  INTEREST: 11,
-  DISCOUNT_OR_CHARGES: 12,
-  LATE_DAYS: 13,
-  LATE_FEES: 14,
-  FINAL_AMOUNT: 15,
-  PART_PAYMENT: 16,
-  DATE_PART_PAYMENT: 17,
-  PAID: 18,
-  PROFIT: 19,
-  NOTES: 21,
-  CREATED_AT: 22,             // col W — ISO datetime of loan creation
+  // Col G (index 6) is an extra blank column in the sheet — not mapped to any field.
+  TENURE_DAYS: 7,              // col H — input
+  WHATSAPP: 8,                 // col I — input (phone, sometimes with free-form notes)
+  STATUS: 9,                   // col J — input ("Pending" | "Clear" | "Temp" | "Archived")
+  FLAT_FEE: 10,                // col K — COMPUTED
+  INTEREST_PCT: 11,            // col L — COMPUTED
+  INTEREST: 12,                // col M — COMPUTED
+  DISCOUNT_OR_CHARGES: 13,     // col N — input (negative = discount, positive = charge)
+  LATE_DAYS: 14,               // col O — COMPUTED
+  LATE_FEES: 15,               // col P — COMPUTED
+  FINAL_AMOUNT: 16,            // col Q — COMPUTED (authoritative amount to collect)
+  PART_PAYMENT: 17,            // col R — input
+  DATE_PART_PAYMENT: 18,       // col S — input (date)
+  PAID: 19,                    // col T — input (total amount actually collected)
+  PROFIT: 20,                  // col U — COMPUTED
+  NOTES: 21,                   // col V — input (these columns were always at correct positions)
+  CREATED_AT: 22,              // col W — ISO datetime of loan creation
   PART_PAYMENT_TIMESTAMPS: 23, // col X — pipe-separated ISO datetimes for each part-payment
   ACTIVITY_LOG: 24,            // col Y — pipe-separated activity entries (ISO_timestamp~label)
 } as const;
