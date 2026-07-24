@@ -1501,7 +1501,8 @@ function buildRepaymentItems(
     }
 
     // ── Standard (lump-sum) loan ──
-    const outstanding = Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0);
+    // Use the sheet's "Final amount calculation" column directly — it already accounts for partial payments.
+    const outstanding = Math.max(l.finalAmount ?? 0, 0);
     if (outstanding <= 0) continue;
     let dueDate: Date | null = null;
     if (l.returnDate) {
@@ -2044,7 +2045,8 @@ function ComingUpTab({ items }: { items: RepayItem[] }) {
 
 function LoanCard({ loan }: { loan: Loan }) {
   const [repayOpen, setRepayOpen] = useState(false);
-  const outstanding = (loan.finalAmount ?? 0) - (loan.paid ?? 0);
+  // Use the sheet's "Final amount calculation" column directly — it already accounts for partial payments.
+  const outstanding = loan.finalAmount ?? 0;
 
   const dueDate = loan.returnDate
     ? new Date(loan.returnDate)
@@ -2590,7 +2592,7 @@ function MyEmiLoans({ emiLoans }: { emiLoans: EmiLoan[] }) {
                   </div>
                 </div>
                 <div className="p-4 space-y-0.5">
-                  <div className="text-xs text-muted-foreground">Instalments</div>
+                  <div className="text-xs text-muted-foreground">Instalments remaining</div>
                   <div className="text-base font-semibold">
                     {remainingDisplay}
                   </div>
