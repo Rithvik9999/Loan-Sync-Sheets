@@ -136,10 +136,13 @@ export function SharedLayout({ children }: { children: React.ReactNode }) {
       )}
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-5xl p-4 md:p-8 animate-in fade-in-50 duration-500">
+      <main className="flex-1 overflow-auto flex flex-col">
+        <div className="flex-1 mx-auto w-full max-w-5xl p-4 md:p-8 animate-in fade-in-50 duration-500">
           {children}
         </div>
+        <footer className="border-t px-4 py-2.5 text-center text-[10px] text-muted-foreground/50 bg-background/50">
+          🎮 This is a game — all names, amounts, and transactions are entirely fictional. No real money or real people are involved.
+        </footer>
       </main>
     </div>
   );

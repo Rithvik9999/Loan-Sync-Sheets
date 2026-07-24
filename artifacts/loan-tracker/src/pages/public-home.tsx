@@ -84,8 +84,11 @@ export default function Home() {
         </div>
       </main>
       
-      <footer className="py-8 text-center text-sm text-muted-foreground border-t">
-        <p>BorrowApp — Trust built on clarity.</p>
+      <footer className="py-8 text-center border-t space-y-2">
+        <p className="text-sm text-muted-foreground">BorrowApp — Trust built on clarity.</p>
+        <p className="text-xs text-muted-foreground/60 max-w-xl mx-auto px-4 leading-relaxed">
+          🎮 Just so we're clear — this is a game. Every name, amount, loan, and transaction you see here is completely made up. No real money, no real borrowers, no real lenders. If it looks alarmingly realistic, that's kind of the point. Don't lose sleep over it.
+        </p>
       </footer>
     </div>
   );
