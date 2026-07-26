@@ -1392,20 +1392,16 @@ export function buildRepaymentItems(
       const periodsElapsedForOverdue = Math.max(elapsedCapped - 1, 0);
       // Daily payments are tracked in partPayment (sum of stacked date entries).
       // l.paid may hold unrelated or negative sheet-formula values — guard with Math.max.
+      // Count paid periods by base rate only. Late fees are added on top of genuinely
+      // missed days via calcOverdueTotal — inflating the divisor here undercounts paid
+      // periods (e.g. 2 base-rate payments ÷ inflated rate = 1 period → shows 2 missed
+      // instead of 1 when the borrower caught up after a single miss).
       const totalDailyPaid = Math.max((l.partPayment ?? 0), 0) + Math.max((l.paid ?? 0), 0);
-      const paidNormal = Math.floor(totalDailyPaid / dailyAmt);
-      // Use fee-adjusted divisor when late: borrower may have paid the inflated
-      // daily rate (dailyAmt × 1.02), so dividing by that gives the correct
-      // number of periods settled. When on time, base rate is the right divisor.
-      const isOnTimeLoan = paidNormal >= periodsElapsedForOverdue;
-      const clearingAmtLoan = isOnTimeLoan ? dailyAmt : Math.ceil(dailyAmt * 1.02);
-      const paidPeriods = Math.floor(totalDailyPaid / clearingAmtLoan);
+      const paidPeriods = Math.floor(totalDailyPaid / dailyAmt);
       const overdueDays = Math.max(periodsElapsedForOverdue - paidPeriods, 0);
 
-      // todayCovered: paidNormal counts how many full ₹dailyAmt payments have been
-      // received. daysElapsed counts how many payment days have occurred (including today).
-      // If paidNormal >= daysElapsed, today's instalment is already covered.
-      const todayCovered = paidNormal >= daysElapsed;
+      // todayCovered: if paid periods >= days elapsed (including today), today is covered.
+      const todayCovered = paidPeriods >= daysElapsed;
 
       if (overdueDays > 0) {
         // Each missed day piles up with 2%/day late fee
