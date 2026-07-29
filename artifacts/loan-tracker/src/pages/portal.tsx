@@ -1618,6 +1618,8 @@ export function buildRepaymentItems(
       // remainingMonths drifts when borrowers skip/delay payments and does not reflect
       // how many instalments have actually been received.
       const wRemaining = Math.max(0, wTotal - wPaidCount);
+      // All instalments paid and nothing overdue — fully settled, don't show in portal.
+      if (wRemaining === 0 && overdueCount === 0) continue;
       const wProgress = ` · ${wRemaining}/${wTotal} instalments remaining`;
       if (overdueCount > 0) {
         // Use actual daysLate (calendar days since most recent due date) for the fee.
@@ -1697,6 +1699,8 @@ export function buildRepaymentItems(
         return t === "BM" || t === "BMM";
       }).length;
       const bmRemaining = Math.max(0, bmTotal - bmPaidCount);
+      // All instalments paid and nothing overdue — fully settled, don't show in portal.
+      if (bmRemaining === 0 && overdueCountBi === 0) continue;
       const bmProgress = ` · ${bmRemaining}/${bmTotal} instalments remaining`;
       if (overdueCountBi > 0) {
         const overdueTotal = calcOverdueTotal(biAmt, overdueCountBi, 15, Math.max(daysLateBi, 1));
