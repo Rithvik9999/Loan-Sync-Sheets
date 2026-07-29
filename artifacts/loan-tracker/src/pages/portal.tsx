@@ -1489,13 +1489,17 @@ export function buildRepaymentItems(
         });
       } else {
         const currentDue = getCurrentWeeklyPaymentDate(txDate, today);
-        const isDueToday = currentDue && differenceInCalendarDays(today, currentDue) === 0;
-        const nextDue = isDueToday ? currentDue! : getNextWeeklyPaymentDate(txDate, today);
+        const isDueToday = !!(currentDue && differenceInCalendarDays(today, currentDue) === 0);
+        // paidPayments > paymentsElapsed means today's instalment is already recorded
+        const todayAlreadyCovered = isDueToday && paidPayments > paymentsElapsed;
+        const nextDue = (isDueToday && !todayAlreadyCovered)
+          ? currentDue!
+          : getNextWeeklyPaymentDate(txDate, today);
         items.push({
           key: `loan-weekly-${l.id}`,
           id: l.id, loanId: l.loanId, type: "loan",
           label: `Weekly Payment — ₹${weeklyAmt.toLocaleString("en-IN")}/week`,
-          subLabel: isDueToday
+          subLabel: (isDueToday && !todayAlreadyCovered)
             ? "Due today"
             : nextDue
               ? `Next payment ${formatDate(nextDue.toISOString())}`
@@ -1576,7 +1580,9 @@ export function buildRepaymentItems(
         return { date: parts[0] ?? "", amount: Number(parts[1]) || 0 };
       }).filter(pe => pe.date.length >= 8);
 
-      const overdueCount = (() => {
+      // Hoist so the "today already covered" check below can reuse both values.
+      const totalPaidFromDates = weeklyPaidEntries.reduce((s, pe) => s + pe.amount, 0);
+      const { overdueCount, elapsedBeforeToday } = (() => {
         // Count how many 8/15/22/30 payment dates have elapsed since txDate.
         // Use date-string arithmetic (no timezone shift from new Date().toISOString()).
         const txDateStr = e.transactionDate ?? "";
@@ -1605,8 +1611,10 @@ export function buildRepaymentItems(
         // Cumulative: total paid ÷ weeklyAmt tells us how many periods are covered,
         // regardless of which specific window each payment falls in. A ₹5 000 payment
         // on July 15 covers 1 period whether or not it was made in the July-8 window.
-        const totalPaidFromDates = weeklyPaidEntries.reduce((s, pe) => s + pe.amount, 0);
-        return Math.max(elapsed - Math.floor(totalPaidFromDates / weeklyAmt), 0);
+        return {
+          overdueCount: Math.max(elapsed - Math.floor(totalPaidFromDates / weeklyAmt), 0),
+          elapsedBeforeToday: elapsed,
+        };
       })();
 
       const wTotal = Math.round(e.tenureMonths * 4);
@@ -1635,15 +1643,17 @@ export function buildRepaymentItems(
           earlyDiscount: 0,
         });
       } else {
-        const isDueToday = currentWeekDue && daysLate === 0;
-        const upcomingDue = isDueToday
+        const isDueToday = !!(currentWeekDue && daysLate === 0);
+        // today already covered if total paid ÷ weeklyAmt exceeds periods elapsed before today
+        const todayAlreadyCovered = isDueToday && Math.floor(totalPaidFromDates / weeklyAmt) > elapsedBeforeToday;
+        const upcomingDue = (isDueToday && !todayAlreadyCovered)
           ? currentWeekDue!
           : getNextWeeklyPaymentDate(txDate, today);
         items.push({
           key: `emi-weekly-${e.id}`,
           id: e.id, loanId: (e as any).emiId, type: "emi",
           label: `${formatCurrency(e.principal)} EMI (₹${weeklyAmt.toLocaleString("en-IN")}/week)`,
-          subLabel: (isDueToday
+          subLabel: ((isDueToday && !todayAlreadyCovered)
             ? "Due today"
             : upcomingDue
               ? `Next payment ${formatDate(upcomingDue.toISOString())}`
@@ -1670,7 +1680,8 @@ export function buildRepaymentItems(
         return { date: parts[0] ?? "", amount: Number(parts[1]) || 0 };
       }).filter(pe => pe.date.length >= 8);
 
-      const overdueCountBi = (() => {
+      const biTotalPaidFromDates = biPaidEntries.reduce((s, pe) => s + pe.amount, 0);
+      const { overdueCountBi, biElapsedBeforeToday } = (() => {
         const txDateStr = e.transactionDate ?? "";
         const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
         const firstPaidDateStr = biPaidEntries.length > 0
@@ -1689,8 +1700,10 @@ export function buildRepaymentItems(
           }
           mo++; if (mo > 11) { mo = 0; yr++; }
         }
-        const totalPaidFromDates = biPaidEntries.reduce((s, pe) => s + pe.amount, 0);
-        return Math.max(elapsed - Math.floor(totalPaidFromDates / biAmt), 0);
+        return {
+          overdueCountBi: Math.max(elapsed - Math.floor(biTotalPaidFromDates / biAmt), 0),
+          biElapsedBeforeToday: elapsed,
+        };
       })();
 
       const bmTotal = Math.round(e.tenureMonths * 2);
@@ -1715,15 +1728,17 @@ export function buildRepaymentItems(
           earlyDiscount: 0,
         });
       } else {
-        const isDueTodayBi = currentBiDue && daysLateBi === 0;
-        const upcomingBiDue = isDueTodayBi
+        const isDueTodayBi = !!(currentBiDue && daysLateBi === 0);
+        // today already covered if total paid ÷ biAmt exceeds periods elapsed before today
+        const todayAlreadyCoveredBi = isDueTodayBi && Math.floor(biTotalPaidFromDates / biAmt) > biElapsedBeforeToday;
+        const upcomingBiDue = (isDueTodayBi && !todayAlreadyCoveredBi)
           ? currentBiDue!
           : getNextBimonthlyPaymentDate(txDate, today);
         items.push({
           key: `emi-bimonthly-${e.id}`,
           id: e.id, loanId: (e as any).emiId, type: "emi",
           label: `${formatCurrency(e.principal)} EMI (₹${biAmt.toLocaleString("en-IN")}/15th & 30th)`,
-          subLabel: (isDueTodayBi
+          subLabel: ((isDueTodayBi && !todayAlreadyCoveredBi)
             ? "Due today"
             : upcomingBiDue
               ? `Next payment ${formatDate(upcomingBiDue.toISOString())}`
