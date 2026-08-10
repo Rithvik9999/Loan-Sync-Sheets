@@ -47,7 +47,7 @@ const FORMULA_ROW = 6;
 const DATA_START_ROW = 7;
 const LAST_COL_INDEX = 24; // Y
 
-const COL = {
+const LEGACY_COL = {
   ID: 0,
   RETURN_DATE: 1,
   NAME: 2,
@@ -55,7 +55,7 @@ const COL = {
   TRANSACTION_DATE: 4,
   PRINCIPAL: 5,
   // Col G (index 6) is an extra blank column in the sheet — not mapped to any field.
-  TENURE_DAYS: 7,              // col H — input
+  TENURE_DAYS: 6,              // col G — input
   WHATSAPP: 8,                 // col I — input (phone, sometimes with free-form notes)
   STATUS: 9,                   // col J — input ("Pending" | "Clear" | "Temp" | "Archived")
   FLAT_FEE: 10,                // col K — COMPUTED
@@ -73,6 +73,36 @@ const COL = {
   CREATED_AT: 22,              // col W — ISO datetime of loan creation
   PART_PAYMENT_TIMESTAMPS: 23, // col X — pipe-separated ISO datetimes for each part-payment
   ACTIVITY_LOG: 24,            // col Y — pipe-separated activity entries (ISO_timestamp~label)
+} as const;
+
+// The live Heat Map has no blank column between Principal (F) and Tenure (G).
+// Keep the legacy map above for historical context, but use this positional map
+// for all reads and writes against the current sheet.
+const COL = {
+  ID: 0,
+  RETURN_DATE: 1,
+  NAME: 2,
+  TIMELY_RETURN: 3,
+  TRANSACTION_DATE: 4,
+  PRINCIPAL: 5,
+  TENURE_DAYS: 6,
+  WHATSAPP: 7,
+  STATUS: 8,
+  FLAT_FEE: 9,
+  INTEREST_PCT: 10,
+  INTEREST: 11,
+  DISCOUNT_OR_CHARGES: 12,
+  LATE_DAYS: 13,
+  LATE_FEES: 14,
+  FINAL_AMOUNT: 15,
+  DATE_PART_PAYMENT: 16,
+  PART_PAYMENT: 17,
+  PAID: 18,
+  PROFIT: 19,
+  NOTES: 21,
+  CREATED_AT: 22,
+  PART_PAYMENT_TIMESTAMPS: 23,
+  ACTIVITY_LOG: 24,
 } as const;
 
 export type LoanStatus = "Pending" | "Clear" | "Temp" | "Archived";

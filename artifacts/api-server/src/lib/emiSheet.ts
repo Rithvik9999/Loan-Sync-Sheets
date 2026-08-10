@@ -238,6 +238,42 @@ function computeNextDueDate(
   return d.toISOString().slice(0, 10);
 }
 
+const FIXED_WEEKLY_PAYMENT_DAYS = [8, 15, 22, 30] as const;
+
+/**
+ * Finds the first unpaid date for the fixed weekly schedule.
+ * Weekly EMI payments are due only on the 8th, 15th, 22nd, and 30th.
+ */
+function computeFixedWeeklyNextDueDate(
+  transactionDate: string | null,
+  paidDates: string[],
+): string | null {
+  if (!transactionDate) return null;
+  const start = new Date(`${transactionDate}T00:00:00Z`);
+  const paidWeeklyCount = paidDates.filter((entry) => {
+    const type = entry.split(":")[2];
+    return type === "W" || type === "WM";
+  }).length;
+
+  let seen = 0;
+  let year = start.getUTCFullYear();
+  let month = start.getUTCMonth();
+  for (let monthOffset = 0; monthOffset < 120; monthOffset++) {
+    for (const day of FIXED_WEEKLY_PAYMENT_DAYS) {
+      const candidate = new Date(Date.UTC(year, month, day));
+      if (candidate <= start) continue;
+      seen++;
+      if (seen > paidWeeklyCount) return candidate.toISOString().slice(0, 10);
+    }
+    month++;
+    if (month > 11) {
+      month = 0;
+      year++;
+    }
+  }
+  return null;
+}
+
 /**
  * Counts how many monthly due dates (txDate + 1m, +2m, ...) have passed as of today.
  * This is the maximum number of months that could legitimately have been paid.
@@ -313,8 +349,18 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
     }
   }
 
-  // Compute next payment date using effective remaining (accounts for retroactive credits).
-  const nextPaymentDate = computeNextDueDate(transactionDate, tenureMonths, effectiveRemaining);
+  const weeklyAmountVal = toNumberOrNull(get(COL.WEEKLY_AMOUNT));
+  const dailyAmountVal = toNumberOrNull(get(COL.DAILY_AMOUNT));
+  const notes = toText(get(COL.NOTES));
+  const isFixedWeekly =
+    (weeklyAmountVal != null && weeklyAmountVal > 0) ||
+    /pay\s+weekly/i.test(notes);
+
+  // Weekly loans use the fixed 8/15/22/30 schedule. Monthly loans use the
+  // remaining-months calculation.
+  const nextPaymentDate = isFixedWeekly
+    ? computeFixedWeeklyNextDueDate(transactionDate, paidDatesRaw)
+    : computeNextDueDate(transactionDate, tenureMonths, effectiveRemaining);
 
   const today = todaySerial();
   const nextPaySerial = nextPaymentDate ? isoToSerial(nextPaymentDate) : null;
@@ -333,8 +379,6 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
   // This overrides the sheet ARRAYFORMULA (which uses interestPerMonth — too high) and
   // ensures the app always shows: payment × 0.01 × lateDays as the late penalty.
   // Priority: weeklyAmount > dailyAmount > monthlyPayment.
-  const weeklyAmountVal = toNumberOrNull(get(COL.WEEKLY_AMOUNT));
-  const dailyAmountVal  = toNumberOrNull(get(COL.DAILY_AMOUNT));
   const effectivePmt    = weeklyAmountVal ?? dailyAmountVal ?? monthlyPayVal;
   const lateFees =
     effectivePmt != null && effectivePmt > 0 && lateDays > 0
@@ -388,56 +432,81 @@ function parseRow(raw: unknown[], rowNumber: number): EmiLoanRow {
 }
 
 /**
- * Writes the late-fees ARRAYFORMULA to column Q of the EMI Heat Map tab.
+ * Repairs the computed formulas in the EMI Heat Map.
  *
- * Formula: lateFees = overdueDays × (interestPerMonth / 30)
- *   — only for Pending rows with a past nextPaymentDate and remaining months.
- *
- * Uses the same column positions the sheet already defines:
- *   C = nextPaymentDate (serial), D = name, K = interestPerMonth,
- *   O = status, R = remainingMonths, Q = lateFees (target).
+ * Weekly rows use the fixed 8th, 15th, 22nd, and 30th schedule and the W/WM
+ * entries in column T to find the first unpaid date. Other rows retain the
+ * monthly schedule. Column Q uses the resulting date and the effective
+ * repayment amount for a 1% per-day late fee.
  */
-let lateFeesFormulaWritten = false;
+let emiComputedFormulasWritten = false;
 
-async function ensureEmiLateFeesFormula(): Promise<void> {
-  if (lateFeesFormulaWritten) return;
+async function ensureEmiComputedFormulas(): Promise<void> {
+  if (emiComputedFormulasWritten) return;
   try {
     const sheetId = getEmiSpreadsheetId();
-    const targetCell = `${TAB}!${colLetter(COL.LATE_FEES)}${DATA_START_ROW}`;
-    // Read current formula in the cell (FORMULA render mode) to skip if already set
-    const existing = await getRawValuesFromSheet(sheetId, targetCell, "FORMULA");
-    const currentFormula = toText(existing?.[0]?.[0]);
-    // Check if formula is already written AND includes the 1.5× multiplier
-    if (currentFormula.startsWith("=ARRAYFORMULA") && currentFormula.includes("*1.5")) {
-      lateFeesFormulaWritten = true;
+    const [currentDate, currentLateFees] = await Promise.all([
+      getRawValuesFromSheet(
+        sheetId,
+        `${TAB}!${colLetter(COL.NEXT_PAYMENT_DATE)}${DATA_START_ROW}`,
+        "FORMULA",
+      ),
+      getRawValuesFromSheet(
+        sheetId,
+        `${TAB}!${colLetter(COL.LATE_FEES)}${DATA_START_ROW}`,
+        "FORMULA",
+      ),
+    ]);
+    const currentDateFormula = toText(currentDate?.[0]?.[0]);
+    const currentLateFeeFormula = toText(currentLateFees?.[0]?.[0]);
+    if (
+      currentDateFormula.includes("paidCount") &&
+      currentDateFormula.includes("CHOOSE(MOD(idx,4)+1,8,15,22,30)") &&
+      currentLateFeeFormula.includes("IF(U6:U>0,U6:U,E6:E)")
+    ) {
+      emiComputedFormulasWritten = true;
       return;
     }
-    // Write the ARRAYFORMULA. Conditions (all must be true for a non-zero result):
-    //   D6:D <> ""             → row has a borrower name
-    //   O6:O = "Pending"       → loan is not yet cleared
-    //   ISNUMBER(C6:C)         → nextPaymentDate is a real date serial
-    //   C6:C < TODAY()         → payment was due in the past (overdue)
-    //   ISNUMBER(R6:R)         → remainingMonths is computed
-    //   R6:R > 0               → loan not fully repaid
-    // Value: overdue days × (K/30) × 1.5, wrapped in CEILING so result is always a whole rupee.
-    const formula =
+
+    const dateFormula =
+      `=MAP(F${DATA_START_ROW}:F,O${DATA_START_ROW}:O,V${DATA_START_ROW}:V,` +
+      `S${DATA_START_ROW}:S,T${DATA_START_ROW}:T,` +
+      `LAMBDA(tx,st,weekly,note,paid,IF(tx="","",` +
+      `IF(LOWER(st)<>"pending","",` +
+      `IF(OR(N(weekly)>0,REGEXMATCH(LOWER(note),"weekly")),` +
+      `LET(slot,IF(DAY(tx)<8,0,IF(DAY(tx)<15,1,IF(DAY(tx)<22,2,IF(DAY(tx)<30,3,4)))),` +
+      `paidCount,IF(paid="",0,LEN(paid)-LEN(SUBSTITUTE(paid,":W",""))),` +
+      `idx,slot+paidCount,` +
+      `DATE(YEAR(EDATE(tx,INT(idx/4))),MONTH(EDATE(tx,INT(idx/4))),CHOOSE(MOD(idx,4)+1,8,15,22,30)),` +
+      `EDATE(tx,IF(paid="",0,LEN(paid)-LEN(SUBSTITUTE(paid,":M","")))+1)` +
+      `))))))`;
+
+    const lateFeesFormula =
       `=ARRAYFORMULA(IF(` +
       `(D${DATA_START_ROW}:D<>"")*(O${DATA_START_ROW}:O="Pending")` +
       `*(ISNUMBER(C${DATA_START_ROW}:C))*(C${DATA_START_ROW}:C<TODAY())` +
       `*(ISNUMBER(R${DATA_START_ROW}:R))*(R${DATA_START_ROW}:R>0),` +
-      `CEILING(FLOOR(TODAY()-C${DATA_START_ROW}:C)*IFERROR(K${DATA_START_ROW}:K,0)/30*1.5,1),` +
-      `0))`;
-    await batchUpdateCellsInSheet(sheetId, [{ range: targetCell, values: [[formula]] }]);
-    lateFeesFormulaWritten = true;
+      `ROUND((TODAY()-C${DATA_START_ROW}:C)*IF(V${DATA_START_ROW}:V>0,` +
+      `V${DATA_START_ROW}:V,IF(U${DATA_START_ROW}:U>0,U${DATA_START_ROW}:U,E${DATA_START_ROW}:E))/100,0),0))`;
+
+    await batchUpdateCellsInSheet(sheetId, [{
+      range: `${TAB}!${colLetter(COL.NEXT_PAYMENT_DATE)}${DATA_START_ROW}`,
+      values: [[dateFormula]],
+    }]);
+    await batchUpdateCellsInSheet(sheetId, [{
+      range: `${TAB}!${colLetter(COL.LATE_FEES)}${DATA_START_ROW}`,
+      values: [[lateFeesFormula]],
+    }]);
+    emiComputedFormulasWritten = true;
   } catch (err) {
-    // Non-fatal: server still works, late fees just won't be in the sheet
-    console.warn("[emiSheet] Failed to write late-fees formula:", err);
+    // Non-fatal: the API still computes the schedule server-side.
+    console.error("[emiSheet] Failed to repair EMI computed formulas:", err);
   }
 }
 
 export async function listEmiLoanRows(): Promise<EmiLoanRow[]> {
-  // Ensure the late-fees ARRAYFORMULA is in place (runs once per process, non-blocking).
-  ensureEmiLateFeesFormula().catch(() => {});
+  // Repair the formulas before reading the values they produce.
+  await ensureEmiComputedFormulas();
   const sheetId = getEmiSpreadsheetId();
   const raw = await getRawValuesFromSheet(sheetId, `${TAB}!A${DATA_START_ROW}:${LAST_COL}`);
   const rows: EmiLoanRow[] = [];

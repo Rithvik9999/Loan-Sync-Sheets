@@ -1,6 +1,11 @@
 import { Router, type IRouter } from "express";
 import { attachRole, requireStaff } from "../middlewares/auth";
-import { getRawValues, batchUpdateCells } from "../lib/sheetsClient";
+import {
+  getRawValues,
+  batchUpdateCells,
+  getRawValuesFromSheet,
+  getEmiSpreadsheetId,
+} from "../lib/sheetsClient";
 import { listBorrowers } from "../lib/repositories/borrowers";
 
 const router: IRouter = Router();
@@ -29,6 +34,23 @@ router.get("/debug/borrowers", attachRole, requireStaff, async (_req, res): Prom
 });
 
 /**
+ * Temporary staff-only regular Heat Map diagnostic.
+ * Returns a bounded slice of the raw Heat Map as formulas and values so column
+ * alignment can be verified without exposing this data to borrowers.
+ */
+router.get("/debug/heat-map", attachRole, requireStaff, async (req, res): Promise<void> => {
+  const requestedRow = Number(req.query.row);
+  const startRow = Number.isInteger(requestedRow) && requestedRow >= 5 ? requestedRow : 5;
+  const endRow = Math.min(startRow + 2, startRow + 10);
+  const [headers, formulas, values] = await Promise.all([
+    getRawValues("Heat Map!A1:Y5", "FORMATTED_VALUE"),
+    getRawValues(`Heat Map!A${startRow}:Y${endRow}`, "FORMULA"),
+    getRawValues(`Heat Map!A${startRow}:Y${endRow}`, "UNFORMATTED_VALUE"),
+  ]);
+  res.json({ startRow, endRow, headers, formulas, values });
+});
+
+/**
  * Staff-only: rewrites the Borrowers sheet header row (row 1) to match the
  * expected schema ["id","name","phone","pin","creditLimit","createdAt"].
  * The data columns are already in the right positions; only the labels differ.
@@ -42,6 +64,23 @@ router.post("/debug/fix-borrowers-headers", attachRole, requireStaff, async (_re
     },
   ]);
   res.json({ ok: true, headers: expectedHeaders });
+});
+
+/**
+ * Temporary staff-only EMI formula diagnostic.
+ * Returns a bounded slice of the EMI Heat Map as both formulas and values.
+ */
+router.get("/debug/emi-formulas", attachRole, requireStaff, async (req, res): Promise<void> => {
+  const sheetId = getEmiSpreadsheetId();
+  const requestedRow = Number(req.query.row);
+  const startRow = Number.isInteger(requestedRow) && requestedRow >= 6 ? requestedRow : 6;
+  const endRow = Math.min(startRow + 4, startRow + 20);
+  const [headers, formulas, values] = await Promise.all([
+    getRawValuesFromSheet(sheetId, "Heat Map!A1:Z5", "FORMATTED_VALUE"),
+    getRawValuesFromSheet(sheetId, `Heat Map!A${startRow}:Z${endRow}`, "FORMULA"),
+    getRawValuesFromSheet(sheetId, `Heat Map!A${startRow}:Z${endRow}`, "UNFORMATTED_VALUE"),
+  ]);
+  res.json({ startRow, endRow, headers, formulas, values });
 });
 
 export default router;
