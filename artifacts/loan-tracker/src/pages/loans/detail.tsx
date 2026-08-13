@@ -20,6 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "@/components/ui/link";
 import { ArrowLeft, Edit, Trash2, Calendar, FileText, Plus, TrendingUp, CalendarDays, CalendarRange, Loader2, RotateCcw, Pencil, Share2, Clock } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";
+import { parseDateOnly, todayDateIST, todayISOIST } from "@/lib/ist-date";
 import { LoanStatusBadge } from "@/components/status-badges";
 
 import {
@@ -69,7 +70,7 @@ export default function LoanDetail() {
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [isEditPaid, setIsEditPaid] = useState(false);
   const [paidEditValue, setPaidEditValue] = useState("");
-  const [quickPayDate, setQuickPayDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [quickPayDate, setQuickPayDate] = useState(todayISOIST());
   const [dailyPending, setDailyPending] = useState(false);
   const [weeklyPending, setWeeklyPending] = useState(false);
   const [undoPending, setUndoPending] = useState(false);
@@ -368,14 +369,24 @@ export default function LoanDetail() {
         const handleQuickPay = (amount: number, freq: "daily" | "weekly") => {
           if (!amount || dailyPending || weeklyPending || undoPending) return;
           // ── Guard: same-date duplicate ──
-          if (loan.dateOfPartPayment === quickPayDate) {
+          const recordedPaymentDates = [
+            ...(((loan as any).partPayments ?? []) as Array<{ date?: string | null }>)
+              .map((payment) => String(payment.date ?? "").slice(0, 10))
+              .filter(Boolean),
+            ...(loan.dateOfPartPayment ?? "")
+              .split("|")
+              .map((entry) => entry.split(":")[0]?.trim())
+              .filter(Boolean),
+          ];
+          if (recordedPaymentDates.includes(quickPayDate)) {
             toast({ variant: "destructive", title: "Already recorded", description: `A payment for ${quickPayDate} is already recorded. Change the date to add another.` });
             return;
           }
           // ── Guard: today's payment already recorded ──
           if (freq === "daily" && dailyAmt != null && loan.transactionDate) {
-            const nowD = new Date(); nowD.setHours(0, 0, 0, 0);
-            const txD = new Date(loan.transactionDate + "T00:00:00Z");
+            const nowD = todayDateIST();
+            const txD = parseDateOnly(loan.transactionDate);
+            if (!txD) return;
             const elapsed = Math.max(differenceInCalendarDays(nowD, txD), 0);
             if (Math.floor((loan.paid ?? 0) / dailyAmt) >= elapsed) {
               toast({ variant: "destructive", title: "Already recorded", description: "Today's daily payment has already been recorded." });
@@ -383,8 +394,9 @@ export default function LoanDetail() {
             }
           }
           if (freq === "weekly" && weeklyAmt != null && loan.transactionDate) {
-            const nowW = new Date(); nowW.setHours(0, 0, 0, 0);
-            const txW = new Date(loan.transactionDate + "T00:00:00Z");
+            const nowW = todayDateIST();
+            const txW = parseDateOnly(loan.transactionDate);
+            if (!txW) return;
             const WDAYS = [8, 15, 22, 30];
             let wElapsed = 0;
             let wyr = txW.getFullYear(), wmo = txW.getMonth();
@@ -456,9 +468,9 @@ export default function LoanDetail() {
 
         if (!loan.transactionDate || periodAmount <= 0) return null;
 
-        const txDate = new Date(loan.transactionDate + "T00:00:00Z");
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        const txDate = parseDateOnly(loan.transactionDate);
+        const today = todayDateIST();
+        if (!txDate) return null;
 
         const daysElapsed = Math.max(differenceInCalendarDays(today, txDate), 0);
         // periodsElapsed: total periods including today (used for display of "X elapsed").

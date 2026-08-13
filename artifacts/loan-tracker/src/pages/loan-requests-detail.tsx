@@ -27,6 +27,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { estimateFinalAmount } from "@/lib/early-payment-discount";
+import { todayISOIST } from "@/lib/ist-date";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -133,7 +134,7 @@ export default function LoanRequestDetail() {
   const [isDiscount, setIsDiscount] = useState(true); // true = discount (reduces final), false = extra charge
   const [overrideAmount, setOverrideAmount] = useState("");
   const [transactionDate, setTransactionDate] = useState(
-    new Date().toISOString().slice(0, 10),
+    todayISOIST(),
   );
 
   // Auto-populate the discount and amount fields when the request loads.

@@ -17,11 +17,17 @@ export function formatCurrency(amount: number | null | undefined): string {
 
 export function formatDate(dateString: string | null | undefined): string {
   if (!dateString) return "";
-  const date = new Date(dateString);
+  // Date-only values represent an India calendar date, not a UTC timestamp.
+  // Parsing YYYY-MM-DD with `new Date()` treats it as UTC and can display the
+  // previous day in non-UTC/browser environments.
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(dateString)
+    ? new Date(`${dateString}T12:00:00+05:30`)
+    : new Date(dateString);
   return new Intl.DateTimeFormat("en-IN", {
     year: "numeric",
     month: "short",
     day: "numeric",
+    timeZone: "Asia/Kolkata",
   }).format(date);
 }
 

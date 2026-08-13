@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { todayISOIST } from "../lib/dateUtils";
 import {
   UpdateLoanRequestBody,
   ListLoanRequestsResponse,
@@ -198,7 +199,7 @@ router.post(
     // (principal + fees + interest + discountOrCharges) computes the correct final amount.
     const loan = await loansRepo.createLoan({
       name: loanRequest.name,
-      transactionDate: transactionDate ?? new Date().toISOString().slice(0, 10),
+      transactionDate: transactionDate ?? todayISOIST(),
       principal,
       tenureDays: loanRequest.tenureDays > 0 ? loanRequest.tenureDays : 30,
       whatsapp: loanRequest.phone,

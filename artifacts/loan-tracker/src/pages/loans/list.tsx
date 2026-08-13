@@ -73,6 +73,7 @@ import LoanFormDialog from "./components/loan-form-dialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import { todayISOIST } from "@/lib/ist-date";
 
 // ─── Bulk Mark as Paid Dialog ─────────────────────────────────────────────────
 
@@ -91,7 +92,7 @@ function BulkMarkPaidDialog({
   const queryClient = useQueryClient();
   const updateLoan = useUpdateLoan();
   const [isPending, setIsPending] = useState(false);
-  const [paidDate, setPaidDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [paidDate, setPaidDate] = useState(todayISOIST());
   // Per-row editable paid amounts — keyed by loan id, defaults to finalAmount
   const [amounts, setAmounts] = useState<Record<string, string>>({});
 

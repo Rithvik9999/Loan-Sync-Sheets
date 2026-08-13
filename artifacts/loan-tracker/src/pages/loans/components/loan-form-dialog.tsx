@@ -13,6 +13,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { format, addDays, differenceInCalendarDays, parseISO } from "date-fns";
+import { todayISOIST } from "@/lib/ist-date";
 
 import {
   Dialog,
@@ -99,7 +100,7 @@ export default function LoanFormDialog({ open, onOpenChange, loan, defaultName }
     const existingDiscount = loan?.discountOrCharges ?? 0;
     return {
       name: loan?.name || defaultName || "",
-      transactionDate: loan?.transactionDate || format(new Date(), "yyyy-MM-dd"),
+      transactionDate: loan?.transactionDate || todayISOIST(),
       principal: loan?.principal ?? (undefined as unknown as number),
       tenureDays: loan?.tenureDays || 30,
       returnDate: loan?.returnDate || "",

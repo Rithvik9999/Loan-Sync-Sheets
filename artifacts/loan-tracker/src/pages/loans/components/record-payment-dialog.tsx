@@ -11,6 +11,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import { todayISOIST } from "@/lib/ist-date";
 
 import {
   Dialog,
@@ -141,7 +142,7 @@ export default function RecordPaymentDialog({ open, onOpenChange, loan }: Record
                   <FormItem>
                     <FormLabel>Part Payment Date</FormLabel>
                     <FormControl>
-                      <Input type="date" {...field} value={field.value ?? format(new Date(), "yyyy-MM-dd")} />
+                      <Input type="date" {...field} value={field.value ?? todayISOIST()} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

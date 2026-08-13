@@ -84,6 +84,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
 import { computeEarlyPaymentDiscount, estimateFinalAmount } from "@/lib/early-payment-discount";
+import { parseDateOnly, todayDateIST, todayISOIST } from "@/lib/ist-date";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -1362,7 +1363,8 @@ export function buildRepaymentItems(
   emiLoans: EmiLoan[] | undefined,
 ): RepayItem[] {
   const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const today = todayDateIST();
+  const todayISO = todayISOIST();
   const items: RepayItem[] = [];
 
   // ── Regular loans ──
@@ -1370,7 +1372,7 @@ export function buildRepaymentItems(
     if (l.status === "Clear") continue;
     const lnotes = (l as any).notes as string | null;
     const freq = parsePaymentFrequency(lnotes, l.whatsapp);
-    const txDate = l.transactionDate ? new Date(l.transactionDate + "T00:00:00Z") : null;
+    const txDate = parseDateOnly(l.transactionDate);
 
     // ── Daily payment loan ──
     if (isPayDailyLoan(l.whatsapp, lnotes)) {
@@ -1378,7 +1380,7 @@ export function buildRepaymentItems(
       if (!txDate || dailyAmt <= 0) continue;
 
       const daysElapsed = Math.max(differenceInCalendarDays(today, txDate), 0);
-      const returnDate = l.returnDate ? new Date(l.returnDate + "T00:00:00Z") : null;
+      const returnDate = parseDateOnly(l.returnDate);
       const withinTenure = !returnDate || today <= returnDate;
 
       // Today's payment is "due today", NOT yet overdue — exclude today from
@@ -1400,8 +1402,20 @@ export function buildRepaymentItems(
       const paidPeriods = Math.floor(totalDailyPaid / dailyAmt);
       const overdueDays = Math.max(periodsElapsedForOverdue - paidPeriods, 0);
 
-      // todayCovered: if paid periods >= days elapsed (including today), today is covered.
-      const todayCovered = paidPeriods >= daysElapsed;
+      // Do not infer today's payment from the cumulative amount. That makes
+      // any older payment count as today's payment and sends borrowers straight
+      // to "Due tomorrow". The sheet exposes the dated payment entries, so use
+      // the actual date instead.
+      const datedPayments = Array.isArray((l as any).partPayments)
+        ? (l as any).partPayments as Array<{ date?: string | null }>
+        : [];
+      const rawPaymentDates = (l.dateOfPartPayment ?? "")
+        .split("|")
+        .map((entry) => entry.split(":")[0]?.trim())
+        .filter(Boolean);
+      const todayCovered =
+        datedPayments.some((payment) => String(payment.date ?? "").slice(0, 10) === todayISO) ||
+        rawPaymentDates.includes(todayISO);
 
       if (overdueDays > 0) {
         // Each missed day piles up with 2%/day late fee
@@ -1419,21 +1433,9 @@ export function buildRepaymentItems(
         });
       }
 
-      if (daysElapsed === 0) {
-        // Created today — first payment is due tomorrow, nothing due yet.
-        const tomorrow = new Date(today.getTime() + 86400000);
-        items.push({
-          key: `daily-today-${l.id}`,
-          id: l.id, loanId: l.loanId, type: "loan",
-          label: `Daily Payment — ₹${dailyAmt.toLocaleString("en-IN")}/day`,
-          subLabel: "Due tomorrow",
-          outstanding: dailyAmt,
-          dueDate: tomorrow,
-          isOverdue: false,
-          earlyDiscount: 0,
-        });
-      } else if (!todayCovered) {
-        // Today's instalment hasn't been paid yet — show it in Coming Up.
+      if (!todayCovered) {
+        // Today's instalment has not been recorded. This includes loans
+        // created today: the borrower should see today's payment, not tomorrow's.
         items.push({
           key: `daily-today-${l.id}`,
           id: l.id, loanId: l.loanId, type: "loan",
@@ -1562,7 +1564,7 @@ export function buildRepaymentItems(
     if (isPayDailyLoan((e as any).whatsapp, e.notes)) continue;
 
     const freq = parsePaymentFrequency(e.notes, (e as any).whatsapp);
-    const txDate = e.transactionDate ? new Date(e.transactionDate + "T00:00:00Z") : null;
+    const txDate = parseDateOnly(e.transactionDate);
 
     // ── Weekly EMI (8th / 15th / 22nd / 30th schedule) ──
     // Uses fixed monthly payment dates instead of 7-day rolling cycles.

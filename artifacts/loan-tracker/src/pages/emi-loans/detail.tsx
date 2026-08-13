@@ -5,6 +5,7 @@ import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useAppAuth } from "@/hooks/use-app-auth";
 import { format } from "date-fns";
+import { todayISOIST } from "@/lib/ist-date";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -154,7 +155,7 @@ function RecordEmiPaymentDialog({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [amount, setAmount] = useState(String(loan.monthlyPayment ?? ""));
-  const [date, setDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [date, setDate] = useState(todayISOIST());
   const [markClear, setMarkClear] = useState(false);
   const [isPending, setIsPending] = useState(false);
 
@@ -295,7 +296,7 @@ export default function EmiLoanDetail() {
   const [dailyPending, setDailyPending] = useState(false);
   const [weeklyPending, setWeeklyPending] = useState(false);
   const [bimonthlyPending, setBimonthlyPending] = useState(false);
-  const [quickPayDate, setQuickPayDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [quickPayDate, setQuickPayDate] = useState(todayISOIST());
 
   const { data: loan, isLoading } = useQuery<EmiLoan>({
     queryKey: emiLoanQueryKey(id),

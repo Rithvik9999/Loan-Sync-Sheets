@@ -17,3 +17,4 @@
 - [Session cache cross-user leak pattern](session-cache-leak.md) — React Query cache must be cleared explicitly inside login() and logout(); effect-based clear misses same-user→user transitions where isSignedIn stays true.
 - [Borrower row filter — phone-first rule](borrower-phone-filter.md) — list endpoints must use `rowPhone ? phoneMatch : nameMatch`; never `phoneMatch || nameMatch` or name collisions expose another user's loans.
 - [Use stable loanId/emiId for routing and mutations](stable-id-routing.md) — UUID in col A is re-generated on every listLoanRows() call until persisted; always use loanId/emiId (row-number-derived, always stable) for navigation URLs, selection keys, and PATCH/DELETE mutation IDs.
+- [IST calendar-date handling](ist-calendar-date-handling.md) — loan/payment date-only values must use explicit Asia/Kolkata today/parsing helpers; never infer today-paid from cumulative totals.

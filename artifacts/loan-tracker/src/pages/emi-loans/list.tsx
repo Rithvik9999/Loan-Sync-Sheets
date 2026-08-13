@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import { todayISOIST } from "@/lib/ist-date";
 import EmiLoanFormDialog, { EmiLoan, EMI_LOANS_QUERY_KEY, fetchEmiLoans, markEmiLoanMonthlyPaid } from "./components/emi-loan-form-dialog";
 
 function EmiStatusBadge({ status }: { status: string }) {
@@ -70,7 +71,7 @@ function BulkMarkPaidDialog({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isPending, setIsPending] = useState(false);
-  const [paidDate, setPaidDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [paidDate, setPaidDate] = useState(todayISOIST());
 
   const totalMonthly = loans.reduce((s, l) => s + (l.monthlyPayment ?? 0), 0);
 
@@ -181,14 +182,14 @@ function RecordEmiPaymentInlineDialog({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [amount, setAmount] = useState(String(loan.monthlyPayment ?? ""));
-  const [date, setDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [date, setDate] = useState(todayISOIST());
   const [markClear, setMarkClear] = useState(false);
   const [isPending, setIsPending] = useState(false);
 
   // Reset when loan changes
   useEffect(() => {
     setAmount(String(loan.monthlyPayment ?? ""));
-    setDate(format(new Date(), "yyyy-MM-dd"));
+    setDate(todayISOIST());
     setMarkClear(false);
   }, [loan.id]);
 

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import { todayISOIST } from "@/lib/ist-date";
 import { useLocation } from "wouter";
 
 import {
@@ -234,7 +235,7 @@ export default function EmiLoanFormDialog({ open, onOpenChange, loan, defaultNam
 
   const defaults = (): EmiLoanFormValues => ({
     name: loan?.name || defaultName || "",
-    transactionDate: loan?.transactionDate || format(new Date(), "yyyy-MM-dd"),
+    transactionDate: loan?.transactionDate || todayISOIST(),
     principal: loan?.principal || 0,
     tenureMonths: loan?.tenureMonths || 12,
     whatsapp: loan?.whatsapp || "",
