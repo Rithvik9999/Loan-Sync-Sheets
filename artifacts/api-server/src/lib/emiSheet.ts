@@ -448,35 +448,35 @@ async function ensureEmiComputedFormulas(): Promise<void> {
     const [currentDate, currentLateFees] = await Promise.all([
       getRawValuesFromSheet(
         sheetId,
-        `${TAB}!${colLetter(COL.NEXT_PAYMENT_DATE)}${DATA_START_ROW}`,
+        `${TAB}!${colLetter(COL.NEXT_PAYMENT_DATE)}${FORMULA_ROW}`,
         "FORMULA",
       ),
       getRawValuesFromSheet(
         sheetId,
-        `${TAB}!${colLetter(COL.LATE_FEES)}${DATA_START_ROW}`,
+        `${TAB}!${colLetter(COL.LATE_FEES)}${FORMULA_ROW}`,
         "FORMULA",
       ),
     ]);
     const currentDateFormula = toText(currentDate?.[0]?.[0]);
     const currentLateFeeFormula = toText(currentLateFees?.[0]?.[0]);
     if (
-      currentDateFormula.includes(`F${DATA_START_ROW}:F`) &&
+      currentDateFormula.includes(`F${FORMULA_ROW}:F`) &&
       currentDateFormula.includes("paidCount") &&
       currentDateFormula.includes("IF(MOD(idx,4)=0,8") &&
       currentDateFormula.includes('LEN(":W")') &&
       currentDateFormula.includes('LEN(":M")') &&
       currentDateFormula.endsWith(")))))") &&
       !currentDateFormula.endsWith("))))))") &&
-      currentLateFeeFormula.includes(`IF(V${DATA_START_ROW}:V>0,V${DATA_START_ROW}:V`) &&
-      currentLateFeeFormula.includes(`E${DATA_START_ROW}:E`)
+      currentLateFeeFormula.includes(`IF(V${FORMULA_ROW}:V>0,V${FORMULA_ROW}:V`) &&
+      currentLateFeeFormula.includes(`E${FORMULA_ROW}:E`)
     ) {
       emiComputedFormulasWritten = true;
       return;
     }
 
     const dateFormula =
-      `=MAP(F${DATA_START_ROW}:F,O${DATA_START_ROW}:O,V${DATA_START_ROW}:V,` +
-      `S${DATA_START_ROW}:S,T${DATA_START_ROW}:T,` +
+      `=MAP(F${FORMULA_ROW}:F,O${FORMULA_ROW}:O,V${FORMULA_ROW}:V,` +
+      `S${FORMULA_ROW}:S,T${FORMULA_ROW}:T,` +
       `LAMBDA(tx,st,weekly,note,paid,IF(OR(tx="",LOWER(st)<>"pending"),"",` +
       `IF(OR(N(weekly)>0,REGEXMATCH(LOWER(note),"weekly")),` +
       `LET(slot,IF(DAY(tx)<8,0,IF(DAY(tx)<15,1,IF(DAY(tx)<22,2,IF(DAY(tx)<30,3,4)))),` +
@@ -489,11 +489,11 @@ async function ensureEmiComputedFormulas(): Promise<void> {
 
     const lateFeesFormula =
       `=ARRAYFORMULA(IF(` +
-      `(D${DATA_START_ROW}:D<>"")*(O${DATA_START_ROW}:O="Pending")` +
-      `*(ISNUMBER(C${DATA_START_ROW}:C))*(C${DATA_START_ROW}:C<TODAY())` +
-      `*(ISNUMBER(R${DATA_START_ROW}:R))*(R${DATA_START_ROW}:R>0),` +
-      `ROUND((TODAY()-C${DATA_START_ROW}:C)*IF(V${DATA_START_ROW}:V>0,` +
-      `V${DATA_START_ROW}:V,IF(U${DATA_START_ROW}:U>0,U${DATA_START_ROW}:U,E${DATA_START_ROW}:E))/100,0),0))`;
+      `(D${FORMULA_ROW}:D<>"")*(O${FORMULA_ROW}:O="Pending")` +
+      `*(ISNUMBER(C${FORMULA_ROW}:C))*(C${FORMULA_ROW}:C<TODAY())` +
+      `*(ISNUMBER(R${FORMULA_ROW}:R))*(R${FORMULA_ROW}:R>0),` +
+      `ROUND((TODAY()-C${FORMULA_ROW}:C)*IF(V${FORMULA_ROW}:V>0,` +
+      `V${FORMULA_ROW}:V,IF(U${FORMULA_ROW}:U>0,U${FORMULA_ROW}:U,E${FORMULA_ROW}:E))/100,0),0))`;
 
     const computedColumns = [
       COL.NEXT_PAYMENT_DATE,
@@ -505,57 +505,59 @@ async function ensureEmiComputedFormulas(): Promise<void> {
       COL.PRINCIPAL_PER_MONTH,
       COL.LATE_FEES,
     ];
-    const legacyAnchorClears = computedColumns.map((col) => ({
-      range: `${TAB}!${colLetter(col)}6`,
+    // A previous repair wrote duplicate array formulas into row 7. Clear only
+    // those computed cells so the real row-6 anchors can spill again.
+    const duplicateDataRowClears = computedColumns.map((col) => ({
+      range: `${TAB}!${colLetter(col)}${DATA_START_ROW}`,
       values: [[""]],
     }));
     const computedFormulaWrites = [
       {
-        range: `${TAB}!${colLetter(COL.NEXT_PAYMENT_DATE)}${DATA_START_ROW}`,
+        range: `${TAB}!${colLetter(COL.NEXT_PAYMENT_DATE)}${FORMULA_ROW}`,
         values: [[dateFormula]],
       },
       {
-        range: `${TAB}!${colLetter(COL.MONTHLY_PAYMENT)}${DATA_START_ROW}`,
+        range: `${TAB}!${colLetter(COL.MONTHLY_PAYMENT)}${FORMULA_ROW}`,
         values: [[
-          `=ARRAYFORMULA(IF((G${DATA_START_ROW}:G<>"")*(L${DATA_START_ROW}:L<>"")*(H${DATA_START_ROW}:H<>""),(G${DATA_START_ROW}:G+L${DATA_START_ROW}:L)/H${DATA_START_ROW}:H,""))`,
+          `=ARRAYFORMULA(IF((G${FORMULA_ROW}:G<>"")*(L${FORMULA_ROW}:L<>"")*(H${FORMULA_ROW}:H<>""),(G${FORMULA_ROW}:G+L${FORMULA_ROW}:L)/H${FORMULA_ROW}:H,""))`,
         ]],
       },
       {
-        range: `${TAB}!${colLetter(COL.FLAT_FEE)}${DATA_START_ROW}`,
-        values: [[`=ARRAYFORMULA(IF(G${DATA_START_ROW}:G<>"",G${DATA_START_ROW}:G*2.5%,""))`]],
+        range: `${TAB}!${colLetter(COL.FLAT_FEE)}${FORMULA_ROW}`,
+        values: [[`=ARRAYFORMULA(IF(G${FORMULA_ROW}:G<>"",G${FORMULA_ROW}:G*2.5%,""))`]],
       },
       {
-        range: `${TAB}!${colLetter(COL.INTEREST_PCT)}${DATA_START_ROW}`,
+        range: `${TAB}!${colLetter(COL.INTEREST_PCT)}${FORMULA_ROW}`,
         values: [[
-          `=ARRAYFORMULA(IF(G${DATA_START_ROW}:G="","",0.1+IF(H${DATA_START_ROW}:H<=2,0.02,IF((H${DATA_START_ROW}:H>=3)*(H${DATA_START_ROW}:H<=5),0.015,IF((H${DATA_START_ROW}:H>=6)*(H${DATA_START_ROW}:H<=99),0.01,0)))+IF(G${DATA_START_ROW}:G<1000,0.04,IF((G${DATA_START_ROW}:G>=1000)*(G${DATA_START_ROW}:G<=4999),0.03,IF((G${DATA_START_ROW}:G>=5000)*(G${DATA_START_ROW}:G<=9999),0.02,IF((G${DATA_START_ROW}:G>=10000)*(G${DATA_START_ROW}:G<=29999),0.01,0))))))`,
+          `=ARRAYFORMULA(IF(G${FORMULA_ROW}:G="","",0.1+IF(H${FORMULA_ROW}:H<=2,0.02,IF((H${FORMULA_ROW}:H>=3)*(H${FORMULA_ROW}:H<=5),0.015,IF((H${FORMULA_ROW}:H>=6)*(H${FORMULA_ROW}:H<=99),0.01,0)))+IF(G${FORMULA_ROW}:G<1000,0.04,IF((G${FORMULA_ROW}:G>=1000)*(G${FORMULA_ROW}:G<=4999),0.03,IF((G${FORMULA_ROW}:G>=5000)*(G${FORMULA_ROW}:G<=9999),0.02,IF((G${FORMULA_ROW}:G>=10000)*(G${FORMULA_ROW}:G<=29999),0))))))`,
         ]],
       },
       {
-        range: `${TAB}!${colLetter(COL.INTEREST_PER_MONTH)}${DATA_START_ROW}`,
+        range: `${TAB}!${colLetter(COL.INTEREST_PER_MONTH)}${FORMULA_ROW}`,
         values: [[
-          `=ARRAYFORMULA(IF((G${DATA_START_ROW}:G<>"")*(H${DATA_START_ROW}:H<>"")*(J${DATA_START_ROW}:J<>""),((G${DATA_START_ROW}:G/H${DATA_START_ROW}:H)*J${DATA_START_ROW}:J*(H${DATA_START_ROW}:H*(H${DATA_START_ROW}:H+1)/2))/H${DATA_START_ROW}:H+M${DATA_START_ROW}:M,""))`,
+          `=ARRAYFORMULA(IF((G${FORMULA_ROW}:G<>"")*(H${FORMULA_ROW}:H<>"")*(J${FORMULA_ROW}:J<>""),((G${FORMULA_ROW}:G/H${FORMULA_ROW}:H)*J${FORMULA_ROW}:J*(H${FORMULA_ROW}:H*(H${FORMULA_ROW}:H+1)/2))/H${FORMULA_ROW}:H+M${FORMULA_ROW}:M,""))`,
         ]],
       },
       {
-        range: `${TAB}!${colLetter(COL.TOTAL_INTEREST)}${DATA_START_ROW}`,
+        range: `${TAB}!${colLetter(COL.TOTAL_INTEREST)}${FORMULA_ROW}`,
         values: [[
-          `=ARRAYFORMULA(IF((K${DATA_START_ROW}:K<>"")*(H${DATA_START_ROW}:H<>""),K${DATA_START_ROW}:K*H${DATA_START_ROW}:H+I${DATA_START_ROW}:I,""))`,
+          `=ARRAYFORMULA(IF((K${FORMULA_ROW}:K<>"")*(H${FORMULA_ROW}:H<>""),K${FORMULA_ROW}:K*H${FORMULA_ROW}:H+I${FORMULA_ROW}:I,""))`,
         ]],
       },
       {
-        range: `${TAB}!${colLetter(COL.PRINCIPAL_PER_MONTH)}${DATA_START_ROW}`,
+        range: `${TAB}!${colLetter(COL.PRINCIPAL_PER_MONTH)}${FORMULA_ROW}`,
         values: [[
-          `=ARRAYFORMULA(IF((G${DATA_START_ROW}:G<>"")*(H${DATA_START_ROW}:H<>""),G${DATA_START_ROW}:G/H${DATA_START_ROW}:H,""))`,
+          `=ARRAYFORMULA(IF((G${FORMULA_ROW}:G<>"")*(H${FORMULA_ROW}:H<>""),G${FORMULA_ROW}:G/H${FORMULA_ROW}:H,""))`,
         ]],
       },
       {
-        range: `${TAB}!${colLetter(COL.LATE_FEES)}${DATA_START_ROW}`,
+        range: `${TAB}!${colLetter(COL.LATE_FEES)}${FORMULA_ROW}`,
         values: [[lateFeesFormula]],
       },
     ];
 
     await batchUpdateCellsInSheet(sheetId, [
-      ...legacyAnchorClears,
+      ...duplicateDataRowClears,
       ...computedFormulaWrites,
     ]);
     emiComputedFormulasWritten = true;

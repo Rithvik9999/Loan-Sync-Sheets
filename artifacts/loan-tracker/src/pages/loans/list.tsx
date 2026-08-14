@@ -50,6 +50,29 @@ function fmtDateNoYear(dateStr: string | null | undefined): string {
       .toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" });
   } catch { return dateStr; }
 }
+
+function parseDateOnlyUtc(dateStr: string): Date {
+  return new Date(`${dateStr}T00:00:00Z`);
+}
+
+function getRecurringDueDate(loan: Loan, now: Date): Date | null {
+  const text = `${loan.notes ?? ""} ${loan.whatsapp ?? ""}`.toLowerCase();
+  const isDaily = /pay\s+daily(?:\s+₹?\s*[\d,]+)?/i.test(text);
+  const isWeekly = /pay\s+weekly(?:\s+₹?\s*[\d,]+)?/i.test(text);
+  if ((!isDaily && !isWeekly) || !loan.transactionDate) return null;
+
+  const start = parseDateOnlyUtc(loan.transactionDate);
+  const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  const daysElapsed = Math.max(
+    Math.floor((today.getTime() - start.getTime()) / 86400000),
+    0,
+  );
+  const periodDays = isDaily ? 1 : 7;
+  const elapsedPeriods = isDaily ? daysElapsed : Math.floor(daysElapsed / periodDays);
+  const due = new Date(start);
+  due.setUTCDate(due.getUTCDate() + (elapsedPeriods + 1) * periodDays);
+  return due;
+}
 import { EmptyState } from "@/components/empty-state";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -520,7 +543,9 @@ function EmiSection({
 
 export default function LoansList() {
   const [selectedUser, setSelectedUser] = useState("all");
-  const [statusFilter, setStatusFilter] = useState<string>("Pending");
+  // Show every non-archived loan by default. Previously this defaulted to
+  // Pending, which made cleared loans appear to have disappeared.
+  const [statusFilter, setStatusFilter] = useState<string>("all-statuses");
   const [dateRange, setDateRange] = useState<[number, number] | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -599,16 +624,17 @@ export default function LoansList() {
     () =>
       (allLoans ?? [])
         .filter((l) => {
-          if (l.status !== "Pending") return false;
+          if (l.status !== "Pending" && l.status !== "Temp") return false;
           if ((l.lateDays ?? 0) > 0) return false;
-          if (!l.returnDate) return false;
-          const due = new Date(l.returnDate);
+          const due = getRecurringDueDate(l, now) ??
+            (l.returnDate ? new Date(l.returnDate) : null);
+          if (!due) return false;
           const diffDays = (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
           return diffDays >= 0 && diffDays <= 30;
         })
         .sort((a, b) => {
-          const da = a.returnDate ? new Date(a.returnDate).getTime() : 0;
-          const db = b.returnDate ? new Date(b.returnDate).getTime() : 0;
+          const da = (getRecurringDueDate(a, now) ?? (a.returnDate ? new Date(a.returnDate) : null))?.getTime() ?? 0;
+          const db = (getRecurringDueDate(b, now) ?? (b.returnDate ? new Date(b.returnDate) : null))?.getTime() ?? 0;
           return da - db;
         }),
     [allLoans, now],
@@ -669,6 +695,7 @@ export default function LoansList() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .filter((l) => (l.status as any) !== "Archived")
         .filter((l) => {
+          if (statusFilter === "all-statuses") return true;
           if (statusFilter === "all") return (l.status as string) !== "Clear";
           return (l.status as string) === statusFilter;
         })
@@ -1095,7 +1122,8 @@ export default function LoansList() {
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All (excl. Cleared)</SelectItem>
+                        <SelectItem value="all-statuses">All loans</SelectItem>
+                        <SelectItem value="all">Active (excl. Cleared)</SelectItem>
                         <SelectItem value="Pending">Pending</SelectItem>
                         <SelectItem value="Temp">Temp</SelectItem>
                         <SelectItem value="Clear">Clear</SelectItem>
@@ -1143,12 +1171,14 @@ export default function LoansList() {
                   onToggleAll={toggleAll}
                   emptyTitle="No loans found"
                   emptyDescription={
-                    statusFilter !== "all"
+                    statusFilter !== "all" && statusFilter !== "all-statuses"
                       ? `No loans with status: ${statusFilter}`
                       : "Record your first loan to start tracking."
                   }
                   onCreateLoan={
-                    statusFilter === "all" ? () => setIsCreateOpen(true) : undefined
+                    statusFilter === "all" || statusFilter === "all-statuses"
+                      ? () => setIsCreateOpen(true)
+                      : undefined
                   }
                 />
               ) : isLoading ? (
