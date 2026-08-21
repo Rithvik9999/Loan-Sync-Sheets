@@ -3452,13 +3452,13 @@ export default function Portal() {
   const totalOutstanding = useMemo(
     () =>
       activeLoans.reduce(
-        (sum, l) => sum + Math.max(l.finalAmount ?? 0, 0),
+        (sum, l) => sum + Math.max((l.finalAmount ?? 0) - (l.paid ?? 0), 0),
         0,
       ) +
       activeEmi.reduce(
         (sum, e) => {
           const rem = e.remainingMonths;
-          if (rem == null) return sum;
+          if (rem == null) return sum + (e.monthlyPayment ?? e.principal ?? 0);
           const remClamped = Math.max(rem, 0);
           // monthlyPayment × remaining months = actual total still owed (includes interest)
           if (e.monthlyPayment != null) {

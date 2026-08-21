@@ -5,9 +5,9 @@
  * also named "Heat Map". The structure differs from the main Heat Map:
  *  - Tenure is in MONTHS (not days)
  *  - Monthly payment computed by the sheet's array formulas
- *  - Row 5: headers, Row 6: legacy formula anchors, Row 7+: data rows.
- *    The live workbook keeps its computed array formulas aligned with the
- *    first real data row at row 7.
+ *  - Row 5: headers, Row 6: array-formula anchors, Row 7+: data rows.
+ *    The anchor row is intentionally one row above the first real data row
+ *    so the first blank array result occupies the legacy formula row.
  *
  * Column map (0-indexed):
  *  A(0)  id                  — bookkeeping UUID
@@ -43,7 +43,8 @@ import {
 } from "./sheetsClient";
 
 const TAB = "Heat Map";
-const DATA_START_ROW = 7; // Row 6 is the legacy formula row; row 7 is the first real data row
+const FORMULA_ROW = 6;
+const DATA_START_ROW = 7; // Row 6 is the formula anchor; row 7 is the first real data row
 const LAST_COL = "Z";     // Column Z = index 25
 
 const COL = {
@@ -80,7 +81,7 @@ export type EmiLoanStatus = "Pending" | "Clear" | "Archived";
 export interface EmiLoanRow {
   id: string;
   /** Human-readable EMI loan ID derived from the sheet row (e.g. "E-0001").
-   *  DATA_START_ROW (6) → "E-0001", row 7 → "E-0002", etc.
+   *  DATA_START_ROW (7) → "E-0001", row 8 → "E-0002", etc.
    *  Stable as long as the row is not deleted. */
   emiId: string;
   rowNumber: number;
@@ -186,7 +187,7 @@ function toText(value: unknown): string {
 
 /** Converts a 1-based data row number to a human-readable EMI loan ID: "E-0001", "E-0002", … */
 function makeEmiId(rowNumber: number): string {
-  const seq = rowNumber - DATA_START_ROW + 1; // row 6 → 1, row 7 → 2, …
+  const seq = rowNumber - DATA_START_ROW + 1; // row 7 → 1, row 8 → 2, …
   return `E-${String(seq).padStart(4, "0")}`;
 }
 
@@ -506,7 +507,7 @@ async function ensureEmiComputedFormulas(): Promise<void> {
       COL.LATE_FEES,
     ];
     // A previous repair wrote duplicate array formulas into row 7. Clear only
-    // those computed cells so the real row-6 anchors can spill again.
+    // those computed cells so the row-6 anchors can spill again.
     const duplicateDataRowClears = computedColumns.map((col) => ({
       range: `${TAB}!${colLetter(col)}${DATA_START_ROW}`,
       values: [[""]],
