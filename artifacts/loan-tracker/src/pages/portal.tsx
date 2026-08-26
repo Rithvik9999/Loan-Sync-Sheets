@@ -130,6 +130,30 @@ function parsePaymentFrequency(
   return { type: null, amount: null };
 }
 
+type RegularPaymentEntry = { date: string; amount: number | null };
+
+/**
+ * Main-sheet payment dates may be a single legacy date or a pipe-separated
+ * history of `YYYY-MM-DD:amount` entries. Keep date parsing local to the
+ * history format so a whole stacked cell is never passed to Date.
+ */
+function parseRegularPaymentEntries(value: string | null | undefined, fallbackAmount?: number | null): RegularPaymentEntry[] {
+  if (!value?.trim()) return [];
+  return value
+    .split("|")
+    .map((entry) => {
+      const [date, ...amountParts] = entry.split(":");
+      const cleanDate = date?.trim() ?? "";
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate)) return null;
+      const parsedAmount = amountParts.length > 0 ? Number(amountParts.join(":")) : fallbackAmount ?? null;
+      return {
+        date: cleanDate,
+        amount: parsedAmount != null && Number.isFinite(parsedAmount) ? parsedAmount : null,
+      };
+    })
+    .filter((entry): entry is RegularPaymentEntry => entry !== null);
+}
+
 /**
  * Converts a usage percentage (0-100) to a hex color interpolated
  * green → amber → red. Avoids CSS hsl() which can fail in SVG fill attrs.
@@ -2684,7 +2708,7 @@ function AlreadyPaidSection({
         {pageItems.map(({ kind, item }) =>
           kind === "loan" ? (
             <div
-              key={item.id}
+              key={`loan-${item.id}`}
               className="flex items-center justify-between px-4 py-3 bg-emerald-50/30 text-sm"
             >
               <div>
@@ -2712,7 +2736,7 @@ function AlreadyPaidSection({
             </div>
           ) : (
             <div
-              key={item.id}
+              key={`emi-${item.id}`}
               className="flex items-center justify-between px-4 py-3 bg-emerald-50/30 text-sm"
             >
               <div>
@@ -2819,17 +2843,18 @@ function RecentActivitySection({
   }
   // Regular loan payments
   for (const l of loans) {
-    if (!l.dateOfPartPayment) continue;
-    const payDate = new Date(l.dateOfPartPayment + "T00:00:00Z");
-    if (payDate < cutoff) continue;
-    recentPayments.push({
-      date: l.dateOfPartPayment,
-      amount: null, // cumulative paid — no per-payment amount available
-      label: `${l.name} — ${l.loanId ?? "Loan"}`,
-      loanId: l.loanId ?? l.id,
-      href: `/loans/${l.id}`,
-      type: "loan",
-    });
+    for (const payment of parseRegularPaymentEntries(l.dateOfPartPayment, l.partPayment)) {
+      const payDate = new Date(payment.date + "T00:00:00Z");
+      if (payDate < cutoff) continue;
+      recentPayments.push({
+        date: payment.date,
+        amount: payment.amount,
+        label: `${l.name} — ${l.loanId ?? "Loan"}`,
+        loanId: l.loanId ?? l.id,
+        href: `/loans/${l.id}`,
+        type: "loan",
+      });
+    }
   }
   recentPayments.sort((a, b) => b.date.localeCompare(a.date));
 

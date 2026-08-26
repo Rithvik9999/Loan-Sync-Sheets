@@ -23,6 +23,7 @@ export function formatDate(dateString: string | null | undefined): string {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(dateString)
     ? new Date(`${dateString}T12:00:00+05:30`)
     : new Date(dateString);
+  if (!Number.isFinite(date.getTime())) return "—";
   return new Intl.DateTimeFormat("en-IN", {
     year: "numeric",
     month: "short",
@@ -34,6 +35,7 @@ export function formatDate(dateString: string | null | undefined): string {
 export function formatDateTime(dateString: string | null | undefined): string {
   if (!dateString) return "";
   const date = new Date(dateString);
+  if (!Number.isFinite(date.getTime())) return "—";
   return new Intl.DateTimeFormat("en-IN", {
     year: "numeric",
     month: "short",
