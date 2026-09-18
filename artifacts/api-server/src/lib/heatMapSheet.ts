@@ -209,14 +209,21 @@ function applyRoundToCeiling(formula: string): string {
 
 // The date-of-part-payment column also stores stacked values such as
 // "2026-09-18:2189|2026-09-18:2189". Final Amount must use the date portion,
-// not the whole text cell, when calculating late-payment interest.
+// not the whole text cell, when calculating late-payment interest. When Q is
+// blank, the late-payment term must be zero rather than performing arithmetic
+// with an empty string.
 const PART_PAYMENT_DATE_EXPR =
-  'IFERROR(IF(ISNUMBER(Q6:Q),Q6:Q,DATEVALUE(REGEXEXTRACT(Q6:Q,"^[^:|]+"))),"")';
-
-function repairFinalAmountPartPaymentDates(formula: string): string {
-  if (!formula || !formula.startsWith("=")) return formula;
-  return formula.replace(/Q6:Q\s*-\s*E6:E/g, `(${PART_PAYMENT_DATE_EXPR}) - E6:E`);
-}
+  'IF(ISNUMBER(Q6:Q),Q6:Q,IFERROR(DATEVALUE(REGEXEXTRACT(Q6:Q,"^[^:|]+")),0))';
+const PART_PAYMENT_DATE_DIFF = `(${PART_PAYMENT_DATE_EXPR}-E6:E)`;
+const PART_PAYMENT_LATE_RATE =
+  `IF(${PART_PAYMENT_DATE_DIFF}<=3,0.04,` +
+  `IF((${PART_PAYMENT_DATE_DIFF}>=4)*(${PART_PAYMENT_DATE_DIFF}<=9),0.03,` +
+  `IF((${PART_PAYMENT_DATE_DIFF}>=10)*(${PART_PAYMENT_DATE_DIFF}<=29),0.02,` +
+  `IF((${PART_PAYMENT_DATE_DIFF}>=30)*(${PART_PAYMENT_DATE_DIFF}<=89),0.01,0))))`;
+const FINAL_AMOUNT_FORMULA =
+  `=ARRAYFORMULA(IF(F6:F="","",` +
+  `INT(F6:F-R6:R+L6:L+J6:J+M6:M+O6:O)+` +
+  `IF(Q6:Q="",0,(R6:R*(0.1+${PART_PAYMENT_LATE_RATE})/30*${PART_PAYMENT_DATE_DIFF}))))`;
 
 async function ensureHeatMapCeilingFormulas(): Promise<void> {
   if (ceilingFormulaMigrationDone) return;
@@ -229,10 +236,10 @@ async function ensureHeatMapCeilingFormulas(): Promise<void> {
     for (const colIdx of colsToMigrate) {
       const raw = cells[colIdx];
       const formula = typeof raw === "string" ? raw : "";
-      let updated = applyRoundToCeiling(formula);
-      if (colIdx === COL.FINAL_AMOUNT) {
-        updated = repairFinalAmountPartPaymentDates(updated);
-      }
+      const updated =
+        colIdx === COL.FINAL_AMOUNT
+          ? FINAL_AMOUNT_FORMULA
+          : applyRoundToCeiling(formula);
       if (updated !== formula) {
         updates.push({ range: `${TAB}!${colLetter(colIdx)}${FORMULA_ROW}`, values: [[updated]] });
       }
