@@ -175,6 +175,30 @@ function colLetter(idx: number): string {
 // nearest rupee, consistent with JS-side rounding.
 let ceilingFormulaMigrationDone = false;
 
+// Google Sheets is the source of truth and row-based writes are not safe when
+// multiple requests are in flight at once. Keep every Heat Map mutation in a
+// single in-process queue so a later request cannot calculate a row number from
+// a stale sheet snapshot while an earlier request is still writing/recalculating.
+let heatMapWriteQueue: Promise<void> = Promise.resolve();
+
+async function withHeatMapWriteLock<T>(operation: () => Promise<T>): Promise<T> {
+  const previous = heatMapWriteQueue;
+  let release!: () => void;
+  heatMapWriteQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function applyRoundToCeiling(formula: string): string {
   if (!formula || !formula.startsWith("=")) return formula;
   let result = formula.replace(/\bROUND\(/g, "CEILING(");
@@ -464,60 +488,119 @@ async function getLoanRowAtRowNumber(rowNumber: number): Promise<LoanRow | null>
   return parseRow(raw[0], rowNumber);
 }
 
+/**
+ * Writes the requested input cells and verifies the two fields that matter for
+ * a clear operation. Google Sheets can acknowledge a values.batchUpdate before
+ * formulas and the row read have settled, so a single successful HTTP response
+ * is not enough to consider a loan cleared.
+ */
+async function writeLoanInputsWithRetry(
+  rowNumber: number,
+  updates: { range: string; values: (string | number)[][] }[],
+  patch: LoanRowUpdate,
+): Promise<void> {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await batchUpdateCells(updates);
+
+      const needsVerification = patch.status !== undefined || patch.paid !== undefined;
+      if (!needsVerification) return;
+
+      // Give array formulas and USER_ENTERED conversions time to settle.
+      await wait(500 * (attempt + 1));
+      const raw = await getRawValues(`${TAB}!A${rowNumber}:Y${rowNumber}`);
+      const row = raw[0] ?? [];
+
+      const actualStatus = toText(row[COL.STATUS]).trim();
+      const statusMatches =
+        patch.status === undefined || actualStatus === patch.status;
+
+      const actualPaid = toNumberOrNull(row[COL.PAID]);
+      const paidMatches =
+        patch.paid === undefined ||
+        (patch.paid === null && (actualPaid === null || actualPaid === 0)) ||
+        (patch.paid !== null &&
+          actualPaid !== null &&
+          Math.abs(actualPaid - patch.paid) < 0.005);
+
+      if (statusMatches && paidMatches) return;
+
+      lastError = new Error(
+        `Heat Map row ${rowNumber} did not verify after write ` +
+          `(status=${actualStatus || "blank"}, paid=${actualPaid ?? "blank"})`,
+      );
+    } catch (error) {
+      lastError = error;
+    }
+
+    if (attempt < 2) await wait(750 * (attempt + 1));
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Could not safely update Heat Map row ${rowNumber}`);
+}
+
 export async function updateLoanRow(
   id: string,
   patch: LoanRowUpdate,
 ): Promise<LoanRow | null> {
-  const existing = await getLoanRow(id);
-  if (!existing) return null;
+  return withHeatMapWriteLock(async () => {
+    // Re-read only after acquiring the lock. This prevents a row number from
+    // being captured before another mutation inserts/deletes/recalculates rows.
+    const existing = await getLoanRow(id);
+    if (!existing) return null;
 
-  // Spread non-appendPartPayment fields into normal updates
-  const { appendPartPayment, ...regularPatch } = patch;
-  const updates = inputCellUpdates(existing.rowNumber, regularPatch);
+    // Spread non-appendPartPayment fields into normal updates
+    const { appendPartPayment, ...regularPatch } = patch;
+    const updates = inputCellUpdates(existing.rowNumber, regularPatch);
 
-  // Handle appending a new part payment to the stacked list
-  if (appendPartPayment) {
-    const newEntry = `${appendPartPayment.date}:${appendPartPayment.amount}`;
-    const prevStack = existing.dateOfPartPayment ?? "";
-    const newStack = prevStack
-      ? `${prevStack}|${newEntry}`
-      : newEntry;
+    // Handle appending a new part payment to the stacked list
+    if (appendPartPayment) {
+      const newEntry = `${appendPartPayment.date}:${appendPartPayment.amount}`;
+      const prevStack = existing.dateOfPartPayment ?? "";
+      const newStack = prevStack ? `${prevStack}|${newEntry}` : newEntry;
 
-    // Sum all existing part payments plus the new one
-    const allEntries = newStack.split("|").filter(Boolean);
-    const totalPartPayment = allEntries.reduce((sum, entry) => {
-      const colonIdx = entry.indexOf(":");
-      const amt = colonIdx !== -1 ? Number(entry.slice(colonIdx + 1)) : 0;
-      return sum + (isNaN(amt) ? 0 : amt);
-    }, 0);
+      // Sum all existing part payments plus the new one
+      const allEntries = newStack.split("|").filter(Boolean);
+      const totalPartPayment = allEntries.reduce((sum, entry) => {
+        const colonIdx = entry.indexOf(":");
+        const amt = colonIdx !== -1 ? Number(entry.slice(colonIdx + 1)) : 0;
+        return sum + (isNaN(amt) ? 0 : amt);
+      }, 0);
 
-    // Also append a timestamp entry so the UI can show when each payment was recorded
-    const prevTimestamps = existing.partPaymentTimestamps.join("|");
-    const newTimestamp = new Date().toISOString();
-    const newTimestamps = prevTimestamps ? `${prevTimestamps}|${newTimestamp}` : newTimestamp;
+      // Also append a timestamp entry so the UI can show when each payment was recorded
+      const prevTimestamps = existing.partPaymentTimestamps.join("|");
+      const newTimestamp = new Date().toISOString();
+      const newTimestamps = prevTimestamps
+        ? `${prevTimestamps}|${newTimestamp}`
+        : newTimestamp;
 
-    updates.push(
-      {
-        range: `${TAB}!${colLetter(COL.DATE_PART_PAYMENT)}${existing.rowNumber}`,
-        values: [[newStack]],
-      },
-      {
-        range: `${TAB}!${colLetter(COL.PART_PAYMENT)}${existing.rowNumber}`,
-        values: [[totalPartPayment]],
-      },
-      {
-        range: `${TAB}!${colLetter(COL.PART_PAYMENT_TIMESTAMPS)}${existing.rowNumber}`,
-        values: [[newTimestamps]],
-      },
-    );
-  }
+      updates.push(
+        {
+          range: `${TAB}!${colLetter(COL.DATE_PART_PAYMENT)}${existing.rowNumber}`,
+          values: [[newStack]],
+        },
+        {
+          range: `${TAB}!${colLetter(COL.PART_PAYMENT)}${existing.rowNumber}`,
+          values: [[totalPartPayment]],
+        },
+        {
+          range: `${TAB}!${colLetter(COL.PART_PAYMENT_TIMESTAMPS)}${existing.rowNumber}`,
+          values: [[newTimestamps]],
+        },
+      );
+    }
 
-  if (updates.length > 0) {
-    await batchUpdateCells(updates);
-    // Allow sheet array formulas to recompute before reading back
-    await new Promise((r) => setTimeout(r, 1500));
-  }
-  return getLoanRowAtRowNumber(existing.rowNumber);
+    if (updates.length > 0) {
+      await writeLoanInputsWithRetry(existing.rowNumber, updates, regularPatch);
+      // Allow computed columns to recompute before returning the row.
+      await wait(1500);
+    }
+    return getLoanRowAtRowNumber(existing.rowNumber);
+  });
 }
 
 /**
