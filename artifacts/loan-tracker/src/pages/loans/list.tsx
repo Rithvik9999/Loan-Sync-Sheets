@@ -40,6 +40,7 @@ import {
   CalendarRange,
 } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
+import { Progress } from "@/components/ui/progress";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 
 /** Format a date as "15 Jul" — no year, used in compact table cells. */
@@ -115,6 +116,7 @@ function BulkMarkPaidDialog({
   const queryClient = useQueryClient();
   const updateLoan = useUpdateLoan();
   const [isPending, setIsPending] = useState(false);
+  const [progress, setProgress] = useState({ completed: 0, total: 0, failed: 0 });
   const [paidDate, setPaidDate] = useState(todayISOIST());
   // Per-row editable paid amounts — keyed by loan id, defaults to finalAmount
   const [amounts, setAmounts] = useState<Record<string, string>>({});
@@ -133,34 +135,50 @@ function BulkMarkPaidDialog({
 
   const handleConfirm = async () => {
     setIsPending(true);
-    try {
-      await Promise.all(
-        loans.map((l) => {
-          const paid = parseFloat(amounts[l.id] ?? "0");
-          return updateLoan.mutateAsync({
-            id: l.loanId ?? l.id,
-            data: {
-              status: "Clear",
-              paid: isNaN(paid) ? (l.finalAmount ?? 0) : paid,
-              dateOfPartPayment: paidDate,
-            },
-          });
-        }),
-      );
-      queryClient.invalidateQueries({ queryKey: getListLoansQueryKey() });
+    setProgress({ completed: 0, total: loans.length, failed: 0 });
+
+    let failed = 0;
+    // Process sequentially because each update writes to the spreadsheet.
+    // Promise.all rejects immediately on the first failure, which previously
+    // showed an error while the remaining spreadsheet updates were still busy.
+    for (let index = 0; index < loans.length; index++) {
+      const l = loans[index];
+      const paid = parseFloat(amounts[l.id] ?? "0");
+      try {
+        await updateLoan.mutateAsync({
+          id: l.loanId ?? l.id,
+          data: {
+            status: "Clear",
+            paid: isNaN(paid) ? (l.finalAmount ?? 0) : paid,
+            dateOfPartPayment: paidDate,
+          },
+        });
+      } catch {
+        failed++;
+      } finally {
+        setProgress({
+          completed: index + 1,
+          total: loans.length,
+          failed,
+        });
+      }
+    }
+
+    await queryClient.invalidateQueries({ queryKey: getListLoansQueryKey() });
+    onDone();
+    onOpenChange(false);
+    setIsPending(false);
+
+    if (failed === 0) {
       toast({
         title: `${loans.length} loan${loans.length !== 1 ? "s" : ""} marked as paid`,
       });
-      onDone();
-      onOpenChange(false);
-    } catch {
+    } else {
       toast({
         variant: "destructive",
-        title: "Error",
-        description: "Some loans could not be updated. Please retry.",
+        title: `${failed} loan${failed !== 1 ? "s" : ""} could not be marked as paid`,
+        description: `${loans.length - failed} of ${loans.length} loans were completed. Select the remaining loans and retry.`,
       });
-    } finally {
-      setIsPending(false);
     }
   };
 
@@ -222,6 +240,24 @@ function BulkMarkPaidDialog({
               {formatCurrency(totalPaid)}
             </span>
           </div>
+
+          {isPending && (
+            <div className="space-y-2 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-medium">Clearing loans…</span>
+                <span className="font-numeric text-muted-foreground">
+                  {progress.completed} of {progress.total}
+                </span>
+              </div>
+              <Progress
+                value={progress.total > 0 ? (progress.completed / progress.total) * 100 : 0}
+                className="h-2"
+              />
+              <p className="text-xs text-muted-foreground">
+                Please keep this window open while the spreadsheet updates.
+              </p>
+            </div>
+          )}
         </div>
 
         <DialogFooter className="flex-col sm:flex-row gap-2">
@@ -239,11 +275,14 @@ function BulkMarkPaidDialog({
             disabled={isPending}
           >
             {isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Clearing {progress.completed}/{progress.total}…
+                </>
             ) : (
               <CheckCircle2 className="mr-2 h-4 w-4" />
             )}
-            Confirm Mark as Paid
+              {!isPending && "Confirm Mark as Paid"}
           </Button>
         </DialogFooter>
       </DialogContent>
