@@ -207,6 +207,17 @@ function applyRoundToCeiling(formula: string): string {
   return result;
 }
 
+// The date-of-part-payment column also stores stacked values such as
+// "2026-09-18:2189|2026-09-18:2189". Final Amount must use the date portion,
+// not the whole text cell, when calculating late-payment interest.
+const PART_PAYMENT_DATE_EXPR =
+  'IFERROR(IF(ISNUMBER(Q6:Q),Q6:Q,DATEVALUE(REGEXEXTRACT(Q6:Q,"^[^:|]+"))),"")';
+
+function repairFinalAmountPartPaymentDates(formula: string): string {
+  if (!formula || !formula.startsWith("=")) return formula;
+  return formula.replace(/Q6:Q\s*-\s*E6:E/g, `(${PART_PAYMENT_DATE_EXPR}) - E6:E`);
+}
+
 async function ensureHeatMapCeilingFormulas(): Promise<void> {
   if (ceilingFormulaMigrationDone) return;
   try {
@@ -218,8 +229,10 @@ async function ensureHeatMapCeilingFormulas(): Promise<void> {
     for (const colIdx of colsToMigrate) {
       const raw = cells[colIdx];
       const formula = typeof raw === "string" ? raw : "";
-      if (!formula.includes("ROUND(")) continue;
-      const updated = applyRoundToCeiling(formula);
+      let updated = applyRoundToCeiling(formula);
+      if (colIdx === COL.FINAL_AMOUNT) {
+        updated = repairFinalAmountPartPaymentDates(updated);
+      }
       if (updated !== formula) {
         updates.push({ range: `${TAB}!${colLetter(colIdx)}${FORMULA_ROW}`, values: [[updated]] });
       }
